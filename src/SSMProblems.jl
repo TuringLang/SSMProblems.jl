@@ -5,8 +5,7 @@ module SSMProblems
 
 Simulate the particle for the next time step from the forward dynamics.
 """
-function M!!(rng, t, particle, cache)
-end
+function M!!(rng, t, particle, cache) end
 
 
 """
@@ -14,9 +13,14 @@ end
 
 Compute the log potential of current particle. This effectively "reweight" each particle.
 """
-function logdensity(t, particle, cache)
-end
+function logdensity(t, particle, cache) end
 
+"""
+    isdone(t, particle, cache=nothing)
+
+Determine whether we have reached the last time step of the Markov process. Return `true` if yes, otherwise return `false`. 
+"""
+function isdone(t, particle, cache=nothing) end
 
 """
     SSMProblem
@@ -31,7 +35,7 @@ get_particletype(s::SSMProblemExample, args...) = Nothing
 get_cachetype(s::SSMProblemExample, args...) = Nothing
 
 
-## new convention 
+## new convention -- can be defined in downstream package like AdvancedPS
 # SSMProblem(M!!, logdensity, n_particles, ParticleType, cache)
 
 end
