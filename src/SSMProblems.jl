@@ -1,5 +1,18 @@
 module SSMProblems
 
+"""
+# LogDensityProblem convention Example
+
+struct SSMProblemExample end
+
+M!!(s::SSMProblemExample, args...) = Nothing
+logdensity(s::SSMProblemExample, args...) = Nothing
+get_particletype(s::SSMProblemExample, args...) = Nothing
+get_cachetype(s::SSMProblemExample, args...) = Nothing
+
+# New convention example. This example might be useful for AdvancedPS. 
+SSMProblem(M!!, logdensity, n_particles, ParticleType, cache)
+"""
 abstract type Particle end
 
 """
@@ -31,21 +44,5 @@ function isdone(t, particle::Particle, cache=nothing) end
 (Optional) Computes the log-density of the forward transition if the density is available.
 """
 function logM(t, particle::Particle, x, cache=nothing) end
-
-
-"""
-    SSMProblem
-"""
-
-## LogDensityProblem convention
-struct SSMProblemExample end
-
-M!!(s::SSMProblemExample, args...) = Nothing
-logdensity(s::SSMProblemExample, args...) = Nothing
-get_particletype(s::SSMProblemExample, args...) = Nothing
-get_cachetype(s::SSMProblemExample, args...) = Nothing
-
-## new convention -- can be defined in downstream package like AdvancedPS
-# SSMProblem(M!!, logdensity, n_particles, ParticleType, cache)
-
 end
+
