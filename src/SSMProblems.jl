@@ -22,6 +22,12 @@ Simulate the particle for the next time step from the forward dynamics.
 """
 function M!!(rng, t, particle::Particle, cache) end
 
+"""
+    ℓM = logM(t, particle, x, cache)
+
+(Optional) Computes the log-density of the forward transition if the density is available.
+"""
+function logM(t, particle::Particle, x, cache=nothing) end
 
 """
     ℓπ = logdensity(t, particle, cache)
@@ -37,12 +43,5 @@ Determine whether we have reached the last time step of the Markov process. Retu
 """
 function isdone(t, particle::Particle, cache=nothing) end
 
-
-"""
-    ℓM = logM(t, particle, x, cache)
-
-(Optional) Computes the log-density of the forward transition if the density is available.
-"""
-function logM(t, particle::Particle, x, cache=nothing) end
 end
 
