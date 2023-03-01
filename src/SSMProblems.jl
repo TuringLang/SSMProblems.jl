@@ -10,7 +10,7 @@ logdensity(s::SSMProblemExample, args...) = Nothing
 get_particletype(s::SSMProblemExample, args...) = Nothing
 get_cachetype(s::SSMProblemExample, args...) = Nothing
 
-# New convention example. This example might be useful for AdvancedPS. 
+# New convention example. This example might be useful for AdvancedPS.
 SSMProblem(M!!, logdensity, n_particles, ParticleType, cache)
 """
 abstract type Particle end
@@ -20,7 +20,7 @@ abstract type Particle end
 
 Simulate the particle for the next time step from the forward dynamics.
 """
-function M!!(rng, t, particle::Particle, cache) end
+function M!!(rng, t, particle::Particle, cache=nothing) end
 
 """
     ℓM = logM(t, particle, x, cache)
@@ -34,7 +34,7 @@ function logM(t, particle::Particle, x, cache=nothing) end
 
 Compute the log potential of current particle. This effectively "reweight" each particle.
 """
-function logdensity(t, particle::Particle, cache) end
+function logdensity(t, particle::Particle, cache=nothing) end
 
 """
     isdone(t, particle, cache=nothing)
@@ -42,6 +42,8 @@ function logdensity(t, particle::Particle, cache) end
 Determine whether we have reached the last time step of the Markov process. Return `true` if yes, otherwise return `false`.
 """
 function isdone(t, particle::Particle, cache=nothing) end
+
+export M!!, logM, logdensity, isdone
 
 end
 
