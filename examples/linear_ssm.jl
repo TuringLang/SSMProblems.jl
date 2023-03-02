@@ -3,52 +3,109 @@ using Distributions
 using Random
 using StatsFuns
 
-mutable struct State{T,V} <: Particle
+mutable struct State{T} <: Particle
     x::T
-    logw::V # Move away from the particle
-    parent::Union{Ref{State{T,V}},Nothing}
-    child::Union{Ref{State{T,V}},Nothing}
+    parent::Union{Ref{State{T}},Nothing} # Should be handled by the sampler ?
+    child::Union{Ref{State{T}},Nothing}
 end
 
-State(x::T, weight::U, parent::V) where {T,U,V<:Particle} = State(x, 0., Ref(parent), nothing)
-State(x::T, parent::V) where {T,V<:Particle} = State(x, 0., parent, nothing)
-State(x::T) where T = State(x, 0., nothing, nothing)
+value(particle::State) = getfield(particle, :x)
+
+State(x::T, parent::V) where {T,V<:Particle} = State(x, Ref(parent), nothing)
+State(x::T) where T = State(x, nothing, nothing)
 
 ParticleContainer = Vector{T} where T <: Particle
+
+ancestor(particle::State) = isnothing(particle.parent) ? nothing : particle.parent[]
+children(particle::State) = isnothing(particle.child) ? nothing : particle.child[]
 
 function resampling(rng::AbstractRNG, weights::AbstractVector{<:Real}, n::Integer=length(weights))
     return rand(rng, Distributions.sampler(Distributions.Categorical(weights)), n)
 end
 
 ess(weights) = inv(sum(abs2, weights))
-ess(particles::ParticleContainer) = ess(weights(particles))
+weights(logweights::T) where {T<:AbstractVector{<:Real}} = StatsFuns.softmax(logweights)
 
-weights(particles::ParticleContainer) = StatsFuns.softmax([getfield(particle, :logw) for particle in particles])
+function forward!(particle::State)
+    current, prev = particle, ancestor(particle)
+    while !isnothing(prev)
+        setfield!(prev, :child, Ref(current))
+        current, prev = prev, ancestor(prev)
+    end
+    return current
+end
 
 # SMC Sweep
-function sweep!(rng::AbstractRNG, particles::ParticleContainer, reference::Union{Particle,Nothing}=nothing)
-    # Resample particles, mutate, get the new weights
+function sweep!(rng::AbstractRNG, particles::ParticleContainer, threshold::Float64=0.5)
+    # This seems like a rather generic algorithm
+    #
+    # idx = resample(logweights)
+    # new_particles = particles[idx]
+    # new_particles[n] = M!!(t, new_particles[n], ...)
+    # logweights[n] = logdensity(t, new_particles[n], ...)
+    #
     t = 1
+    logweights = zeros(length(particles))
     while !isdone(t, particles[1])
-        idx = ess(particles) > 0.5 ? resampling(rng, weights(particles)) : 1:length(particles)
+
+        if ess(weights(logweights)) > threshold
+            idx = resampling(rng, weights(logweights))
+            logweights = zeros(length(particles))
+        else
+            idx = 1:length(particles)
+        end
+
         particles = particles[idx]
         for n in eachindex(particles)
             parent = particles[n]
             mutated = M!!(rng, t, parent)
-            particles[n] = State(mutated, parent.logw, parent)
-            particles[n].logw += logdensity(t, particles[n])
+            particles[n] = State(mutated, parent)
+            logweights[n] += logdensity(t, particles[n])
         end
         t += 1
     end
-    return particles
+    idx = resampling(rng, weights(logweights))
+    return particles[idx]
 end
 
-# Particle MCMC
-function step(rng::AbstractRNG, particles::ParticleContainer, ref::Union{Particle,Nothing})
+
+function sweep!(rng::AbstractRNG, particles::ParticleContainer, reference::Particle, threshold::Float64=0.5)
+    # Sweep with reference
+    t = 1
+    N = length(particles)
+    logweights = zeros(length(particles))
+    trace = isnothing(reference.child) ? forward!(reference) : reference
+    particles[N] = trace
+    while !isdone(t, particles[1])
+
+        if ess(weights(logweights)) > threshold
+            idx = resampling(rng, weights(logweights), N-1)
+            logweights = zeros(length(particles))
+        else
+            idx = 1:N-1
+        end
+        idx = [idx; N]
+
+        particles = particles[idx]
+        for n in eachindex(particles)
+            if n == N
+                particles[n] = particles[n].child[]
+            else
+                parent = particles[n]
+                mutated = M!!(rng, t, parent)
+                particles[n] = State(mutated, parent)
+            end
+            logweights[n] += logdensity(t, particles[n])
+        end
+        t += 1
+    end
+    idx = resampling(rng, weights(logweights))
+    return particles[idx]
 end
 
-ancestor(particle::State) = isnothing(particle.parent) ? nothing : particle.parent[]
-children(particle::State) = isnothing(particle.child) ? nothing : particle.child[]
+
+# Small helpers, not really needed
+#
 
 function replay(particle::State, accessor=ancestor)
     values = [particle.x]
@@ -58,15 +115,6 @@ function replay(particle::State, accessor=ancestor)
         parent = accessor(parent)
     end
     return values
-end
-
-function forward!(particle::State)
-    current, prev = particle, ancestor(particle)
-    while !isnothing(prev)
-        setfield!(prev, :child, Ref(current))
-        current, prev = prev, ancestor(prev)
-    end
-    return current
 end
 
 # Model specifics
@@ -84,9 +132,10 @@ end
 isdone(t, particle::State) = t > T
 
 # Simulation
-T = 2
+T = 250
 seed = 32
-N = 3
+N = 100
+M = 500
 rng = MersenneTwister(seed)
 
 x = [rand(rng, Normal(0,1))]
@@ -96,11 +145,23 @@ for t in 2:T
     push!(observations, rand(rng, Normal(x[t], 0.2^2)))
 end
 
-particles = [State(0.) for _ in 1:N]
-particles = sweep!(rng, particles)
+# Particle MCMC
+function pmcmc(rng::AbstractRNG, M::Int, N::Int)
+    samples = Array{State{Float64}}(undef, M)
+    particles = sweep!(rng, [State(0.) for _ in 1:N])
+    selected = particles[rand(1:length(particles))]
+    samples[1] = selected
+    for i in 1:M-1
+        particles = sweep!(rng, [State(0.) for _ in 1:N], selected)
+        selected = particles[rand(1:length(particles))]
+        samples[i] = selected
+    end
+    return samples
+end
 
-new_particles = [State(0.) for _ in 1:N-1]
-push!(new_particles, forward!(particles[end]))
-particles2 = sweep!(rng, new_particles, new_particles[end])
+samples = pmcmc(rng, M, N)
+traces = hcat([replay(samples[i]) for i in 1:M-1]...)
 
-traces = hcat([replay(particle) for particle in particles]...)
+using Plots
+scatter!(traces[end-1:-1:1, :], color=:black, label=false, opacity=.4)
+plot!(x)

@@ -43,7 +43,7 @@ Determine whether we have reached the last time step of the Markov process. Retu
 """
 function isdone(t, particle::Particle, cache=nothing) end
 
-export M!!, logM, logdensity, isdone
+export M!!, logM, logdensity, isdone, Particle
 
 end
 
