@@ -35,6 +35,10 @@ function forward!(particle::State)
     return current
 end
 
+function ancestor_logweights(t, logweights::AbstractVector{<:Real}, particles::ParticleContainer, target::Particle)
+    return logweights .+ map(particle -> logM(t, particle, target.x), particles)
+end
+
 # SMC Sweep
 function sweep!(rng::AbstractRNG, particles::ParticleContainer, threshold::Float64=0.5)
     # This seems like a rather generic algorithm
@@ -45,10 +49,11 @@ function sweep!(rng::AbstractRNG, particles::ParticleContainer, threshold::Float
     # logweights[n] = logdensity(t, new_particles[n], ...)
     #
     t = 1
-    logweights = zeros(length(particles))
+    N = length(particles)
+    logweights = zeros(N)
     while !isdone(t, particles[1])
 
-        if ess(weights(logweights)) > threshold
+        if ess(weights(logweights)) <= threshold * N
             idx = resampling(rng, weights(logweights))
             logweights = zeros(length(particles))
         else
@@ -74,11 +79,11 @@ function sweep!(rng::AbstractRNG, particles::ParticleContainer, reference::Parti
     t = 1
     N = length(particles)
     logweights = zeros(length(particles))
-    trace = isnothing(reference.child) ? forward!(reference) : reference
-    particles[N] = trace
+    ref = isnothing(reference.child) ? forward!(reference) : reference
+    particles[N] = ref
     while !isdone(t, particles[1])
 
-        if ess(weights(logweights)) > threshold
+        if ess(weights(logweights)) <= threshold * N
             idx = resampling(rng, weights(logweights), N-1)
             logweights = zeros(length(particles))
         else
@@ -103,18 +108,65 @@ function sweep!(rng::AbstractRNG, particles::ParticleContainer, reference::Parti
     return particles[idx]
 end
 
+function sweep!(rng::AbstractRNG, particles::ParticleContainer, reference::Particle, threshold::Float64=0.5, ancestor=true)
+    # Sweep with reference and ancestor resampling
+    t = 1
+    N = length(particles)
+    logweights = zeros(length(particles))
+    ref = isnothing(reference.child) ? forward!(reference) : reference
+    particles[N] = ref
+    while !isdone(t, particles[1])
+
+        idx = resampling(rng, weights(logweights), N-1)
+        aidx = t == 1 ? N : ancestor_index(t, logweights, particles, particles[N])
+        idx = [idx; aidx]
+        logweights = zeros(length(particles))
+
+        particles = particles[idx]
+        for n in eachindex(particles)
+            if n == N
+                ref = ref.child[]
+                particles[n] = State(ref.x, Ref(particles[n]), ref.child)# Points to the wrong parent
+                # PG: particles[n] = reference.child[]
+            else
+                parent = particles[n]
+                mutated = M!!(rng, t, parent)
+                particles[n] = State(mutated, parent)
+            end
+            logweights[n] += logdensity(t, particles[n])
+        end
+        t += 1
+    end
+    idx = resampling(rng, weights(logweights))
+    return particles[idx]
+end
+
+function ancestor_index(t, logweights, particles, target)
+    ancestor_weights = weights(ancestor_logweights(t, logweights, particles, target))
+    idx = resampling(rng, ancestor_weights, 1)
+    return idx
+end
+
 
 # Small helpers, not really needed
 #
-
 function replay(particle::State, accessor=ancestor)
-    values = [particle.x]
+    #values = [particle.x]
+    values = []
     parent = accessor(particle)
     while !isnothing(parent)
         push!(values, parent.x)
         parent = accessor(parent)
     end
     return values
+end
+
+function Base.show(io::IO, part::State)
+    buffer = IOBuffer()
+    println(buffer, "Particle: $(part.x)")
+    println(buffer, "Parents: $(replay(part, ancestor))")
+    println(buffer, "Children: $(replay(part, children))")
+    print(io, String(take!(buffer)))
 end
 
 # Model specifics
@@ -129,12 +181,16 @@ function logdensity(t, particle::State)
     return logpdf(Normal(particle.x, 0.2^2), observations[t])
 end
 
+function logM(t, particle::Particle, x)
+    return logpdf(Normal(particle.x, 0.2^2), x)
+end
+
 isdone(t, particle::State) = t > T
 
 # Simulation
 T = 250
 seed = 32
-N = 100
+N = 50
 M = 500
 rng = MersenneTwister(seed)
 
@@ -152,16 +208,15 @@ function pmcmc(rng::AbstractRNG, M::Int, N::Int)
     selected = particles[rand(1:length(particles))]
     samples[1] = selected
     for i in 1:M-1
-        particles = sweep!(rng, [State(0.) for _ in 1:N], selected)
+        println(i)
+        particles = sweep!(rng, [State(0.) for _ in 1:N], selected, 0.5)
         selected = particles[rand(1:length(particles))]
         samples[i] = selected
     end
     return samples
 end
 
+show(State(0))
 samples = pmcmc(rng, M, N)
 traces = hcat([replay(samples[i]) for i in 1:M-1]...)
-
-using Plots
-scatter!(traces[end-1:-1:1, :], color=:black, label=false, opacity=.4)
-plot!(x)
+r = sum(abs.(diff(traces; dims=2)) .> 0; dims=2) / M
