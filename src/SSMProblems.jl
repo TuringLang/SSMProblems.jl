@@ -13,37 +13,51 @@ get_cachetype(s::SSMProblemExample, args...) = Nothing
 # New convention example. This example might be useful for AdvancedPS.
 SSMProblem(M!!, logdensity, n_particles, ParticleType, cache)
 """
-abstract type Particle end
+abstract type AbstractParticle end
+abstract type AbstractParticleCache end
 
 """
-    new_particle = M!!(rng, t, particle, cache)
+    new_particle = transition!!(rng, step, particle, cache)
 
 Simulate the particle for the next time step from the forward dynamics.
 """
-function M!!(rng, t, particle::Particle, cache=nothing) end
+function transition!!(
+    rng,
+    step,
+    particle::AbstractParticle,
+    cache::AbstractParticleCache = nothing,
+) end
 
 """
-    ℓM = logM(t, particle, x, cache)
+    ℓM = transition_logdensity(step, particle, x, cache)
 
 (Optional) Computes the log-density of the forward transition if the density is available.
 """
-function logM(t, particle::Particle, x, cache=nothing) end
+function transition_logdensity(
+    step,
+    particle::AbstractParticle,
+    x,
+    cache::AbstractParticleCache = nothing,
+) end
 
 """
-    ℓπ = logdensity(t, particle, cache)
+    ℓπ = logdensity(step, particle, cache)
 
 Compute the log potential of current particle. This effectively "reweight" each particle.
 """
-function logdensity(t, particle::Particle, cache=nothing) end
+function emission_logdensity(
+    step,
+    particle::AbstractParticle,
+    cache::AbstractParticleCache = nothing,
+) end
 
 """
-    isdone(t, particle, cache=nothing)
+    isdone(step, particle, cache=nothing)
 
 Determine whether we have reached the last time step of the Markov process. Return `true` if yes, otherwise return `false`.
 """
-function isdone(t, particle::Particle, cache=nothing) end
+function isdone(step, particle::AbstractParticle, cache::AbstractParticleCache = nothing) end
 
-export M!!, logM, logdensity, isdone
+export transition!!, transition_logdensity, emission_logdensity, isdone, AbstractParticle
 
 end
-
