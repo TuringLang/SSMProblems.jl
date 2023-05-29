@@ -1,3 +1,5 @@
+push!(LOAD_PATH,"../src/")
+
 #
 # With minor changes from https://github.com/JuliaGaussianProcesses/AbstractGPs.jl/docs
 #
@@ -52,9 +54,7 @@ makedocs(;
     modules=[SSMProblems],
     pages=[
         "Home" => "index.md",
-        "api.md",
         "Examples" => [
-            "example.md",
             map(
                 (x) -> joinpath("examples", x),
                 filter!(filename -> endswith(filename, ".md"), readdir(EXAMPLES_OUT)),

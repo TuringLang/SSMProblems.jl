@@ -14,14 +14,14 @@ This package defines the basic interface needed to run inference on State Space 
 abstract type AbstractParticle end
 
 """
-Emit a new state candidate from latent dynamics
+Emits a new state candidate from latent dynamics
 """
 function transition!! end
 
 """
 Scores the emission transition
 """
-function emissions_logdensity end
+function emission_logdensity end
 
 """
 Stops the state machine
@@ -40,7 +40,7 @@ using Distributions
 T = 10
 sig_u = 0.1
 sig_v = 0.2
-observation = ...
+observations = ...
 
 struct LinearSSM{T} <: AbstractParticle
     state::T
@@ -53,11 +53,11 @@ function transition!!(rng, step, particle::LinearSSM)
     return rand(rng, Normal(particle.state, sig_u))
 end
 
-function emissions_logdensity(step, particle::LinearSSM)
+function emission_logdensity(step, particle::LinearSSM)
     return logpdf(Normal(particle.state, sig_v), observations[step])
 end
 
 isdone(step, ::LinearSSM) = step > T
 ```
 
-More can be found in the [documentation]() and the [examples]().
+More details can be found in the [documentation]() and the [examples]().
