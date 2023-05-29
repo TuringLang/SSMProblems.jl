@@ -1,4 +1,4 @@
-push!(LOAD_PATH,"../src/")
+push!(LOAD_PATH, "../src/")
 
 #
 # With minor changes from https://github.com/JuliaGaussianProcesses/AbstractGPs.jl/docs
