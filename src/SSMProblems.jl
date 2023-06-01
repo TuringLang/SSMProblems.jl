@@ -1,17 +1,9 @@
+"""
+A unified interface to define State Space Models interfaces in the context of Particle MCMC algorithms.
+"""
 module SSMProblems
 
 """
-# LogDensityProblem convention Example
-
-struct SSMProblemExample end
-
-M!!(s::SSMProblemExample, args...) = Nothing
-logdensity(s::SSMProblemExample, args...) = Nothing
-get_particletype(s::SSMProblemExample, args...) = Nothing
-get_cachetype(s::SSMProblemExample, args...) = Nothing
-
-# New convention example. This example might be useful for AdvancedPS.
-SSMProblem(M!!, logdensity, n_particles, ParticleType, cache)
 """
 abstract type AbstractParticle end
 abstract type AbstractParticleCache end
