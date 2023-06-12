@@ -5,13 +5,23 @@ using Plots
 using StatsFuns
 
 # Particle Filter implementation
-mutable struct Particle{T,V} # Here we just need a tree
-  parent::Union{Particle{T}, Nothing}
-  state::V
+struct Particle{T} # Here we just need a tree
+  parent::Union{Particle, Nothing}
+  state::T
 end
 
 Particle(state::T) where {T} = Particle(nothing, state)
 Particle() = Particle(nothing, nothing)
+
+function linearize(particle::Particle{T}) where {T}
+  trace = T[]
+  parent = particle.parent
+  while !isnothing(parent)
+    push!(trace, parent.state)
+    parent = parent.parent
+  end
+  return trace
+end
 
 Root = Particle{Nothing}
 
@@ -20,8 +30,8 @@ ParticleContainer = AbstractVector{<:Particle}
 ess(weights) = inv(sum(abs2, weights))
 get_weights(logweights::T) where {T<:AbstractVector{<:Real}} = StatsFuns.softmax(logweights)
 
-function systematic_resampling(rng::AbstractRNG, weights::AbstractVector{<:Real}, n::Integer=length(wights))
-  return rand(rng, Distributions.sampler(Distributions.Categorical(weights), n))
+function systematic_resampling(rng::AbstractRNG, weights::AbstractVector{<:Real}, n::Integer=length(weights))
+    return rand(rng, Distributions.sampler(Distributions.Categorical(weights)), n)
 end
 
 function sweep!(
@@ -45,12 +55,12 @@ function sweep!(
     end
 
     # Mutation step
-    particles = particles[idx] 
+    particles = particles[idx]
     for i in eachindex(particles)
       parent = particles[i]
       mutated = transition!!(rng, t, parent.state)
       particles[i] = Particle(parent, mutated)
-      logweights[i] += emission_logdensity(rng, step, particles[i].state)
+      logweights[i] += emission_logdensity(t, particles[i].state)
     end
 
     t += 1
@@ -62,7 +72,7 @@ function sweep!(
 end
 
 function sweep!(rng::AbstractRNG, n::Int, resampling::Function, threshold::Float64=0.5)
-  particles = [Particle() for _ in 1:n]
+  particles = [Particle(0.) for _ in 1:n]
   return sweep!(rng, particles, resampling, threshold)
 end
 
@@ -72,32 +82,25 @@ Base.@kwdef struct Parameters
   u::Float64 = .7 # Observation noise stdev
 end
 
-struct State{T} 
-  x::T
-  params::Parameters
-end
-
-State(x::T) where {T} = State(x, Parameters())
-
 # Simulation
 T = 250
 seed = 1
-N = 10_000
+N = 1000
 rng = MersenneTwister(seed)
 params = Parameters(v=.2, u=.7)
 
-function transition!!(rng::AbstractRNG, t::Int, state::Union{State{T}, Nothing}) where {T}
-  if t == 1
-    return State(rand(rng, Normal(0, 1)))
+function transition!!(rng::AbstractRNG, t::Int, state=nothing)
+  if isnothing(state)
+    return rand(rng, Normal(0, 1))
   end
-  return State(rand(rng, Normal(state.x, state.params.v^2)), state.params)
+  return rand(rng, Normal(state, params.v^2))
 end
 
-function emission_logdensity(t, state::State{T}) where {T}
-  return logpdf(Normal(state.x, state.params.u^2), observations[t]) 
+function emission_logdensity(t, state)
+  return logpdf(Normal(state, params.u^2), observations[t]) 
 end
 
-isdone(t, state::State) = t > T
+isdone(t, state) = t > T
 isdone(t, ::Nothing) = false
 
 x, observations = zeros(T), zeros(T)
@@ -110,3 +113,7 @@ for t in 1:T
 end
 
 samples = sweep!(rng, N, systematic_resampling)
+traces = reverse(hcat(map(linearize, samples)...))
+
+scatter(traces, color=:black, opacity=.3)
+plot!(x)
