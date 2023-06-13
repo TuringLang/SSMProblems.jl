@@ -40,10 +40,7 @@ function systematic_resampling(
 end
 
 function sweep!(
-    rng::AbstractRNG,
-    particles::ParticleContainer,
-    resampling,
-    threshold=0.5,
+        rng::AbstractRNG, particles::ParticleContainer, resampling, threshold=0.5
 )
     t = 1
     N = length(particles)
