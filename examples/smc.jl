@@ -39,9 +39,7 @@ function systematic_resampling(
     return rand(rng, Distributions.Categorical(weights), n)
 end
 
-function sweep!(
-        rng::AbstractRNG, particles::ParticleContainer, resampling, threshold=0.5
-)
+function sweep!(rng::AbstractRNG, particles::ParticleContainer, resampling, threshold=0.5)
     t = 1
     N = length(particles)
     logweights = zeros(length(particles))
