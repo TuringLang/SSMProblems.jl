@@ -13,6 +13,11 @@ end
 Particle(state::T) where {T} = Particle(nothing, state)
 Particle() = Particle(nothing, nothing)
 
+"""
+    linearize(particle)
+
+Return the trace of a particle, i.e. the sequence of states from the root to the particle.
+"""
 function linearize(particle::Particle{T}) where {T}
     trace = T[]
     parent = particle.parent
@@ -23,8 +28,6 @@ function linearize(particle::Particle{T}) where {T}
     return trace
 end
 
-Root = Particle{Nothing}
-
 ParticleContainer = AbstractVector{<:Particle}
 
 ess(weights) = inv(sum(abs2, weights))
@@ -33,15 +36,10 @@ get_weights(logweights::T) where {T<:AbstractVector{<:Real}} = StatsFuns.softmax
 function systematic_resampling(
     rng::AbstractRNG, weights::AbstractVector{<:Real}, n::Integer=length(weights)
 )
-    return rand(rng, Distributions.sampler(Distributions.Categorical(weights)), n)
+    return rand(rng, Distributions.Categorical(weights), n)
 end
 
-function sweep!(
-    rng::AbstractRNG,
-    particles::ParticleContainer,
-    resampling::Function,
-    threshold::Float64=0.5,
-)
+function sweep!(rng::AbstractRNG, particles::ParticleContainer, resampling, threshold=0.5)
     t = 1
     N = length(particles)
     logweights = zeros(length(particles))
@@ -73,7 +71,7 @@ function sweep!(
     return particles[idx]
 end
 
-function sweep!(rng::AbstractRNG, n::Int, resampling::Function, threshold::Float64=0.5)
+function sweep!(rng::AbstractRNG, n::Int, resampling, threshold=0.5)
     particles = [Particle(0.0) for _ in 1:n]
     return sweep!(rng, particles, resampling, threshold)
 end
@@ -114,7 +112,7 @@ for t in 1:T
     end
 end
 
-samples = sweep!(rng, N, systematic_resampling)
+samples = sweep!(rng, fill(Particle(x[1]), N), systematic_resampling)
 traces = reverse(hcat(map(linearize, samples)...))
 
 scatter(traces; color=:black, opacity=0.3)
