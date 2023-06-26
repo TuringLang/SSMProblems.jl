@@ -115,4 +115,4 @@ samples = sweep!(rng, fill(Particle(x[1]), N), systematic_resampling)
 traces = reverse(hcat(map(linearize, samples)...))
 
 scatter(traces; color=:black, opacity=0.3, label="")
-plot!(x, label="True state")
+plot!(x; label="True state")
