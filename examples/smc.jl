@@ -105,14 +105,14 @@ isdone(t, ::Nothing) = false
 x, observations = zeros(T), zeros(T)
 x[1] = rand(rng, Normal(0, 1))
 for t in 1:T
-    observations[t] = rand(rng, Normal(x[t], params.v))
+    observations[t] = rand(rng, Normal(x[t], params.u))
     if t < T
-        x[t + 1] = rand(rng, Normal(x[t], params.u))
+        x[t + 1] = rand(rng, Normal(x[t], params.v))
     end
 end
 
 samples = sweep!(rng, fill(Particle(x[1]), N), systematic_resampling)
 traces = reverse(hcat(map(linearize, samples)...))
 
-scatter(traces; color=:black, opacity=0.3, label="")
+scatter(traces; color=:black, opacity=0.3, label=false)
 plot!(x; label="True state")
