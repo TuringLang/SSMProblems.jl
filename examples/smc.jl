@@ -106,7 +106,7 @@ isdone(t, ::Nothing) = false
 x, observations = zeros(T), zeros(T)
 x[1] = rand(rng, Normal(0, 1))
 for t in 1:T
-    observations[t] = rand(rng, Normal(x[1], params.v^2))
+    observations[t] = rand(rng, Normal(x[t], params.v))
     if t < T
         x[t + 1] = rand(rng, Normal(x[t], params.u^2))
     end
