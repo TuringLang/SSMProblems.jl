@@ -12,6 +12,7 @@ end
 
 Particle(state::T) where {T} = Particle(nothing, state)
 Particle() = Particle(nothing, nothing)
+Base.show(io::IO, p::Particle) = print(io, "Particle($(p.state))")
 
 """
     linearize(particle)
@@ -49,13 +50,11 @@ function sweep!(rng::AbstractRNG, particles::ParticleContainer, resampling, thre
         weights = get_weights(logweights)
         if ess(weights) <= threshold * N
             idx = resampling(rng, weights)
+            particles = particles[idx]
             logweights = zeros(length(particles))
-        else
-            idx = 1:N
         end
 
         # Mutation step
-        particles = particles[idx]
         for i in eachindex(particles)
             parent = particles[i]
             mutated = transition!!(rng, t, parent.state)
@@ -66,7 +65,7 @@ function sweep!(rng::AbstractRNG, particles::ParticleContainer, resampling, thre
         t += 1
     end
 
-    # Return un weighted set
+    # Return unweighted set
     idx = resampling(rng, get_weights(logweights))
     return particles[idx]
 end
@@ -93,11 +92,11 @@ function transition!!(rng::AbstractRNG, t::Int, state=nothing)
     if isnothing(state)
         return rand(rng, Normal(0, 1))
     end
-    return rand(rng, Normal(state, params.v^2))
+    return rand(rng, Normal(state, params.v))
 end
 
 function emission_logdensity(t, state)
-    return logpdf(Normal(state, params.u^2), observations[t])
+    return logpdf(Normal(state, params.u), observations[t])
 end
 
 isdone(t, state) = t > T
@@ -106,14 +105,14 @@ isdone(t, ::Nothing) = false
 x, observations = zeros(T), zeros(T)
 x[1] = rand(rng, Normal(0, 1))
 for t in 1:T
-    observations[t] = rand(rng, Normal(x[1], params.v^2))
+    observations[t] = rand(rng, Normal(x[t], params.u))
     if t < T
-        x[t + 1] = rand(rng, Normal(x[t], params.u^2))
+        x[t + 1] = rand(rng, Normal(x[t], params.v))
     end
 end
 
 samples = sweep!(rng, fill(Particle(x[1]), N), systematic_resampling)
 traces = reverse(hcat(map(linearize, samples)...))
 
-scatter(traces; color=:black, opacity=0.3)
-plot!(x)
+scatter(traces; color=:black, opacity=0.3, label=false)
+plot!(x; label="True state")
