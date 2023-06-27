@@ -3,8 +3,8 @@ name: Documentation
 on:
   push:
     branches:
-      # Build the master branch.
-      - master
+      # Build the main branch.
+      - main
     tags: '*'
   pull_request:
 
@@ -16,17 +16,17 @@ concurrency:
 
 jobs:
   docs:
+    permissions:
+      contents: write
+    name: Documentation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: julia-actions/setup-julia@latest
+      - uses: julia-actions/setup-julia@v1
         with:
           version: '1'
-      - name: Install dependencies
-        run: julia --project=docs/ -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
-      - name: Build and deploy
+      - uses: julia-actions/julia-docdeploy@v1
         env:
           GKSwstype: nul # GR backend issues
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # For authentication with GitHub Actions token
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JULIA_DEBUG: Documenter # Print `@debug` statements (https://github.com/JuliaDocs/Documenter.jl/issues/955)
-        run: julia --project=docs/ docs/make.jl
