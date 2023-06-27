@@ -5,8 +5,8 @@ module SSMProblems
 
 """
 """
-abstract type AbstractParticle end
-abstract type AbstractParticleCache end
+abstract type AbstractStateSpaceModel end
+abstract type AbstractSSMCache end
 
 """
     transition!!(rng, step, particle[, cache])
@@ -36,6 +36,7 @@ Determine whether we have reached the last time step of the Markov process. Retu
 """
 function isdone end
 
-export transition!!, transition_logdensity, emission_logdensity, isdone, AbstractParticle
+export transition!!,
+    transition_logdensity, emission_logdensity, isdone, AbstractStateSpaceModel
 
 end
