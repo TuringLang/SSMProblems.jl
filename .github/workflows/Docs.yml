@@ -18,6 +18,7 @@ jobs:
   docs:
     permissions:
       contents: write
+      statuses: write
     name: Documentation
     runs-on: ubuntu-latest
     steps:
