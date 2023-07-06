@@ -9,10 +9,11 @@ In the `julia` REPL:
 ### Documentation
 
 The package defines a generic interface to work with State Space Problems (SSM). The main objective is to provide a consistent
-interface for 
+interface to work with SSMs and their logdensities.
 
+Consider a markovian model from[^Murray]:
 ![state space model](docs/images/state_space_model.png)
-Source[^Murray]
+
 [^Murray]:
     > Murray, Lawrence & Lee, Anthony & Jacob, Pierre. (2013). Rethinking resampling in the particle filter on graphics processing
 units. 
