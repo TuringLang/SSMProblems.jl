@@ -19,16 +19,18 @@ Consider a markovian model from[^Murray]:
 units. 
 
 The model is fully specified by the following densities:
-- *Initialisation*: ``f_0(x)``
-- *Transition*: ``f(x)``
-- *Emission*: ``g(x)``
+- __Initialisation__: ``f_0(x)``
+- __Transition__: ``f(x)``
+- __Emission__: ``g(x)``
 
-And the dynamics of the model reduce to:
+And the dynamics of the model reduces to:
 ```math
 x_t | x_{t-1} \sim f(x_t | x_{t-1})
+```
+```math
 y_t | x_t \sim g(y_t | x_{t})
 ```
-assuming ``x_0 \sim f_0(x)``. The joint law is then fully describes:
+assuming ``x_0 \sim f_0(x)``. The joint law is then fully described:
 
 ```math
 p(x_{0:T}, y_{0:T}) = f_0{x_0} \prod_t g(y_t | x_t) f(x_t | x_{t-1})
