@@ -7,12 +7,12 @@ using StatsFuns
 # Particle Filter implementation
 struct Particle{T} # Here we just need a tree
     parent::Union{Particle,Nothing}
-    state::T
+    model::T
 end
 
-Particle(state::T) where {T} = Particle(nothing, state)
+Particle(model::T) where {T} = Particle(nothing, model)
 Particle() = Particle(nothing, nothing)
-Base.show(io::IO, p::Particle) = print(io, "Particle($(p.state))")
+Base.show(io::IO, p::Particle) = print(io, "Particle($(p.model))")
 
 """
     linearize(particle)
@@ -23,7 +23,7 @@ function linearize(particle::Particle{T}) where {T}
     trace = T[]
     parent = particle.parent
     while !isnothing(parent)
-        push!(trace, parent.state)
+        push!(trace, parent.model)
         parent = parent.parent
     end
     return trace
@@ -44,7 +44,7 @@ function sweep!(rng::AbstractRNG, particles::ParticleContainer, resampling, thre
     t = 1
     N = length(particles)
     logweights = zeros(length(particles))
-    while !isdone(t, particles[1].state)
+    while !isdone(t, particles[1].model)
 
         # Resample step
         weights = get_weights(logweights)
@@ -57,9 +57,9 @@ function sweep!(rng::AbstractRNG, particles::ParticleContainer, resampling, thre
         # Mutation step
         for i in eachindex(particles)
             parent = particles[i]
-            mutated = transition!!(rng, t, parent.state)
+            mutated = transition!!(rng, t, parent.model)
             particles[i] = Particle(parent, mutated)
-            logweights[i] += emission_logdensity(t, particles[i].state)
+            logweights[i] += emission_logdensity(t, particles[i].model)
         end
 
         t += 1
@@ -81,6 +81,14 @@ Base.@kwdef struct Parameters
     u::Float64 = 0.7 # Observation noise stdev
 end
 
+struct LinearSSM{T} <: AbstractStateSpaceModel
+    state::T
+end
+
+LinearSSM() = LinearSSM(Nothing)
+
+dimension(::LinearSSM) = 1
+
 # Simulation
 T = 250
 seed = 1
@@ -88,31 +96,32 @@ N = 1000
 rng = MersenneTwister(seed)
 params = Parameters(; v=0.2, u=0.7)
 
-function transition!!(rng::AbstractRNG, t::Int, state=nothing)
-    if isnothing(state)
-        return rand(rng, Normal(0, 1))
-    end
-    return rand(rng, Normal(state, params.v))
+function transition!!(rng::AbstractRNG, t::Int, model::LinearSSM)
+    return LinearSSM(rand(rng, Normal(model.state, params.v)))
 end
 
-function emission_logdensity(t, state)
-    return logpdf(Normal(state, params.u), observations[t])
+function transition!!(rng::AbstractRNG, t::Int)
+    # Initial transition
+    return LinearSSM(rand(rng, Normal(0, 1)))
 end
 
-isdone(t, state) = t > T
-isdone(t, ::Nothing) = false
+function emission_logdensity(t, model::LinearSSM)
+    return logpdf(Normal(model.state, params.u), observations[t])
+end
 
-x, observations = zeros(T), zeros(T)
-x[1] = rand(rng, Normal(0, 1))
+isdone(t, state::LinearSSM) = t > T
+
+x, observations = Vector{LinearSSM}(undef, T), zeros(T)
+x[1] = transition!!(rng, 1)
 for t in 1:T
-    observations[t] = rand(rng, Normal(x[t], params.u))
+    observations[t] = rand(rng, Normal(x[t].state, params.u))
     if t < T
-        x[t + 1] = rand(rng, Normal(x[t], params.v))
+      x[t + 1] = transition!!(rng, t, x[t])
     end
 end
 
 samples = sweep!(rng, fill(Particle(x[1]), N), systematic_resampling)
-traces = reverse(hcat(map(linearize, samples)...))
+traces = map(model-> model.state, reverse(hcat(map(linearize, samples)...)))
 
 scatter(traces; color=:black, opacity=0.3, label=false)
-plot!(x; label="True state")
+plot!(map(model -> model.state, x); label="True state")

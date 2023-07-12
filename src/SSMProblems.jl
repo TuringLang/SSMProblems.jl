@@ -5,7 +5,8 @@ module SSMProblems
 
 """
 """
-abstract type AbstractParticle end
+abstract type AbstractStateSpaceModel end
+abstract type AbstractParticle end # Could be a message as well ? 
 abstract type AbstractParticleCache end
 
 """
@@ -36,6 +37,20 @@ Determine whether we have reached the last time step of the Markov process. Retu
 """
 function isdone end
 
-export transition!!, transition_logdensity, emission_logdensity, isdone, AbstractParticle
+"""
+    dimension(::Type{AbstractStateSpaceModel})
+
+Returns the dimension of the state space for a given model type
+"""
+dimension(::Type{<:AbstractStateSpaceModel}) = Nothing
+dimension(model::AbstractStateSpaceModel) = dimension(typeof(model))
+
+export transition!!,
+    transition_logdensity,
+    emission_logdensity,
+    isdone,
+    AbstractParticle,
+    AbstractStateSpaceModel,
+    dimension
 
 end
