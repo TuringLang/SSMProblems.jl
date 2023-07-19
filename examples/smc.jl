@@ -5,7 +5,7 @@ using Plots
 using StatsFuns
 
 # Particle Filter implementation
-struct Particle{T} # Here we just need a tree
+struct Particle{T} <: AbstractParticle
     parent::Union{Particle,Nothing}
     model::T
 end
@@ -21,15 +21,21 @@ Return the trace of a particle, i.e. the sequence of states from the root to the
 """
 function linearize(particle::Particle{T}) where {T}
     trace = T[]
-    parent = particle.parent
+    parent = particle
     while !isnothing(parent)
         push!(trace, parent.model)
         parent = parent.parent
     end
-    return trace
+    return trace[1:(end - 1)]
 end
 
 ParticleContainer = AbstractVector{<:Particle}
+
+# Specialize `isdone` to the concrete `Particle` type
+function isdone(t, particles::AbstractVector{<:Particle})
+    return all(map(particle -> isdone(t, particle), particles))
+end
+isdone(t, particle::AbstractParticle) = isdone(t, particle.model)
 
 ess(weights) = inv(sum(abs2, weights))
 get_weights(logweights::T) where {T<:AbstractVector{<:Real}} = StatsFuns.softmax(logweights)
@@ -44,7 +50,7 @@ function sweep!(rng::AbstractRNG, particles::ParticleContainer, resampling, thre
     t = 1
     N = length(particles)
     logweights = zeros(length(particles))
-    while !isdone(t, particles[1].model)
+    while !isdone(t, particles)
 
         # Resample step
         weights = get_weights(logweights)
@@ -70,9 +76,16 @@ function sweep!(rng::AbstractRNG, particles::ParticleContainer, resampling, thre
     return particles[idx]
 end
 
-function sweep!(rng::AbstractRNG, n::Int, resampling, threshold=0.5)
-    particles = [Particle(0.0) for _ in 1:n]
-    return sweep!(rng, particles, resampling, threshold)
+function sample(
+    rng::AbstractRNG,
+    n::Int,
+    model::AbstractStateSpaceModel;
+    resampling=systematic_resampling,
+    threshold=0.5,
+)
+    particles = fill(Particle(model), N)
+    samples = sweep!(rng, particles, resampling, threshold)
+    return samples
 end
 
 # Inference code
@@ -85,43 +98,46 @@ struct LinearSSM{T} <: AbstractStateSpaceModel
     state::T
 end
 
-LinearSSM() = LinearSSM(Nothing)
-
+LinearSSM() = LinearSSM(zero(Float64))
 dimension(::LinearSSM) = 1
 
 # Simulation
 T = 250
 seed = 1
-N = 1000
+N = 1_000
 rng = MersenneTwister(seed)
 params = Parameters(; v=0.2, u=0.7)
 
-function transition!!(rng::AbstractRNG, t::Int, model::LinearSSM)
-    return LinearSSM(rand(rng, Normal(model.state, params.v)))
+f0(t) = Normal(0, 1)
+f(t, x) = Normal(x, params.v)
+g(t, x) = Normal(x, params.u)
+
+# Generate synthtetic data
+x, observations = zeros(T), zeros(T)
+x[1] = rand(rng, f0(1))
+for t in 1:T
+    observations[t] = rand(rng, g(t, x[t]))
+    if t < T
+        x[t + 1] = rand(rng, f(t, x[t]))
+    end
 end
 
-function transition!!(rng::AbstractRNG, t::Int)
-    # Initial transition
-    return LinearSSM(rand(rng, Normal(0, 1)))
+function transition!!(rng::AbstractRNG, t::Int, model::LinearSSM)
+    if t == 1
+        return LinearSSM(rand(rng, f0(t)))
+    else
+        return LinearSSM(rand(rng, f(t, model.state)))
+    end
 end
 
 function emission_logdensity(t, model::LinearSSM)
-    return logpdf(Normal(model.state, params.u), observations[t])
+    return logpdf(g(t, model.state), observations[t])
 end
 
 isdone(t, state::LinearSSM) = t > T
 
-x, observations = Vector{LinearSSM}(undef, T), zeros(T)
-x[1] = transition!!(rng, 1)
-for t in 1:T
-    observations[t] = rand(rng, Normal(x[t].state, params.u))
-    if t < T
-      x[t + 1] = transition!!(rng, t, x[t])
-    end
-end
-
-samples = sweep!(rng, fill(Particle(x[1]), N), systematic_resampling)
-traces = map(model-> model.state, reverse(hcat(map(linearize, samples)...)))
+samples = sample(rng, N, LinearSSM())
+traces = map(model -> model.state, reverse(hcat(map(linearize, samples)...)))
 
 scatter(traces; color=:black, opacity=0.3, label=false)
-plot!(map(model -> model.state, x); label="True state")
+plot!(x; label="True state")
