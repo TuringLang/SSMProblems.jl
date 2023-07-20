@@ -6,7 +6,7 @@ module SSMProblems
 """
 """
 abstract type AbstractStateSpaceModel end
-abstract type AbstractParticle end  
+abstract type AbstractParticle end
 abstract type AbstractParticleCache end
 
 """
