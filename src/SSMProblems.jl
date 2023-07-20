@@ -6,32 +6,32 @@ module SSMProblems
 """
 """
 abstract type AbstractStateSpaceModel end
-abstract type AbstractParticle end # Could be a message as well ? 
+abstract type AbstractParticle end  
 abstract type AbstractParticleCache end
 
 """
-    transition!!(rng, step, particle[, cache])
+    transition!!(rng, step, model, particle[, cache])
 
 Simulate the particle for the next time step from the forward dynamics.
 """
 function transition!! end
 
 """
-    transition_logdensity(step, particle, x[, cache])
+    transition_logdensity(step, model, particle, x[, cache])
 
 (Optional) Computes the log-density of the forward transition if the density is available.
 """
 function transition_logdensity end
 
 """
-    emission_logdensity(step, particle[, cache])
+    emission_logdensity(step, model, particle[, cache])
 
 Compute the log potential of current particle. This effectively "reweight" each particle.
 """
 function emission_logdensity end
 
 """
-    isdone(step, particle[, cache])
+    isdone(step, model, particle[, cache])
 
 Determine whether we have reached the last time step of the Markov process. Return `true` if yes, otherwise return `false`.
 """
@@ -42,7 +42,7 @@ function isdone end
 
 Returns the dimension of the state space for a given model type
 """
-dimension(::Type{<:AbstractStateSpaceModel}) = Nothing
+dimension(::Type{<:AbstractStateSpaceModel}) = nothing
 dimension(model::AbstractStateSpaceModel) = dimension(typeof(model))
 
 export transition!!,
