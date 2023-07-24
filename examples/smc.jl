@@ -5,7 +5,7 @@ using Plots
 using StatsFuns
 
 # Particle Filter implementation
-struct Particle{T} <: AbstractParticle
+mutable struct Particle{T<:AbstractStateSpaceModel} <: AbstractParticle{T}
     parent::Union{Particle,Nothing}
     model::T
 end
@@ -13,6 +13,11 @@ end
 Particle(model::T) where {T} = Particle(nothing, model)
 Particle() = Particle(nothing, nothing)
 Base.show(io::IO, p::Particle) = print(io, "Particle($(p.model))")
+
+function set_parent!(particle::Particle, parent::Particle)
+    setproperty!(particle, :parent, parent)
+    return particle
+end
 
 """
     linearize(particle)
@@ -29,13 +34,12 @@ function linearize(particle::Particle{T}) where {T}
     return trace[1:(end - 1)]
 end
 
-ParticleContainer = AbstractVector{<:Particle}
+const ParticleContainer = AbstractVector{<:Particle}
 
 # Specialize `isdone` to the concrete `Particle` type
-function isdone(t, particles::AbstractVector{<:Particle})
+function isdone(t, particles::ParticleContainer)
     return all(map(particle -> isdone(t, particle), particles))
 end
-isdone(t, particle::AbstractParticle) = isdone(t, particle.model)
 
 ess(weights) = inv(sum(abs2, weights))
 get_weights(logweights::T) where {T<:AbstractVector{<:Real}} = StatsFuns.softmax(logweights)
@@ -63,8 +67,9 @@ function sweep!(rng::AbstractRNG, particles::ParticleContainer, resampling, thre
         # Mutation step
         for i in eachindex(particles)
             parent = particles[i]
-            mutated = transition!!(rng, t, parent.model)
-            particles[i] = Particle(parent, mutated)
+            mutated = transition!!(rng, t, parent)
+            mutated = set_parent!(mutated, parent)
+            particles[i] = mutated
             logweights[i] += emission_logdensity(t, particles[i].model)
         end
 
@@ -122,11 +127,11 @@ for t in 1:T
     end
 end
 
-function transition!!(rng::AbstractRNG, t::Int, model::LinearSSM)
+function transition!!(rng::AbstractRNG, t::Int, particle::Particle{<:LinearSSM})
     if t == 1
-        return LinearSSM(rand(rng, f0(t)))
+        return Particle(LinearSSM(rand(rng, f0(t))))
     else
-        return LinearSSM(rand(rng, f(t, model.state)))
+        return Particle(LinearSSM(rand(rng, f(t, particle.model.state))))
     end
 end
 
@@ -134,7 +139,7 @@ function emission_logdensity(t, model::LinearSSM)
     return logpdf(g(t, model.state), observations[t])
 end
 
-isdone(t, state::LinearSSM) = t > T
+isdone(t, ::Particle{LinearSSM{F}}) where {F} = t > T
 
 samples = sample(rng, N, LinearSSM())
 traces = map(model -> model.state, reverse(hcat(map(linearize, samples)...)))

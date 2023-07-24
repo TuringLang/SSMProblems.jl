@@ -6,11 +6,11 @@ module SSMProblems
 """
 """
 abstract type AbstractStateSpaceModel end
-abstract type AbstractParticle end
+abstract type AbstractParticle{T<:AbstractStateSpaceModel} end
 abstract type AbstractParticleCache end
 
 """
-    transition!!(rng, step, model, particle[, cache])
+    transition!!(rng, step, particle[, cache])
 
 Simulate the particle for the next time step from the forward dynamics.
 """
