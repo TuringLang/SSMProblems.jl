@@ -11,13 +11,13 @@ struct Particle{T<:AbstractStateSpaceModel,V} <: AbstractParticle{T}
 end
 
 function Particle(parent, state, model::T) where {T<:AbstractStateSpaceModel}
-    return Particle{T, particleof(model)}(parent, state)
+    return Particle{T,particleof(model)}(parent, state)
 end
 function Particle(model::T) where {T<:AbstractStateSpaceModel}
     N = dimension(model)
     V = particleof(model)
     state = N == 1 ? zero(V) : zeros(V, N)
-    return Particle{T, V}(nothing, state)
+    return Particle{T,V}(nothing, state)
 end
 Base.show(io::IO, p::Particle) = print(io, "Particle($(p.state))")
 
@@ -26,7 +26,7 @@ Base.show(io::IO, p::Particle) = print(io, "Particle($(p.state))")
 
 Return the trace of a particle, i.e. the sequence of states from the root to the particle.
 """
-function linearize(particle::Particle{T, V}) where {T, V}
+function linearize(particle::Particle{T,V}) where {T,V}
     trace = V[]
     current = particle
     while !isnothing(current)
@@ -52,7 +52,13 @@ function systematic_resampling(
     return rand(rng, Distributions.Categorical(weights), n)
 end
 
-function sweep!(rng::AbstractRNG, model::AbstractStateSpaceModel, particles::ParticleContainer, resampling, threshold=0.5)
+function sweep!(
+    rng::AbstractRNG,
+    model::AbstractStateSpaceModel,
+    particles::ParticleContainer,
+    resampling,
+    threshold=0.5,
+)
     t = 1
     N = length(particles)
     logweights = zeros(length(particles))
@@ -150,6 +156,6 @@ traces = reverse(hcat(map(linearize, samples)...))
 
 #scatter(traces; color=:black, opacity=0.3, label=false)
 plot(x; label="True state")
-plot!(mean(traces, dims=2); label="Posterior mean")
+plot!(mean(traces; dims=2); label="Posterior mean")
 
 gui()
