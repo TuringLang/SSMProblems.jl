@@ -10,7 +10,7 @@ abstract type AbstractParticle{T<:AbstractStateSpaceModel} end
 abstract type AbstractParticleCache end
 
 """
-    transition!!(rng, step, particle[, cache])
+    transition!!(rng, step, model, particle[, cache])
 
 Simulate the particle for the next time step from the forward dynamics.
 """
@@ -38,12 +38,10 @@ Determine whether we have reached the last time step of the Markov process. Retu
 function isdone end
 
 """
-    dimension(::Type{AbstractStateSpaceModel})
-
-Returns the dimension of the state space for a given model type
+    particleof(::Type{AbstractStateSpaceModel})
 """
-dimension(::Type{<:AbstractStateSpaceModel}) = nothing
-dimension(model::AbstractStateSpaceModel) = dimension(typeof(model))
+particleof(::Type{AbstractStateSpaceModel}) = Nothing
+particleof(model::AbstractStateSpaceModel) = particleof(typeof(model))
 
 export transition!!,
     transition_logdensity,
