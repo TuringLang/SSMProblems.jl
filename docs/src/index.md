@@ -12,7 +12,7 @@ In the `julia` REPL:
 interface to work with SSMs and their logdensities.
 
 Consider a markovian model from[^Murray]:
-![state space model](docs/images/state_space_model.png)
+![state space model](./docs/images/state_space_model.png)
 
 [^Murray]:
     > Murray, Lawrence & Lee, Anthony & Jacob, Pierre. (2013). Rethinking resampling in the particle filter on graphics processing units. 
@@ -29,10 +29,12 @@ x_t | x_{t-1} \sim f(x_t | x_{t-1})
 ```math
 y_t | x_t \sim g(y_t | x_{t})
 ```
-assuming ``x_0 \sim f_0(x)``. The joint law follows:
+assuming ``x_0 \sim f_0(x)``. 
+
+The joint law follows:
 
 ```math
-p(x_{0:T}, y_{0:T}) = f_0{x_0} \prod_t g(y_t | x_t) f(x_t | x_{t-1})
+p(x_{0:T}, y_{0:T}) = f_0(x_0) \prod_t g(y_t | x_t) f(x_t | x_{t-1})
 ```
 
 Model users can define their `SSM` using the following interface:
@@ -44,7 +46,12 @@ struct Model <: AbstractStateSpaceModel end
 particleof(::Model) = Float64
 dimension(::Model) = 2
 
-function transition!!(rng::Random.AbstractRNG, step, model::Model, particle::AbstractParticl{<:AbstractStateSpaceModel}) 
+function transition!!(
+    rng::Random.AbstractRNG, 
+    step, 
+    model::Model, 
+    particle::AbstractParticl{<:AbstractStateSpaceModel}
+) 
     if step == 1
         ... # Sample from the initial density
     end
@@ -58,7 +65,7 @@ end
 isdone(step, model::Model, particle::AbstractParticle) = ... # Stops the state machine
 
 # Optionally, if the transition density is known, the model can also specify it
-function transition_logdensity(step, particle, x)
+function transition_logdensity(step, prev_particle::AbstractParticle, next_particle::AbstractParticle)
     ... # Scores the forward transition at `x`
 end
 ```

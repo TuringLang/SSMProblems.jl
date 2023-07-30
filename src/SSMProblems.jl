@@ -4,8 +4,13 @@ A unified interface to define State Space Models interfaces in the context of Pa
 module SSMProblems
 
 """
+    AbstractStateSpaceModel
 """
 abstract type AbstractStateSpaceModel end
+
+"""
+    AbstractParticle{T<:AbstractStateSpaceModel}
+"""
 abstract type AbstractParticle{T<:AbstractStateSpaceModel} end
 abstract type AbstractParticleCache end
 
@@ -53,6 +58,14 @@ Returns the dimension of the latent state.
 dimension(::Type{AbstractStateSpaceModel}) = Nothing
 dimension(model::AbstractStateSpaceModel) = dimension(typeof(model))
 
+"""
+    latent_space_dimension(::Type{AbstractStateSpaceModel})
+
+Returns the type of the latent space and its dimension.
+"""
+latent_space_dimension(T::Type{AbstractStateSpaceModel}) = particleof(T), dimension(T)
+latent_space_dimension(model::AbstractStateSpaceModel) = latent_space_dimension(typeof(model))
+
 export transition!!,
     transition_logdensity,
     emission_logdensity,
@@ -60,6 +73,7 @@ export transition!!,
     AbstractParticle,
     AbstractStateSpaceModel,
     dimension,
-    particleof
+    particleof,
+    latent_space_dimension
 
 end
