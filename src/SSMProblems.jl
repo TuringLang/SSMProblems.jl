@@ -64,7 +64,9 @@ dimension(model::AbstractStateSpaceModel) = dimension(typeof(model))
 Returns the type of the latent space and its dimension.
 """
 latent_space_dimension(T::Type{AbstractStateSpaceModel}) = particleof(T), dimension(T)
-latent_space_dimension(model::AbstractStateSpaceModel) = latent_space_dimension(typeof(model))
+function latent_space_dimension(model::AbstractStateSpaceModel)
+    return latent_space_dimension(typeof(model))
+end
 
 export transition!!,
     transition_logdensity,
