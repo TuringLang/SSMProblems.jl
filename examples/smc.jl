@@ -4,7 +4,7 @@ using Distributions
 using Plots
 using StatsFuns
 
-# Particle Filter implementation
+# Particle Filter 
 struct Particle{T<:AbstractStateSpaceModel,V} <: AbstractParticle{T}
     parent::Union{Particle,Nothing}
     state::V
@@ -13,13 +13,17 @@ end
 function Particle(parent, state, model::T) where {T<:AbstractStateSpaceModel}
     return Particle{T,particleof(model)}(parent, state)
 end
+
 function Particle(model::T) where {T<:AbstractStateSpaceModel}
     N = dimension(model)
     V = particleof(model)
     state = N == 1 ? zero(V) : zeros(V, N)
     return Particle{T,V}(nothing, state)
 end
-Base.show(io::IO, p::Particle) = print(io, "Particle($(p.state))")
+
+Base.show(io::IO, p::Particle{T,V}) where {T,V} = print(io, "Particle{$T, $V}($(p.state))")
+
+const ParticleContainer{T} = AbstractVector{<:Particle{T}}
 
 """
     linearize(particle)
@@ -33,12 +37,9 @@ function linearize(particle::Particle{T,V}) where {T,V}
         push!(trace, current.state)
         current = current.parent
     end
-    return trace[1:(end - 1)]
+    return trace[1:(end - 1)] # Discard the root node
 end
 
-const ParticleContainer{T} = AbstractVector{<:Particle{T}}
-
-# Specialize `isdone` to the concrete `Particle` type
 function isdone(t, model::AbstractStateSpaceModel, particles::ParticleContainer)
     return all(map(particle -> isdone(t, model, particle), particles))
 end
@@ -74,9 +75,7 @@ function sweep!(
 
         # Mutation step
         for i in eachindex(particles)
-            parent = particles[i]
-            mutated = transition!!(rng, t, model, parent)
-            particles[i] = mutated
+            particles[i] = transition!!(rng, t, model, particles[i])
             logweights[i] += emission_logdensity(t, model, particles[i])
         end
 
@@ -88,6 +87,7 @@ function sweep!(
     return particles[idx]
 end
 
+# Turing style sample method
 function sample(
     rng::AbstractRNG,
     n::Int,
@@ -105,6 +105,10 @@ Base.@kwdef struct LinearSSM <: AbstractStateSpaceModel
     v::Float64 = 0.2 # Transition noise stdev
     u::Float64 = 0.7 # Observation noise stdev
 end
+
+# Structure of the latents space
+particleof(::LinearSSM) = Float64
+dimension(::LinearSSM) = 1
 
 # Simulation
 T = 250
@@ -128,6 +132,7 @@ for t in 1:T
     end
 end
 
+# Model dynamics
 function transition!!(
     rng::AbstractRNG, t::Int, model::LinearSSM, particle::AbstractParticle
 )
@@ -142,20 +147,12 @@ function emission_logdensity(t, model::LinearSSM, particle::AbstractParticle)
     return logpdf(g(t, particle.state), observations[t])
 end
 
-# isdone
 isdone(t, ::LinearSSM, ::AbstractParticle) = t > T
 
-# Type of latent space
-# particleof(::S) :: S -> T
-# f(t, x) : Int -> T -> T
-particleof(::LinearSSM) = Float64
-dimension(::LinearSSM) = 1
-
+# Sample latent state trajectories
 samples = sample(rng, N, LinearSSM())
 traces = reverse(hcat(map(linearize, samples)...))
 
-#scatter(traces; color=:black, opacity=0.3, label=false)
-plot(x; label="True state")
+scatter(traces; color=:black, opacity=0.3, label=false)
+plot!(x; label="True state")
 plot!(mean(traces; dims=2); label="Posterior mean")
-
-gui()

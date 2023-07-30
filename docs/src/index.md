@@ -8,15 +8,14 @@ In the `julia` REPL:
 
 ### Documentation
 
-The package defines a generic interface to work with State Space Problems (SSM). The main objective is to provide a consistent
+`SSMProblems` defines a generic interface for State Space Problems (SSM). The main objective is to provide a consistent
 interface to work with SSMs and their logdensities.
 
 Consider a markovian model from[^Murray]:
 ![state space model](docs/images/state_space_model.png)
 
 [^Murray]:
-    > Murray, Lawrence & Lee, Anthony & Jacob, Pierre. (2013). Rethinking resampling in the particle filter on graphics processing
-units. 
+    > Murray, Lawrence & Lee, Anthony & Jacob, Pierre. (2013). Rethinking resampling in the particle filter on graphics processing units. 
 
 The model is fully specified by the following densities:
 - __Initialisation__: ``f_0(x)``
@@ -30,7 +29,7 @@ x_t | x_{t-1} \sim f(x_t | x_{t-1})
 ```math
 y_t | x_t \sim g(y_t | x_{t})
 ```
-assuming ``x_0 \sim f_0(x)``. The joint law is then fully described:
+assuming ``x_0 \sim f_0(x)``. The joint law follows:
 
 ```math
 p(x_{0:T}, y_{0:T}) = f_0{x_0} \prod_t g(y_t | x_t) f(x_t | x_{t-1})
@@ -39,20 +38,24 @@ p(x_{0:T}, y_{0:T}) = f_0{x_0} \prod_t g(y_t | x_t) f(x_t | x_{t-1})
 Model users can define their `SSM` using the following interface:
 ```julia
 
-struct Model <: AbstractParticle end
+struct Model <: AbstractStateSpaceModel end
 
-function transition!!(rng, step, model::Model) 
+# Define the structure of the latent space
+particleof(::Model) = Float64
+dimension(::Model) = 2
+
+function transition!!(rng::Random.AbstractRNG, step, model::Model, particle::AbstractParticl{<:AbstractStateSpaceModel}) 
     if step == 1
         ... # Sample from the initial density
     end
     ... # Sample from the transition density
 end
 
-function emission_logdensity(step, model::Model) 
-    ... # Return log density of the model at
+function emission_logdensity(step, model::Model, particle::AbstractParticle) 
+    ... # Return log density of the model at *time* `step`
 end
 
-isdone(step, model::Model) = ... # Define the stopping criterion
+isdone(step, model::Model, particle::AbstractParticle) = ... # Stops the state machine
 
 # Optionally, if the transition density is known, the model can also specify it
 function transition_logdensity(step, particle, x)
@@ -62,14 +65,16 @@ end
 
 Package users can then consume the model `logdensity` through calls to `emission_logdensity`.  
 
-For example, a bootstrap filter targeting the filtering distribution ``p(x_t | y_{0:t})`` using `N` particles would read:
+For example, a bootstrap filter targeting the filtering distribution ``p(x_t | y_{0:t})`` using `N` particles would roughly follow:
 ```julia
-while !isdone(t, model)
+struct Particle{T<:AbstractStateSpaceModel} <: AbstractParticle{T} end 
+
+while !all(map(particle -> isdone(t, model, particles), particles)):
     ancestors = resample(rng, logweigths)
     particles = particles[ancestors]
     for i in 1:N
-        particles[i] = transition!!(rng, t, particles[i])
-        logweights[i] += emission_logdensity(t, particles[i])
+        particles[i] = transition!!(rng, t, model, particles[i])
+        logweights[i] += emission_logdensity(t, model, particles[i])
     end
 end
 ```

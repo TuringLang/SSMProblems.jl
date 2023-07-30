@@ -17,7 +17,7 @@ Simulate the particle for the next time step from the forward dynamics.
 function transition!! end
 
 """
-    transition_logdensity(step, model, particle, x[, cache])
+    transition_logdensity(step, model, prev_particle, next_particle[, cache])
 
 (Optional) Computes the log-density of the forward transition if the density is available.
 """
@@ -39,9 +39,19 @@ function isdone end
 
 """
     particleof(::Type{AbstractStateSpaceModel})
+
+Returns the type of the latent state.
 """
 particleof(::Type{AbstractStateSpaceModel}) = Nothing
 particleof(model::AbstractStateSpaceModel) = particleof(typeof(model))
+
+"""
+    dimension(::Type{AbstractStateSpaceModel})
+
+Returns the dimension of the latent state.
+"""
+dimension(::Type{AbstractStateSpaceModel}) = Nothing
+dimension(model::AbstractStateSpaceModel) = dimension(typeof(model))
 
 export transition!!,
     transition_logdensity,
@@ -49,6 +59,7 @@ export transition!!,
     isdone,
     AbstractParticle,
     AbstractStateSpaceModel,
-    dimension
+    dimension,
+    particleof
 
 end
