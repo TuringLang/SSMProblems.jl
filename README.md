@@ -11,7 +11,7 @@ A minimalist framework to define State Space Models (SSM) and their associated l
 This package defines the basic interface needed to run inference on State Space Models as the following:
 ```julia
 # State wrapper
-abstract type AbstractParticle end
+abstract type AbstractStateSpaceProblem end
 
 """
 Emits a new state candidate from latent dynamics
