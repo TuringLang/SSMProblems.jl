@@ -1,10 +1,19 @@
-# Concrete Particles as LinkedLists
+"""
+    Common concrete implementations of Particle types for Particle Filter kernels.
+"""
+module Utils
+
 abstract type Node{T} end
 
 struct Root{T} <: Node{T} end
 Root(T) = Root{T}()
 Root() = Root(Any)
 
+"""
+    Particle{T}
+
+Particle as immutable LinkedList. 
+"""
 struct Particle{T} <: Node{T}
     parent::Node{T}
     state::T
@@ -29,4 +38,6 @@ function linearize(particle::Particle{T}) where {T}
         current = current.parent
     end
     return trace
+end
+
 end

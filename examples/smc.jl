@@ -17,7 +17,7 @@ end
 function sweep!(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
-    particles::SSMProblems.ParticleContainer,
+    particles::SSMProblems.Utils.ParticleContainer,
     observations::AbstractArray,
     resampling=systematic_resampling,
     threshold=0.5,
@@ -37,7 +37,7 @@ function sweep!(
         # Mutation step
         for i in eachindex(particles)
             latent_state = transition!!(rng, model, particles[i].state, timestep)
-            particles[i] = SSMProblems.Particle(particles[i], latent_state)
+            particles[i] = SSMProblems.Utils.Particle(particles[i], latent_state)
             logweights[i] += emission_logdensity(
                 model, particles[i].state, observation, timestep
             )
@@ -60,7 +60,7 @@ function sample(
 )
     particles = map(1:N) do i
         state = transition!!(rng, model)
-        SSMProblems.Particle(state)
+        SSMProblems.Utils.Particle(state)
     end
     samples = sweep!(rng, model, particles, observations, resampling, threshold)
     return samples
@@ -109,7 +109,7 @@ end
 
 # Sample latent state trajectories
 samples = sample(rng, LinearSSM(), N, observations)
-traces = reverse(hcat(map(SSMProblems.linearize, samples)...))
+traces = reverse(hcat(map(SSMProblems.Utils.linearize, samples)...))
 
 scatter(traces; color=:black, opacity=0.3, label=false)
 plot!(x; label="True state")

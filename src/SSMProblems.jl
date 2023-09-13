@@ -10,7 +10,7 @@ abstract type AbstractStateSpaceModel end
 abstract type AbstractParticleCache end
 
 """
-    transition!!(rng, model[, timestep, state, cache])
+    transition!!(rng, model[, state, timestep, cache])
 
 Simulate the particle for the next time step from the forward dynamics.
 """
