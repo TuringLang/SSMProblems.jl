@@ -4,33 +4,7 @@ using Distributions
 using Plots
 using StatsFuns
 
-# Particle Filter implementation
-struct Particle{T} # Here we just need a tree
-    parent::Union{Particle,Nothing}
-    state::T
-end
-
-Particle(state::T) where {T} = Particle(nothing, state)
-Particle() = Particle(nothing, nothing)
-Base.show(io::IO, p::Particle) = print(io, "Particle($(p.state))")
-
-"""
-    linearize(particle)
-
-Return the trace of a particle, i.e. the sequence of states from the root to the particle.
-"""
-function linearize(particle::Particle{T}) where {T}
-    trace = T[]
-    parent = particle.parent
-    while !isnothing(parent)
-        push!(trace, parent.state)
-        parent = parent.parent
-    end
-    return trace
-end
-
-ParticleContainer = AbstractVector{<:Particle}
-
+# Particle Filter 
 ess(weights) = inv(sum(abs2, weights))
 get_weights(logweights::T) where {T<:AbstractVector{<:Real}} = StatsFuns.softmax(logweights)
 
@@ -40,29 +14,34 @@ function systematic_resampling(
     return rand(rng, Distributions.Categorical(weights), n)
 end
 
-function sweep!(rng::AbstractRNG, particles::ParticleContainer, resampling, threshold=0.5)
-    t = 1
+function sweep!(
+    rng::AbstractRNG,
+    model::AbstractStateSpaceModel,
+    particles::SSMProblems.Utils.ParticleContainer,
+    observations::AbstractArray,
+    resampling=systematic_resampling,
+    threshold=0.5,
+)
     N = length(particles)
-    logweights = zeros(length(particles))
-    while !isdone(t, particles[1].state)
+    logweights = zeros(N)
 
+    for (timestep, observation) in enumerate(observations)
         # Resample step
         weights = get_weights(logweights)
         if ess(weights) <= threshold * N
             idx = resampling(rng, weights)
             particles = particles[idx]
-            logweights = zeros(length(particles))
+            fill!(logweights, 0)
         end
 
         # Mutation step
         for i in eachindex(particles)
-            parent = particles[i]
-            mutated = transition!!(rng, t, parent.state)
-            particles[i] = Particle(parent, mutated)
-            logweights[i] += emission_logdensity(t, particles[i].state)
+            latent_state = transition!!(rng, model, particles[i].state, timestep)
+            particles[i] = SSMProblems.Utils.Particle(particles[i], latent_state)
+            logweights[i] += emission_logdensity(
+                model, particles[i].state, observation, timestep
+            )
         end
-
-        t += 1
     end
 
     # Return unweighted set
@@ -70,13 +49,25 @@ function sweep!(rng::AbstractRNG, particles::ParticleContainer, resampling, thre
     return particles[idx]
 end
 
-function sweep!(rng::AbstractRNG, n::Int, resampling, threshold=0.5)
-    particles = [Particle(0.0) for _ in 1:n]
-    return sweep!(rng, particles, resampling, threshold)
+# Turing style sample method
+function sample(
+    rng::AbstractRNG,
+    model::AbstractStateSpaceModel,
+    n::Int,
+    observations::AbstractVector;
+    resampling=systematic_resampling,
+    threshold=0.5,
+)
+    particles = map(1:N) do i
+        state = transition!!(rng, model)
+        SSMProblems.Utils.Particle(state)
+    end
+    samples = sweep!(rng, model, particles, observations, resampling, threshold)
+    return samples
 end
 
 # Inference code
-Base.@kwdef struct Parameters
+Base.@kwdef struct LinearSSM <: AbstractStateSpaceModel
     v::Float64 = 0.2 # Transition noise stdev
     u::Float64 = 0.7 # Observation noise stdev
 end
@@ -84,35 +75,42 @@ end
 # Simulation
 T = 250
 seed = 1
-N = 1000
+N = 1_000
 rng = MersenneTwister(seed)
-params = Parameters(; v=0.2, u=0.7)
 
-function transition!!(rng::AbstractRNG, t::Int, state=nothing)
-    if isnothing(state)
-        return rand(rng, Normal(0, 1))
-    end
-    return rand(rng, Normal(state, params.v))
-end
+model = LinearSSM(0.2, 0.7)
 
-function emission_logdensity(t, state)
-    return logpdf(Normal(state, params.u), observations[t])
-end
+f0(::LinearSSM) = Normal(0, 1)
+f(x::Float64, model::LinearSSM) = Normal(x, model.v)
+g(y::Float64, model::LinearSSM) = Normal(y, model.u)
 
-isdone(t, state) = t > T
-isdone(t, ::Nothing) = false
-
+# Generate synthtetic data
 x, observations = zeros(T), zeros(T)
-x[1] = rand(rng, Normal(0, 1))
+x[1] = rand(rng, f0(model))
 for t in 1:T
-    observations[t] = rand(rng, Normal(x[t], params.u))
+    observations[t] = rand(rng, g(x[t], model))
     if t < T
-        x[t + 1] = rand(rng, Normal(x[t], params.v))
+        x[t + 1] = rand(rng, f(x[t], model))
     end
 end
 
-samples = sweep!(rng, fill(Particle(x[1]), N), systematic_resampling)
-traces = reverse(hcat(map(linearize, samples)...))
+# Model dynamics
+function transition!!(rng::AbstractRNG, model::LinearSSM)
+    return rand(rng, f0(model))
+end
+
+function transition!!(rng::AbstractRNG, model::LinearSSM, state::Float64, ::Int)
+    return rand(rng, f(state, model))
+end
+
+function emission_logdensity(model::LinearSSM, state::Float64, observation::Float64, ::Int)
+    return logpdf(g(state, model), observation)
+end
+
+# Sample latent state trajectories
+samples = sample(rng, LinearSSM(), N, observations)
+traces = reverse(hcat(map(SSMProblems.Utils.linearize, samples)...))
 
 scatter(traces; color=:black, opacity=0.3, label=false)
 plot!(x; label="True state")
+plot!(mean(traces; dims=2); label="Posterior mean")
