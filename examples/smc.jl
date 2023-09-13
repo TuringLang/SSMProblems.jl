@@ -5,38 +5,6 @@ using Plots
 using StatsFuns
 
 # Particle Filter 
-abstract type Node{T} end
-
-struct Root{T} <: Node{T} end
-Root(T) = Root{T}()
-Root() = Root(Any)
-
-struct Particle{T} <: Node{T}
-    parent::Node{T}
-    state::T
-end
-
-Particle(state::T) where {T} = Particle(Root(T), state)
-
-Base.show(io::IO, p::Particle{T}) where {T} = print(io, "Particle{$T}($(p.state))")
-
-const ParticleContainer{T} = AbstractVector{<:Particle{T}}
-
-"""
-    linearize(particle)
-
-Return the trace of a particle, i.e. the sequence of states from the root to the particle.
-"""
-function linearize(particle::Particle{T}) where {T}
-    trace = T[]
-    current = particle
-    while !isa(current, Root)
-        push!(trace, current.state)
-        current = current.parent
-    end
-    return trace
-end
-
 ess(weights) = inv(sum(abs2, weights))
 get_weights(logweights::T) where {T<:AbstractVector{<:Real}} = StatsFuns.softmax(logweights)
 
@@ -49,7 +17,7 @@ end
 function sweep!(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
-    particles::ParticleContainer,
+    particles::SSMProblems.ParticleContainer,
     observations::AbstractArray,
     resampling=systematic_resampling,
     threshold=0.5,
@@ -68,10 +36,10 @@ function sweep!(
 
         # Mutation step
         for i in eachindex(particles)
-            latent_state = transition!!(rng, model, timestep, particles[i].state)
-            particles[i] = Particle(particles[i], latent_state)
+            latent_state = transition!!(rng, model, particles[i].state, timestep)
+            particles[i] = SSMProblems.Particle(particles[i], latent_state)
             logweights[i] += emission_logdensity(
-                model, timestep, particles[i].state, observation
+                model, particles[i].state, observation, timestep
             )
         end
     end
@@ -92,7 +60,7 @@ function sample(
 )
     particles = map(1:N) do i
         state = transition!!(rng, model)
-        Particle(state)
+        SSMProblems.Particle(state)
     end
     samples = sweep!(rng, model, particles, observations, resampling, threshold)
     return samples
@@ -112,38 +80,36 @@ rng = MersenneTwister(seed)
 
 model = LinearSSM(0.2, 0.7)
 
-f0() = Normal(0, 1)
-f(t::Int, x::Float64) = Normal(x, model.v)
-g(t::Int, y::Float64) = Normal(y, model.u)
+f0(::LinearSSM) = Normal(0, 1)
+f(x::Float64, model::LinearSSM) = Normal(x, model.v)
+g(y::Float64, model::LinearSSM) = Normal(y, model.u)
 
 # Generate synthtetic data
 x, observations = zeros(T), zeros(T)
-x[1] = rand(rng, f0())
+x[1] = rand(rng, f0(model))
 for t in 1:T
-    observations[t] = rand(rng, g(t, x[t]))
+    observations[t] = rand(rng, g(x[t], model))
     if t < T
-        x[t + 1] = rand(rng, f(t, x[t]))
+        x[t + 1] = rand(rng, f(x[t], model))
     end
 end
 
 # Model dynamics
 function transition!!(rng::AbstractRNG, model::LinearSSM)
-    return rand(rng, f0())
+    return rand(rng, f0(model))
 end
 
-function transition!!(rng::AbstractRNG, model::LinearSSM, timestep::Int, state::Float64)
-    return rand(rng, f(timestep, state))
+function transition!!(rng::AbstractRNG, model::LinearSSM, state::Float64, ::Int)
+    return rand(rng, f(state, model))
 end
 
-function emission_logdensity(
-    model::LinearSSM, timestep::Int, state::Float64, observation::Float64
-)
-    return logpdf(g(timestep, state), observation)
+function emission_logdensity(model::LinearSSM, state::Float64, observation::Float64, ::Int)
+    return logpdf(g(state, model), observation)
 end
 
 # Sample latent state trajectories
 samples = sample(rng, LinearSSM(), N, observations)
-traces = reverse(hcat(map(linearize, samples)...))
+traces = reverse(hcat(map(SSMProblems.linearize, samples)...))
 
 scatter(traces; color=:black, opacity=0.3, label=false)
 plot!(x; label="True state")
