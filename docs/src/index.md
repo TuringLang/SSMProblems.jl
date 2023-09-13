@@ -24,10 +24,10 @@ The model is fully specified by the following densities:
 
 And the dynamics of the model reduces to:
 ```math
-x_t | x_{t-1} \sim f(x_t | x_{t-1})
-```
-```math
-y_t | x_t \sim g(y_t | x_{t})
+\begin{aligned}
+x_t | x_{t-1} &\sim f(x_t | x_{t-1}) \\
+y_t | x_t &\sim g(y_t | x_{t})
+\end{aligned}
 ```
 assuming ``x_0 \sim f_0(x)``. 
 
@@ -37,9 +37,8 @@ The joint law follows:
 p(x_{0:T}, y_{0:T}) = f_0(x_0) \prod_t g(y_t | x_t) f(x_t | x_{t-1})
 ```
 
-Model users can define their `SSM` using the following interface:
+Users can define their SSM with `SSMProblems` in the following way:
 ```julia
-
 struct Model <: AbstractStateSpaceModel end
 
 # Define the structure of the latent space
