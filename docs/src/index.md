@@ -12,7 +12,7 @@ In the `julia` REPL:
 interface to work with SSMs and their logdensities.
 
 Consider a markovian model from[^Murray]:
-![state space model](./docs/images/state_space_model.png)
+![state space model](images/state_space_model.png)
 
 [^Murray]:
     > Murray, Lawrence & Lee, Anthony & Jacob, Pierre. (2013). Rethinking resampling in the particle filter on graphics processing units. 
@@ -22,7 +22,7 @@ The model is fully specified by the following densities:
 - __Transition__: ``f(x)``
 - __Emission__: ``g(x)``
 
-And the dynamics of the model reduces to:
+The dynamics of the model are reduced to:
 ```math
 \begin{aligned}
 x_t | x_{t-1} &\sim f(x_t | x_{t-1}) \\
