@@ -29,7 +29,7 @@ function emission_logdensity end
 ### Linear Gaussian State Space Model
 As a concrete example, the following snippet of pseudo-code defines a linear Gaussian state space model:
 ```julia
-using SSMProblems, Distributions
+using SSMProblems, Distributions, Random
 
 # Model definition
 T, sig_u, sig_v  = 10, 0.1, 0.2
