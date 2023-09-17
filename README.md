@@ -35,9 +35,7 @@ using SSMProblems, Distributions
 T, sig_u, sig_v  = 10, 0.1, 0.2
 observations = rand(T)
 
-struct LinearSSM{T} <: AbstractStateSpaceModel
-    state::T
-end
+struct LinearSSM{T} <: AbstractStateSpaceModel end
 
 # Model dynamics
 function transition!!(rng::AbstractRNG, model::LinearSSM)
