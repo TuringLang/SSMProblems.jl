@@ -33,9 +33,7 @@ using SSMProblems
 using Distributions
 
 # Model definition
-T = 10
-sig_u = 0.1
-sig_v = 0.2
+T, sig_u, sig_v  = 10, 0.1, 0.2
 observations = ...
 
 struct LinearSSM{T} <: AbstractStateSpaceModel
