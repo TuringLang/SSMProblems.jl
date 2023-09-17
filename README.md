@@ -11,7 +11,7 @@ A minimalist framework to define State Space Models (SSM) and their associated l
 This package defines the basic interface needed to run inference on State Space Models as the following:
 ```julia
 # State wrapper
-abstract type AbstractParticle end
+abstract type AbstractStateSpaceModel end
 
 """
 Emits a new state candidate from latent dynamics
@@ -23,15 +23,11 @@ Scores the emission transition
 """
 function emission_logdensity end
 
-"""
-Stops the state machine
-"""
-function isdone end
 
 ```
 
 ### Linear Gaussian State Space Model
-As a concrete example, the following snippet of pseudo-code defines a linear gaussian state space model:
+As a concrete example, the following snippet of pseudo-code defines a linear Gaussian state space model:
 ```julia
 using SSMProblems
 using Distributions
@@ -42,22 +38,22 @@ sig_u = 0.1
 sig_v = 0.2
 observations = ...
 
-struct LinearSSM{T} <: AbstractParticle
+struct LinearSSM{T} <: AbstractStateSpaceModel
     state::T
 end
 
-function transition!!(rng, step, particle::LinearSSM)
-    if step == 1
-        return rand(rng, Normal())
-    end
-    return rand(rng, Normal(particle.state, sig_u))
+# Model dynamics
+function transition!!(rng::AbstractRNG, model::LinearSSM)
+    return rand(rng, Normal(0, 1))
 end
 
-function emission_logdensity(step, particle::LinearSSM)
-    return logpdf(Normal(particle.state, sig_v), observations[step])
+function transition!!(rng::AbstractRNG, model::LinearSSM, state::Float64, ::Int)
+    return rand(rng, Normal(state, 1))
 end
 
-isdone(step, ::LinearSSM) = step > T
+function emission_logdensity(model::LinearSSM, state::Float64, observation::Float64, ::Int)
+    return logpdf(Normal(0, 1), observation)
+end
 ```
 
 More details can be found in the [documentation]() and the [examples]().
