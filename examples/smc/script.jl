@@ -109,6 +109,6 @@ end
 samples = sample(rng, LinearSSM(), N, observations)
 traces = reverse(hcat(map(SSMProblems.Utils.linearize, samples)...))
 
-scatter(traces[:, 1:10]; color=:black, opacity=1, label=false)
-plot!(x; label="True state")
-plot!(mean(traces; dims=2); label="Posterior mean")
+scatter(traces[:, 1:10]; color=:black, opacity=0.7, label=false)
+plot!(x; label="True state", linewidth=2)
+plot!(mean(traces; dims=2); label="Posterior mean", color=:orange, linewidth=2)
