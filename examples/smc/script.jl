@@ -1,3 +1,4 @@
+# # Partilce Filter with adaptive resampling
 using Random
 using SSMProblems
 using Distributions
@@ -26,7 +27,6 @@ function sweep!(
     logweights = zeros(N)
 
     for (timestep, observation) in enumerate(observations)
-        # Resample step
         weights = get_weights(logweights)
         if ess(weights) <= threshold * N
             idx = resampling(rng, weights)
@@ -34,7 +34,6 @@ function sweep!(
             fill!(logweights, 0)
         end
 
-        # Mutation step
         for i in eachindex(particles)
             latent_state = transition!!(rng, model, particles[i].state, timestep)
             particles[i] = SSMProblems.Utils.Particle(particles[i], latent_state)
@@ -44,7 +43,6 @@ function sweep!(
         end
     end
 
-    # Return unweighted set
     idx = resampling(rng, get_weights(logweights))
     return particles[idx]
 end
@@ -73,9 +71,9 @@ Base.@kwdef struct LinearSSM <: AbstractStateSpaceModel
 end
 
 # Simulation
-T = 250
+T = 150
 seed = 1
-N = 1_000
+N = 500
 rng = MersenneTwister(seed)
 
 model = LinearSSM(0.2, 0.7)
@@ -111,6 +109,6 @@ end
 samples = sample(rng, LinearSSM(), N, observations)
 traces = reverse(hcat(map(SSMProblems.Utils.linearize, samples)...))
 
-scatter(traces; color=:black, opacity=0.3, label=false)
-plot!(x; label="True state")
-plot!(mean(traces; dims=2); label="Posterior mean")
+scatter(traces[:, 1:10]; color=:black, opacity=0.7, label=false)
+plot!(x; label="True state", linewidth=2)
+plot!(mean(traces; dims=2); label="Posterior mean", color=:orange, linewidth=2)
