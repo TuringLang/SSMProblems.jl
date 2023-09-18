@@ -1,4 +1,4 @@
-# # Partilce Filter with adaptive resampling for a Linear State Space Model
+# # Partilce Filter with adaptive resampling
 using Random
 using SSMProblems
 using Distributions
@@ -71,7 +71,7 @@ Base.@kwdef struct LinearSSM <: AbstractStateSpaceModel
 end
 
 # Simulation
-T = 250
+T = 150
 seed = 1
 N = 500
 rng = MersenneTwister(seed)
@@ -109,6 +109,6 @@ end
 samples = sample(rng, LinearSSM(), N, observations)
 traces = reverse(hcat(map(SSMProblems.Utils.linearize, samples)...))
 
-scatter(traces; color=:black, opacity=0.3, label=false)
+scatter(traces[:, 1:10]; color=:black, opacity=1, label=false)
 plot!(x; label="True state")
 plot!(mean(traces; dims=2); label="Posterior mean")
