@@ -90,6 +90,6 @@ end
 
 ### Interface
 ```@autodocs
-Modules = [SSMProblems]
-Order   = [:type, :function]
+Modules = [SSMProblems, SSMProblems.Utils]
+Order   = [:type, :function, :module]
 ```
