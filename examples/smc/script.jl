@@ -1,3 +1,4 @@
+# # Partilce Filter with adaptive resampling for a Linear State Space Model
 using Random
 using SSMProblems
 using Distributions
@@ -26,7 +27,6 @@ function sweep!(
     logweights = zeros(N)
 
     for (timestep, observation) in enumerate(observations)
-        # Resample step
         weights = get_weights(logweights)
         if ess(weights) <= threshold * N
             idx = resampling(rng, weights)
@@ -34,7 +34,6 @@ function sweep!(
             fill!(logweights, 0)
         end
 
-        # Mutation step
         for i in eachindex(particles)
             latent_state = transition!!(rng, model, particles[i].state, timestep)
             particles[i] = SSMProblems.Utils.Particle(particles[i], latent_state)
@@ -44,7 +43,6 @@ function sweep!(
         end
     end
 
-    # Return unweighted set
     idx = resampling(rng, get_weights(logweights))
     return particles[idx]
 end
@@ -75,7 +73,7 @@ end
 # Simulation
 T = 250
 seed = 1
-N = 1_000
+N = 500
 rng = MersenneTwister(seed)
 
 model = LinearSSM(0.2, 0.7)
