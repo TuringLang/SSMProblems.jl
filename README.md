@@ -50,5 +50,3 @@ function emission_logdensity(model::LinearSSM, state::Float64, observation::Floa
     return logpdf(Normal(0, 1), observation)
 end
 ```
-
-More details can be found in the [documentation]() and the [examples]().
