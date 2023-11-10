@@ -51,7 +51,7 @@ DocMeta.setdocmeta!(SSMProblems, :DocTestSetup, :(using SSMProblems); recursive=
 makedocs(;
     sitename="SSMProblems",
     format=Documenter.HTML(; size_threshold=1000 * 2^11), # 1Mb per page
-    modules=[SSMProblems],
+    #modules=[SSMProblems],
     pages=[
         "Home" => "index.md",
         "Examples" => [

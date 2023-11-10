@@ -3,10 +3,12 @@ A unified interface to define State Space Models interfaces in the context of Pa
 """
 module SSMProblems
 
+using AbstractMCMC: AbstractMCMC
+
 """
     AbstractStateSpaceModel
 """
-abstract type AbstractStateSpaceModel end
+abstract type AbstractStateSpaceModel <: AbstractMCMC.AbstractModel end
 abstract type AbstractParticleCache end
 
 """
