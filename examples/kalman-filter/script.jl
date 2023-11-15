@@ -8,7 +8,6 @@ using Plots
 using Random
 using SSMProblems
 
-
 # Model definition
 struct LinearGaussianSSM <: AbstractStateSpaceModel
     """
@@ -34,7 +33,7 @@ g(y::Vector{Float64}, model::LinearGaussianSSM) = MvNormal(model.H * y, model.R)
 # Simulation parameters
 SEED = 1
 T = 100  # number of time steps
-z = [-1., 1.]
+z = [-1.0, 1.0]
 P = Matrix(1.0I, 2, 2)
 Φ = [0.8 0.2; -0.1 0.8]
 b = zeros(2)
@@ -63,12 +62,11 @@ function filter(model::LinearGaussianSSM, y::Vector{Any})
     ps = [p]  # vector of filtered Gaussians
     for i in 1:T
         # Predict step
-        p = Φ*p ⊕ Gaussian(zero(z), Q)  # same as Gaussian(Φ*p.μ, Φ*p.Σ*Φ' + Q)
+        p = Φ * p ⊕ Gaussian(zero(z), Q)  # same as Gaussian(Φ*p.μ, Φ*p.Σ*Φ' + Q)
         # Update step
         p, yres, _ = Kalman.correct(
-            Kalman.JosephForm(), 
-            p, 
-            (Gaussian(y[i], model.R), model.H))
+            Kalman.JosephForm(), p, (Gaussian(y[i], model.R), model.H)
+        )
         push!(ps, p) # save filtered density
     end
     return ps
@@ -77,14 +75,24 @@ end
 # Run filter and plot results
 ps = filter(model, y)
 
-p1 = scatter(1:T, first.(y), color="red", label="Observations")
+p1 = scatter(1:T, first.(y); color="red", label="Observations")
 plot!(
-    p1, 0:T, [mean(p)[1] for p in ps], 
-    color="orange", label="Filtered x1", grid=false,
-    ribbon=[sqrt(cov(p)[1,1]) for p in ps], fillalpha=.5
+    p1,
+    0:T,
+    [mean(p)[1] for p in ps];
+    color="orange",
+    label="Filtered x1",
+    grid=false,
+    ribbon=[sqrt(cov(p)[1, 1]) for p in ps],
+    fillalpha=0.5,
 )
 plot!(
-    p1, 0:T, [mean(p)[2] for p in ps],
-    color="blue", label="Filtered x2", grid=false,
-    ribbon=[sqrt(cov(p)[2,2]) for p in ps], fillalpha=.5
+    p1,
+    0:T,
+    [mean(p)[2] for p in ps];
+    color="blue",
+    label="Filtered x2",
+    grid=false,
+    ribbon=[sqrt(cov(p)[2, 2]) for p in ps],
+    fillalpha=0.5,
 )
