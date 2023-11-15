@@ -1,0 +1,90 @@
+# Kalman filter using Kalman.jl
+using Distributions
+using GaussianDistributions
+using GaussianDistributions: ⊕
+using Kalman
+using LinearAlgebra
+using Plots
+using Random
+using SSMProblems
+
+
+# Model definition
+struct LinearGaussianSSM <: AbstractStateSpaceModel
+    """
+        A state space model with linear dynamics and Gaussian noise.
+        The model is defined by the following equations:
+        x[0] = z + ϵ,                 ϵ    ∼ N(0, P)
+        x[k] = Φx[k-1] + b + w[k],    w[k] ∼ N(0, Q)
+        y[k] = Hx[k] + v[k],          v[k] ∼ N(0, R)
+    """
+    z::Vector{Float64}
+    P::Matrix{Float64}
+    Φ::Matrix{Float64}
+    b::Vector{Float64}
+    Q::Matrix{Float64}
+    H::Matrix{Float64}
+    R::Matrix{Float64}
+end
+
+f0(model::LinearGaussianSSM) = MvNormal(model.z, model.P)
+f(x::Vector{Float64}, model::LinearGaussianSSM) = MvNormal(model.Φ * x + model.b, model.Q)
+g(y::Vector{Float64}, model::LinearGaussianSSM) = MvNormal(model.H * y, model.R)
+
+# Simulation parameters
+SEED = 1
+T = 100  # number of time steps
+z = [-1., 1.]
+P = Matrix(1.0I, 2, 2)
+Φ = [0.8 0.2; -0.1 0.8]
+b = zeros(2)
+Q = [0.2 0.0; 0.0 0.5]
+H = [1.0 0.0;]
+R = Matrix(0.3I, 1, 1)
+
+model = LinearGaussianSSM(z, P, Φ, b, Q, H, R)
+
+# Generate synthetic data
+rng = MersenneTwister(SEED)
+x, y = Vector{Any}(undef, T), Vector{Any}(undef, T)
+x[1] = rand(rng, f0(model))
+for t in 1:T
+    y[t] = rand(rng, g(x[t], model))
+    if t < T
+        x[t + 1] = rand(rng, f(x[t], model))
+    end
+end
+
+# Kalman filter
+function filter(model::LinearGaussianSSM, y::Vector{Any})
+    T = length(y)
+    # Initialize filter
+    p = Gaussian(model.z, model.P)
+    ps = [p]  # vector of filtered Gaussians
+    for i in 1:T
+        # Predict step
+        p = Φ*p ⊕ Gaussian(zero(z), Q)  # same as Gaussian(Φ*p.μ, Φ*p.Σ*Φ' + Q)
+        # Update step
+        p, yres, _ = Kalman.correct(
+            Kalman.JosephForm(), 
+            p, 
+            (Gaussian(y[i], model.R), model.H))
+        push!(ps, p) # save filtered density
+    end
+    return ps
+end
+
+# Run filter and plot results
+ps = filter(model, y)
+
+p1 = scatter(1:T, first.(y), color="red", label="Observations")
+plot!(
+    p1, 0:T, [mean(p)[1] for p in ps], 
+    color="orange", label="Filtered x1", grid=false,
+    ribbon=[sqrt(cov(p)[1,1]) for p in ps], fillalpha=.5
+)
+plot!(
+    p1, 0:T, [mean(p)[2] for p in ps],
+    color="blue", label="Filtered x2", grid=false,
+    ribbon=[sqrt(cov(p)[2,2]) for p in ps], fillalpha=.5
+)
