@@ -1,8 +1,6 @@
 # Kalman filter using Kalman.jl
 using Distributions
-using GaussianDistributions
-using GaussianDistributions: ⊕
-using Kalman
+using GaussianDistributions: correct, Gaussian
 using LinearAlgebra
 using Plots
 using Random
@@ -26,9 +24,16 @@ struct LinearGaussianSSM <: AbstractStateSpaceModel
     R::Matrix{Float64}
 end
 
-f0(model::LinearGaussianSSM) = MvNormal(model.z, model.P)
-f(x::Vector{Float64}, model::LinearGaussianSSM) = MvNormal(model.Φ * x + model.b, model.Q)
-g(y::Vector{Float64}, model::LinearGaussianSSM) = MvNormal(model.H * y, model.R)
+f0(model::LinearGaussianSSM) = Gaussian(model.z, model.P)
+f(x::Vector{Float64}, model::LinearGaussianSSM) = Gaussian(model.Φ * x + model.b, model.Q)
+g(y::Vector{Float64}, model::LinearGaussianSSM) = Gaussian(model.H * y, model.R)
+
+function transition!!(rng::AbstractRNG, model::LinearGaussianSSM)
+    return Gaussian(rand(rng, f0(model)), model.P)
+end
+function transition!!(rng::AbstractRNG, model::LinearGaussianSSM, state::Gaussian)
+    return Gaussian(rand(rng, f(state.μ, model)), model.Q)
+end
 
 # Simulation parameters
 SEED = 1
@@ -55,22 +60,20 @@ for t in 1:T
 end
 
 # Kalman filter
-function filter(model::LinearGaussianSSM, y::Vector{Any})
+function filter(rng::Random.AbstractRNG, model::LinearGaussianSSM, y::Vector{Any})
     T = length(y)
-    p = Gaussian(model.z, model.P)
+    p = transition!!(rng, model)
     ps = [p]
     for i in 1:T
-        p = Φ * p ⊕ Gaussian(zero(z), Q)
-        p, yres, _ = Kalman.correct(
-            Kalman.JosephForm(), p, (Gaussian(y[i], model.R), model.H)
-        )
+        p = transition!!(rng, model, p)
+        p, yres, _ = correct(p, Gaussian(y[i], model.R), model.H)
         push!(ps, p)
     end
     return ps
 end
 
 # Run filter and plot results
-ps = filter(model, y)
+ps = filter(rng, model, y)
 
 p1 = scatter(1:T, first.(y); color="red", label="Observations")
 plot!(
@@ -83,6 +86,7 @@ plot!(
     ribbon=[sqrt(cov(p)[1, 1]) for p in ps],
     fillalpha=0.5,
 )
+
 plot!(
     p1,
     0:T,
