@@ -32,7 +32,7 @@ g(y::Vector{Float64}, model::LinearGaussianSSM) = MvNormal(model.H * y, model.R)
 
 # Simulation parameters
 SEED = 1
-T = 100  # number of time steps
+T = 100  
 z = [-1.0, 1.0]
 P = Matrix(1.0I, 2, 2)
 Φ = [0.8 0.2; -0.1 0.8]
@@ -57,17 +57,14 @@ end
 # Kalman filter
 function filter(model::LinearGaussianSSM, y::Vector{Any})
     T = length(y)
-    # Initialize filter
     p = Gaussian(model.z, model.P)
-    ps = [p]  # vector of filtered Gaussians
+    ps = [p]  
     for i in 1:T
-        # Predict step
-        p = Φ * p ⊕ Gaussian(zero(z), Q)  # same as Gaussian(Φ*p.μ, Φ*p.Σ*Φ' + Q)
-        # Update step
+        p = Φ * p ⊕ Gaussian(zero(z), Q)  
         p, yres, _ = Kalman.correct(
             Kalman.JosephForm(), p, (Gaussian(y[i], model.R), model.H)
         )
-        push!(ps, p) # save filtered density
+        push!(ps, p) 
     end
     return ps
 end
