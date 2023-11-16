@@ -32,7 +32,7 @@ g(y::Vector{Float64}, model::LinearGaussianSSM) = MvNormal(model.H * y, model.R)
 
 # Simulation parameters
 SEED = 1
-T = 100  
+T = 100
 z = [-1.0, 1.0]
 P = Matrix(1.0I, 2, 2)
 Φ = [0.8 0.2; -0.1 0.8]
@@ -58,13 +58,13 @@ end
 function filter(model::LinearGaussianSSM, y::Vector{Any})
     T = length(y)
     p = Gaussian(model.z, model.P)
-    ps = [p]  
+    ps = [p]
     for i in 1:T
-        p = Φ * p ⊕ Gaussian(zero(z), Q)  
+        p = Φ * p ⊕ Gaussian(zero(z), Q)
         p, yres, _ = Kalman.correct(
             Kalman.JosephForm(), p, (Gaussian(y[i], model.R), model.H)
         )
-        push!(ps, p) 
+        push!(ps, p)
     end
     return ps
 end
