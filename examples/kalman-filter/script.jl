@@ -78,25 +78,28 @@ end
 # Run filter and plot results
 ps = filter(rng, model, y)
 
+p_mean = mean.(ps)
+p_cov = sqrt.(cov.(ps))
+
 p1 = scatter(1:T, first.(y); color="red", label="Observations")
 plot!(
     p1,
     0:T,
-    [mean(p)[1] for p in ps];
+    first.(p_mean);
     color="orange",
     label="Filtered x1",
     grid=false,
-    ribbon=[sqrt(cov(p)[1, 1]) for p in ps],
+    ribbon=getindex.(p_cov, 1, 1),
     fillalpha=0.5,
 )
 
 plot!(
     p1,
     0:T,
-    [mean(p)[2] for p in ps];
+    last.(p_mean);
     color="blue",
     label="Filtered x2",
     grid=false,
-    ribbon=[sqrt(cov(p)[2, 2]) for p in ps],
+    ribbon=getindex.(p_cov, 2, 2),
     fillalpha=0.5,
 )
