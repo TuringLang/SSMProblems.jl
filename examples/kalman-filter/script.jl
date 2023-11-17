@@ -34,7 +34,7 @@ end
 
 function transition!!(rng::AbstractRNG, model::LinearGaussianSSM, state::Gaussian)
     let Φ = model.Φ, Q = model.Q, μ = state.μ, Σ = state.Σ
-        return Gaussian(Φ*μ, Φ*Σ*Φ' + Q)
+        return Gaussian(Φ * μ, Φ * Σ * Φ' + Q)
     end
 end
 
