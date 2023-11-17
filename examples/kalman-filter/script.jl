@@ -1,6 +1,7 @@
 ## Kalman filter using Kalman.jl
 using GaussianDistributions: correct, Gaussian
 using LinearAlgebra
+using Statistics
 using Plots
 using Random
 using SSMProblems
