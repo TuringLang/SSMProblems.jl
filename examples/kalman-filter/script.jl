@@ -1,4 +1,4 @@
-# # Kalman filter using Kalman.jl
+# # Kalman filter for a linear SSM 
 using GaussianDistributions: correct, Gaussian
 using LinearAlgebra
 using Statistics
