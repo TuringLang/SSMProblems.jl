@@ -1,5 +1,4 @@
 [deps]
-Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 GaussianDistributions = "43dcc890-d446-5863-8d1a-14597580bb8d"
 Kalman = "d59c0ba6-2ef2-5409-8dc5-1fd9a2b46832"
 Literate = "98b081ad-f1c9-55d3-8b20-4c87d4299306"
