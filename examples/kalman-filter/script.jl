@@ -29,10 +29,13 @@ f(x::Vector{Float64}, model::LinearGaussianSSM) = Gaussian(model.Φ * x + model.
 g(y::Vector{Float64}, model::LinearGaussianSSM) = Gaussian(model.H * y, model.R)
 
 function transition!!(rng::AbstractRNG, model::LinearGaussianSSM)
-    return Gaussian(rand(rng, f0(model)), model.P)
+    return Gaussian(model.z, model.P)
 end
+
 function transition!!(rng::AbstractRNG, model::LinearGaussianSSM, state::Gaussian)
-    return Gaussian(rand(rng, f(state.μ, model)), model.Q)
+    let Φ = model.Φ, Q = model.Q, μ = state.μ, Σ = state.Σ
+        return Gaussian(Φ*μ, Φ*Σ*Φ' + Q)
+    end
 end
 
 # Simulation parameters
