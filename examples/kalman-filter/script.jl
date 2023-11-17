@@ -1,5 +1,4 @@
-# Kalman filter using Kalman.jl
-using Distributions
+## Kalman filter using Kalman.jl
 using GaussianDistributions: correct, Gaussian
 using LinearAlgebra
 using Plots
