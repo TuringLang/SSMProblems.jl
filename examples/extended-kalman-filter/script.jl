@@ -42,7 +42,6 @@ function transition!!(::AbstractRNG, model::PendulumModel)
 end
 
 function transition!!(::AbstractRNG, model::PendulumModel, state::Gaussian)
-    # Jacobian - Linearization
     Jf = jacobian(x -> f(x, model), state.μ)
     Jh = jacobian(x -> h(x, model), state.μ)
     pred = f(state.μ, model)
@@ -61,7 +60,7 @@ for t in 1:nstep
 end
 
 function ekf_correct(obs, state::Gaussian, model::PendulumModel)
-    Jf = jacobian(x -> f(x, model), state.μ) 
+    Jf = jacobian(x -> f(x, model), state.μ)
     Jh = jacobian(x -> h(x, model), state.μ)
 
     S = model.R + Jh * state.Σ * Jh'
