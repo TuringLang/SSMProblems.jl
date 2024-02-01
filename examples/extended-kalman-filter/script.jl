@@ -61,7 +61,7 @@ for t in 1:nstep
 end
 
 function ekf_correct(obs, state::Gaussian, model::PendulumModel)
-    Jf = jacobian(x -> f(x, model), state.μ) # We should not have to recompute these jacobians
+    Jf = jacobian(x -> f(x, model), state.μ) 
     Jh = jacobian(x -> h(x, model), state.μ)
 
     S = model.R + Jh * state.Σ * Jh'
