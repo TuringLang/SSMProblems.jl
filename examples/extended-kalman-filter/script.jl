@@ -38,7 +38,7 @@ f(x::Array, model::PendulumModel) =
 h(x::Array, model::PendulumModel) = [sin(x[1])]
 
 function transition!!(::AbstractRNG, model::PendulumModel)
-  return Gaussian(model.x0, zeros(2,2))
+    return Gaussian(model.x0, zeros(2, 2))
 end
 
 function transition!!(::AbstractRNG, model::PendulumModel, state::Gaussian)
