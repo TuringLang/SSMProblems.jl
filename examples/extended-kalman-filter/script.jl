@@ -38,7 +38,7 @@ f(x::Array, model::PendulumModel) =
 h(x::Array, model::PendulumModel) = [sin(x[1])]
 
 function transition!!(::AbstractRNG, model::PendulumModel)
-    return Gaussian(model.x0, 0.0)
+  return Gaussian(model.x0, zeros(2,2))
 end
 
 function transition!!(::AbstractRNG, model::PendulumModel, state::Gaussian)
@@ -73,8 +73,8 @@ end
 function filter(rng::Random.AbstractRNG, model::PendulumModel, y::Vector)
     T = length(y)
     p = transition!!(rng, model)
-    ps = []
-    for i in 1:T
+    ps = [p]
+    for i in 2:T
         p = transition!!(rng, model, p)
         p = ekf_correct(y[i], p, model)
         push!(ps, p)
