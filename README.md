@@ -22,8 +22,6 @@ function transition!! end
 Scores the emission transition
 """
 function emission_logdensity end
-
-
 ```
 
 ### Linear Gaussian State Space Model
@@ -48,5 +46,15 @@ end
 
 function emission_logdensity(model::LinearSSM, state::Float64, observation::Float64, ::Int)
     return logpdf(Normal(0, 1), observation)
+end
+```
+
+### Time-Varying and Control-Dependent Dynamics
+
+Both the `transition!!` and `emission_logdensity` functions can be extended to include time-varying and control-dependent dynamics by including `timestep` and `control` arguments in their definitions. For example, we can modify the previous `transition!!` function to include a time-varying and control-dependent dynamics as follows:
+
+```julia
+function transition!!(rng::AbstractRNG, ::LinearSSM, state::Float64, timestep::Int, control::Float64)
+    return rand(rng, Normal(state + control, 1 / (1 + timestep)))
 end
 ```
