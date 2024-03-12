@@ -36,7 +36,8 @@ function sweep!(
 
         for i in eachindex(particles)
             latent_state = transition!!(rng, model, particles[i].state, timestep)
-            particles[i] = SSMProblems.Utils.Particle(particles[i], latent_state)
+            parent = deepcopy(particles[i])
+            particles[i] = SSMProblems.Utils.Particle(latent_state, parent)
             logweights[i] += emission_logdensity(
                 model, particles[i].state, observation, timestep
             )
