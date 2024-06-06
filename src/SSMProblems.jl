@@ -32,7 +32,7 @@ abstract type LatentDynamics end
 function initialise end
 
 """
-    initialise_logdensity(
+    initialisation_logdensity(
         dynamics::LatentDynamics
         state;
         extra
