@@ -14,7 +14,7 @@ function initialise(rng::AbstractRNG, dynamics::LatentDynamics; extra)
     check_initial_distribution(dynamics)
     return rand(rng, initialisation_distribution(dynamics; extra))
 end
-function initialise_logdensity(dynamics::LatentDynamics; state, extra)
+function initialisation_logdensity(dynamics::LatentDynamics; state, extra)
     check_initial_distribution(dynamics)
     return logpdf(initialisation_distribution(dynamics; extra), state)
 end

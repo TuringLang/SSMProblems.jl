@@ -167,8 +167,8 @@ end
 function initialise(rng::AbstractRNG, model::StateSpaceModel; extra...)
     return initialise(rng, model.latent_dynamics; extra...)
 end
-function initialise_logdensity(model::StateSpaceModel; extra...)
-    return initialise_logdensity(model.latent_dynamics; extra...)
+function initialisation_logdensity(model::StateSpaceModel; extra...)
+    return initialisation_logdensity(model.latent_dynamics; extra...)
 end
 function initialisation_distribution(model::StateSpaceModel; extra...)
     return initialisation_distribution(model.latent_dynamics; extra...)
