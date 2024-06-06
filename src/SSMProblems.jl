@@ -151,6 +151,9 @@ function observation_logdensity end
 """
 abstract type AbstractStateSpaceModel <: AbstractMCMC.AbstractModel end
 
+## A vanilla implementation of a state space model
+
+
 """
     A state space model.
 
