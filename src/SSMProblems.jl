@@ -40,7 +40,7 @@ function initialise end
 
     Compute the log-density of an initial state.
 """
-function initialise_logdensity end
+function initialisation_logdensity end
 
 """
     initialise_distribution(
