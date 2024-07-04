@@ -4,6 +4,7 @@ A unified interface to define state space models in the context of particle MCMC
 module SSMProblems
 
 using AbstractMCMC: AbstractMCMC
+import Random: AbstractRNG
 
 export LatentDynamics, ObservationProcess, AbstractStateSpaceModel, StateSpaceModel
 

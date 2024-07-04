@@ -1,8 +1,9 @@
 """Forward simulation of state space models."""
 
-function StatsBase.sample(
-    rng::AbstractRNG, model::AbstractStateSpaceModel, extras::AbstractVector
-)
+import AbstractMCMC: sample
+export sample
+
+function sample(rng::AbstractRNG, model::AbstractStateSpaceModel, extras::AbstractVector)
     T = length(extras)
 
     x0 = initialise(rng, model; extra=extras[1])
@@ -22,7 +23,7 @@ function StatsBase.sample(
     return xs, ys
 end
 
-function StatsBase.sample(rng::AbstractRNG, model::AbstractStateSpaceModel, T::Integer)
+function sample(rng::AbstractRNG, model::AbstractStateSpaceModel, T::Integer)
     extras = [nothing for _ in 1:T]
     return sample(rng, model, extras)
 end
