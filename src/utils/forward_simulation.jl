@@ -9,8 +9,8 @@ function sample(rng::AbstractRNG, model::AbstractStateSpaceModel, extras::Abstra
     x0 = initialise(rng, model, extras[1])
     y0 = observation(rng, model, x0, 1, extras[1])
 
-    xs = Vector{eltype(x0)}(undef, T)
-    ys = Vector{eltype(y0)}(undef, T)
+    xs = Vector{typeof(x0)}(undef, T)
+    ys = Vector{typeof(y0)}(undef, T)
 
     xs[1] = x0
     ys[1] = y0
