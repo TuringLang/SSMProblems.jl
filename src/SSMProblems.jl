@@ -24,7 +24,7 @@ abstract type LatentDynamics end
 """
     initialise(
         rng::AbstractRNG, 
-        dynamics::LatentDynamics;
+        dynamics::LatentDynamics,
         extra
     )
 
@@ -34,8 +34,8 @@ function initialise end
 
 """
     initialisation_logdensity(
-        dynamics::LatentDynamics
-        state;
+        dynamics::LatentDynamics,
+        state,
         extra
     )
 
@@ -45,7 +45,7 @@ function initialisation_logdensity end
 
 """
     initialise_distribution(
-        dynamics::LatentDynamics;
+        dynamics::LatentDynamics,
         extra
     )
 
@@ -56,7 +56,7 @@ function initialisation_distribution end
 """
     transition(
         rng::AbstractRNG, 
-        dynamics::LatentDynamics;
+        dynamics::LatentDynamics,
         state,
         step,
         extra
@@ -68,9 +68,9 @@ function transition end
 
 """
     transition_logdensity(
-        dynamics::LatentDynamics
-        next_state;
+        dynamics::LatentDynamics,
         state,
+        next_state,
         step,
         extra
     )
@@ -81,7 +81,7 @@ function transition_logdensity end
 
 """
     transition_distribution(
-        dynamics::LatentDynamics;
+        dynamics::LatentDynamics,
         state,
         step,
         extra
@@ -106,7 +106,7 @@ abstract type ObservationProcess end
 """
     observation(
         rng::AbstractRNG, 
-        process::ObservationProcess;
+        process::ObservationProcess,
         state,
         step,
         extra
@@ -118,9 +118,9 @@ function observation end
 
 """
     observation_logdensity(
-        process::ObservationProcess;
-        observation,
+        process::ObservationProcess,
         state,
+        observation,
         step,
         extra
     )
@@ -132,7 +132,7 @@ function observation_logdensity end
 
 """
     observation_distribution(
-        process::ObservationProcess;
+        process::ObservationProcess,
         state,
         step,
         extra
@@ -165,34 +165,34 @@ end
 
 # SSM-level methods simply call the corresponding methods of the latent dynamics and
 # observation process
-function initialise(rng::AbstractRNG, model::StateSpaceModel; extra...)
-    return initialise(rng, model.latent_dynamics; extra...)
+function initialise(rng::AbstractRNG, model::StateSpaceModel, extra)
+    return initialise(rng, model.latent_dynamics, extra)
 end
-function initialisation_logdensity(model::StateSpaceModel; extra...)
-    return initialisation_logdensity(model.latent_dynamics; extra...)
+function initialisation_logdensity(model::StateSpaceModel, extra)
+    return initialisation_logdensity(model.latent_dynamics, extra)
 end
-function initialisation_distribution(model::StateSpaceModel; extra...)
-    return initialisation_distribution(model.latent_dynamics; extra...)
+function initialisation_distribution(model::StateSpaceModel, extra)
+    return initialisation_distribution(model.latent_dynamics, extra)
 end
-function transition(rng::AbstractRNG, model::StateSpaceModel; state, step, extra...)
-    return transition(rng, model.latent_dynamics; state, step, extra...)
+function transition(rng::AbstractRNG, model::StateSpaceModel, state, step, extra)
+    return transition(rng, model.latent_dynamics, state, step, extra)
 end
-function transition_logdensity(model::StateSpaceModel; next_state, state, step, extra...)
-    return transition_logdensity(model.latent_dynamics; next_state, state, step, extra...)
+function transition_logdensity(model::StateSpaceModel, state, next_state, step, extra)
+    return transition_logdensity(model.latent_dynamics, state, next_state, step, extra)
 end
-function transition_distribution(model::StateSpaceModel; state, step, extra...)
-    return transition_distribution(model.latent_dynamics; state, step, extra...)
+function transition_distribution(model::StateSpaceModel, state, step, extra)
+    return transition_distribution(model.latent_dynamics, state, step, extra)
 end
-function observation(rng::AbstractRNG, model::StateSpaceModel; state, step, extra...)
-    return observation(rng, model.observation_process; state, step, extra...)
+function observation(rng::AbstractRNG, model::StateSpaceModel, state, step, extra)
+    return observation(rng, model.observation_process, state, step, extra)
 end
-function observation_logdensity(model::StateSpaceModel; observation, state, step, extra...)
+function observation_logdensity(model::StateSpaceModel, state, observation, step, extra)
     return observation_logdensity(
-        model.observation_process; observation, state, step, extra...
+        model.observation_process, state, observation, step, extra
     )
 end
-function observation_distribution(model::StateSpaceModel; state, step, extra...)
-    return observation_distribution(model.observation_process; state, step, extra...)
+function observation_distribution(model::StateSpaceModel, state, step, extra)
+    return observation_distribution(model.observation_process, state, step, extra)
 end
 
 include("utils/distributions.jl")
