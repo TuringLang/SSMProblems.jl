@@ -1,22 +1,21 @@
-"""
-Particle-Marginal Metropolis-Hasting using Turing.jl and AdvancedPS.jl.
+# # Particle-Marginal Metropolis-Hasting
 
-This script demonstrates how the SSMProblems interface can be used with AdvancedPS.jl and
+
+# This script demonstrates how the SSMProblems interface can be used with AdvancedPS.jl and
 Turing.jl to perform particle-marginal Metropolis-Hastings as introduced in Andrieu et al.
 (2010).
 
-We test this algorithm on a simple linear Gaussian state-space model with an unknown drift
+# We test this algorithm on a simple linear Gaussian state-space model with an unknown drift
 parameter. This drift parameter can be included in an augmented state vector and filtered
 exactly using a Kalman filter, allowing us to compare the PMMH results to the ground truth
 posterior.
 
-The dynamics of the model are defined as follows:
+# The dynamics of the model are defined as follows:
 
-    x_t = x_{t-1} + b + w_t, w_t ~ N(0, σ_x^2)
-    y_t = x_t + v_t, v_t ~ N(0, σ_y^2)
+#    x_t = x_{t-1} + b + w_t, w_t ~ N(0, σ_x^2)
+#    y_t = x_t + v_t, v_t ~ N(0, σ_y^2)
 
-The augmented model has state vector z_t = [x_t, b_t].
-"""
+# The augmented model has state vector z_t = [x_t, b_t].
 
 using AdvancedPS
 using AdvancedMH
