@@ -90,7 +90,7 @@ There are a few things to note here:
   the model is time-homogeneous, these are not required in the function bodies.
 - Every function takes an `extra` argument. This is part of the "secret sauce"
   of `SSMProblems` that allows it to flexibly represent more exotic models
-  without any performance penalty. You can read more about it [here](\extras).
+  without any performance penalty. You can read more about it [here](extras.md).
 - If your latent dynamics and observation process cannot be represented as a
   `Distribution` object, you may implement specific methods for sampling and
   log-density evaluation as documented below.
