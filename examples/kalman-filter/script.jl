@@ -1,24 +1,27 @@
-# # Kalman filter for a linear SSM 
+"""Implementation of a Kalman filter using the SSMProblems.jl interface."""
+
 using AbstractMCMC
 using Distributions
 using LinearAlgebra
 using PDMats
 using Plots
 using Random
+using UnPack
+
 using SSMProblems
 
 ##########################
 #### MODEL DEFINITION ####
 ##########################
 
-struct LinearGaussianLatentDynamics{T<:Real} <: LatentDynamics
-    """
-        Latent dynamics for a linear Gaussian state space model.
+"""
+Latent dynamics for a linear Gaussian state space model.
 
-        The model is defined by the following equations:
-        x[0] = z + ϵ,                 ϵ    ∼ N(0, P)
-        x[k] = Φx[k-1] + b + w[k],    w[k] ∼ N(0, Q)
-    """
+The model is defined by the following equations:
+x[0] = z + ϵ,                 ϵ    ∼ N(0, P)
+x[k] = Φx[k-1] + b + w[k],    w[k] ∼ N(0, Q)
+"""
+struct LinearGaussianLatentDynamics{T<:Real} <: LatentDynamics
     z::Vector{T}
     P::PDMat{T}
     Φ::Matrix{T}
@@ -30,13 +33,13 @@ function LinearGaussianLatentDynamics(z::Vector, P::Matrix, Φ::Matrix, b::Vecto
     return LinearGaussianLatentDynamics(z, PDMat(P), Φ, b, PDMat(Q))
 end
 
-struct LinearGaussianObservationProcess{T<:Real} <: ObservationProcess
-    """
-        Observation process for a linear Gaussian state space model.
+"""
+    Observation process for a linear Gaussian state space model.
 
-        The model is defined by the following equation:
-        y[k] = Hx[k] + v[k],          v[k] ∼ N(0, R)
-    """
+    The model is defined by the following equation:
+    y[k] = Hx[k] + v[k],          v[k] ∼ N(0, R)
+"""
+struct LinearGaussianObservationProcess{T<:Real} <: ObservationProcess
     H::Matrix{T}
     R::PDMat{T}
 end
@@ -44,13 +47,14 @@ function LinearGaussianObservationProcess(H::Matrix, R::Matrix)
     return LinearGaussianObservationProcess(H, PDMat(R))
 end
 
-# Define general transition and observation distributions to be used in forward simulation
+# Define general transition and observation distributions to be used in forward simulation.
+# Since our model is homogenous (doesn't depend on control variables), we use `Nothing` for
+# the type of `extra`.
 function SSMProblems.initialisation_distribution(
     model::LinearGaussianLatentDynamics, extra::Nothing
 )
     return MvNormal(model.z, model.P)
 end
-
 function SSMProblems.transition_distribution(
     model::LinearGaussianLatentDynamics{T},
     state::AbstractVector{T},
@@ -59,7 +63,6 @@ function SSMProblems.transition_distribution(
 ) where {T}
     return MvNormal(model.Φ * state + model.b, model.Q)
 end
-
 function SSMProblems.observation_distribution(
     model::LinearGaussianObservationProcess{T},
     state::AbstractVector{T},
@@ -68,15 +71,6 @@ function SSMProblems.observation_distribution(
 ) where {T}
     return MvNormal(model.H * state, model.R)
 end
-
-# Define getter methods for Kalman filter parameters
-calc_z(model::LinearGaussianLatentDynamics, step::Int, extra::Nothing) = model.z
-calc_P(model::LinearGaussianLatentDynamics, step::Int, extra::Nothing) = model.P
-calc_Φ(model::LinearGaussianLatentDynamics, step::Int, extra::Nothing) = model.Φ
-calc_b(model::LinearGaussianLatentDynamics, step::Int, extra::Nothing) = model.b
-calc_Q(model::LinearGaussianLatentDynamics, step::Int, extra::Nothing) = model.Q
-calc_H(model::LinearGaussianObservationProcess, step::Int, extra::Nothing) = model.H
-calc_R(model::LinearGaussianObservationProcess, step::Int, extra::Nothing) = model.R
 
 #######################
 #### KALMAN FILTER ####
@@ -95,19 +89,15 @@ function AbstractMCMC.sample(
     ::KalmanFilter,
 )
     T = length(observations)
-    x_filts = Vector{typeof(z)}(undef, T)
-    P_filts = Vector{typeof(P)}(undef, T)
+    latent_type = only(typeof(model.latent_dynamics).parameters)
+    x_filts = Vector{Vector{latent_type}}(undef, T)
+    P_filts = Vector{Matrix{latent_type}}(undef, T)
+
+    # Extract parameters
+    @unpack z, P, Φ, b, Q = model.latent_dynamics
+    @unpack H, R = model.observation_process
 
     for t in 1:T
-        # Extract parameters
-        z = calc_z(model.latent_dynamics, t, extras[t])
-        P = calc_P(model.latent_dynamics, t, extras[t])
-        Φ = calc_Φ(model.latent_dynamics, t, extras[t])
-        b = calc_b(model.latent_dynamics, t, extras[t])
-        Q = calc_Q(model.latent_dynamics, t, extras[t])
-        H = calc_H(model.observation_process, t, extras[t])
-        R = calc_R(model.observation_process, t, extras[t])
-
         # Prediction step
         x_pred, P_pred = if t == 1
             z, P
@@ -128,10 +118,12 @@ function AbstractMCMC.sample(
     return x_filts, P_filts
 end
 
+# If no extras are provided, assume they are all `nothing`
 function AbstractMCMC.sample(
     model::StateSpaceModel, observations::AbstractVector, algorithm
 )
-    return sample(model, observations, [nothing for _ in 1:length(observations)], algorithm)
+    extras = fill(nothing, length(observations))
+    return sample(model, observations, extras, algorithm)
 end
 
 ##################################
@@ -161,6 +153,14 @@ xs, ys = sample(rng, model, T)
 x_filts, P_filts = AbstractMCMC.sample(model, ys, KalmanFilter())
 
 # Plot trajectory for first dimension
-p = plot(1:T, first.(xs); label="Truth")
+p = plot(; title="First Dimension Kalman Filter Estimates", xlabel="Step", ylabel="Value")
+plot!(p, 1:T, first.(xs); label="Truth")
 scatter!(p, 1:T, first.(ys); label="Observations")
-plot!(p, 1:T, first.(x_filts); ribbon=sqrt.(first.(P_filts)), label="Filtered")
+plot!(
+    p,
+    1:T,
+    first.(x_filts);
+    ribbon=sqrt.(first.(P_filts)),
+    label="Filtered (±1σ)",
+    fillalpha=0.2,
+)
