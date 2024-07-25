@@ -5,6 +5,7 @@ module SSMProblems
 
 using AbstractMCMC: AbstractMCMC
 import Random: AbstractRNG
+import Distributions: logpdf
 
 export LatentDynamics, ObservationProcess, AbstractStateSpaceModel, StateSpaceModel
 
