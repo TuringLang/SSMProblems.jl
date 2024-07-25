@@ -4,10 +4,12 @@ A unified interface to define state space models in the context of particle MCMC
 module SSMProblems
 
 using AbstractMCMC: AbstractMCMC
-import Random: AbstractRNG
+import Random: AbstractRNG, default_rng
 import Distributions: logpdf
 
 export LatentDynamics, ObservationProcess, AbstractStateSpaceModel, StateSpaceModel
+
+include("utils/helpers.jl")
 
 """
     Latent dynamics of a state space model.
@@ -168,7 +170,9 @@ end
 
 # SSM-level methods simply call the corresponding methods of the latent dynamics and
 # observation process
-function initialise(rng::AbstractRNG, model::StateSpaceModel, extra)
+@default_arg function initialise(
+    rng::AbstractRNG=default_rng(), model::StateSpaceModel, extra
+)
     return initialise(rng, model.latent_dynamics, extra)
 end
 function initialisation_logdensity(model::StateSpaceModel, extra)
@@ -177,7 +181,9 @@ end
 function initialisation_distribution(model::StateSpaceModel, extra)
     return initialisation_distribution(model.latent_dynamics, extra)
 end
-function transition(rng::AbstractRNG, model::StateSpaceModel, state, step, extra)
+@default_arg function transition(
+    rng::AbstractRNG=default_rng(), model::StateSpaceModel, state, step, extra
+)
     return transition(rng, model.latent_dynamics, state, step, extra)
 end
 function transition_logdensity(model::StateSpaceModel, state, next_state, step, extra)
@@ -186,7 +192,9 @@ end
 function transition_distribution(model::StateSpaceModel, state, step, extra)
     return transition_distribution(model.latent_dynamics, state, step, extra)
 end
-function observation(rng::AbstractRNG, model::StateSpaceModel, state, step, extra)
+@default_arg function observation(
+    rng::AbstractRNG=default_rng(), model::StateSpaceModel, state, step, extra
+)
     return observation(rng, model.observation_process, state, step, extra)
 end
 function observation_logdensity(model::StateSpaceModel, state, observation, step, extra)
