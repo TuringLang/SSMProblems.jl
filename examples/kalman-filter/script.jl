@@ -105,17 +105,17 @@ function AbstractMCMC.sample(
     x_filts = Vector{Vector{latent_type}}(undef, T)
     P_filts = Vector{Matrix{latent_type}}(undef, T)
 
-    @unpack z, P, Φ, b, Q = model.latent_dynamics # Extract parameters
+    @unpack z, P, Φ, b, Q = model.latent_dynamics  ## Extract parameters
     @unpack H, R = model.observation_process
 
     for t in 1:T
         x_pred, P_pred = if t == 1
             z, P
         else
-            Φ * x_filts[t - 1] + b, Φ * P_filts[t - 1] * Φ' + Q # Prediction step
+            Φ * x_filts[t - 1] + b, Φ * P_filts[t - 1] * Φ' + Q  ## Prediction step
         end
 
-        y = observations[t]  # Update step
+        y = observations[t]   ## Update step
         K = P_pred * H' / (H * P_pred * H' + R)
         x_filt = x_pred + K * (y - H * x_pred)
         P_filt = P_pred - K * H * P_pred
