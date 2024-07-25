@@ -126,6 +126,6 @@ For more thorough examples, see the provided example scripts.
 
 ### Interface
 ```@autodocs
-Modules = [SSMProblems, SSMProblems.Utils]
+Modules = [SSMProblems]
 Order   = [:type, :function, :module]
 ```
