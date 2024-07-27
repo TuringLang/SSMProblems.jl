@@ -3,9 +3,7 @@
 import AbstractMCMC: sample
 export sample
 
-@default_arg function sample(
-    rng::AbstractRNG=default_rng(), model::AbstractStateSpaceModel, extras::AbstractVector
-)
+function sample(rng::AbstractRNG, model::AbstractStateSpaceModel, extras::AbstractVector)
     T = length(extras)
 
     x0 = initialise(rng, model, extras[1])
@@ -24,10 +22,14 @@ export sample
 
     return xs, ys
 end
+function sample(model::AbstractStateSpaceModel, extras::AbstractVector)
+    return sample(default_rng(), model, extras)
+end
 
-@default_arg function sample(
-    rng::AbstractRNG=default_rng(), model::AbstractStateSpaceModel, T::Integer
-)
+function sample(rng::AbstractRNG, model::AbstractStateSpaceModel, T::Integer)
     extras = [nothing for _ in 1:T]
     return sample(rng, model, extras)
+end
+function sample(model::AbstractStateSpaceModel, T::Integer)
+    return sample(default_rng(), model, T)
 end

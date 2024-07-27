@@ -9,8 +9,6 @@ import Distributions: logpdf
 
 export LatentDynamics, ObservationProcess, AbstractStateSpaceModel, StateSpaceModel
 
-include("utils/helpers.jl")
-
 """
     Latent dynamics of a state space model.
 
@@ -168,21 +166,21 @@ end
 
 # SSM-level methods simply call the corresponding methods of the latent dynamics and
 # observation process
-@default_arg function initialise(
-    rng::AbstractRNG=default_rng(), model::StateSpaceModel, extra
-)
+function initialise(rng::AbstractRNG, model::StateSpaceModel, extra)
     return initialise(rng, model.latent_dynamics, extra)
 end
+initialise(model::StateSpaceModel, extra) = initialise(default_rng(), model, extra)
 function initialisation_logdensity(model::StateSpaceModel, extra)
     return initialisation_logdensity(model.latent_dynamics, extra)
 end
 function initialisation_distribution(model::StateSpaceModel, extra)
     return initialisation_distribution(model.latent_dynamics, extra)
 end
-@default_arg function transition(
-    rng::AbstractRNG=default_rng(), model::StateSpaceModel, state, step, extra
-)
+function transition(rng::AbstractRNG, model::StateSpaceModel, state, step, extra)
     return transition(rng, model.latent_dynamics, state, step, extra)
+end
+function transition(model::StateSpaceModel, state, step, extra)
+    return transition(default_rng(), model, state, step, extra)
 end
 function transition_logdensity(model::StateSpaceModel, state, next_state, step, extra)
     return transition_logdensity(model.latent_dynamics, state, next_state, step, extra)
@@ -190,10 +188,11 @@ end
 function transition_distribution(model::StateSpaceModel, state, step, extra)
     return transition_distribution(model.latent_dynamics, state, step, extra)
 end
-@default_arg function observation(
-    rng::AbstractRNG=default_rng(), model::StateSpaceModel, state, step, extra
-)
+function observation(rng::AbstractRNG, model::StateSpaceModel, state, step, extra)
     return observation(rng, model.observation_process, state, step, extra)
+end
+function observation(model::StateSpaceModel, state, step, extra)
+    return observation(default_rng(), model, state, step, extra)
 end
 function observation_logdensity(model::StateSpaceModel, state, observation, step, extra)
     return observation_logdensity(

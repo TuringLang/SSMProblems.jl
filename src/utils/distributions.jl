@@ -2,28 +2,29 @@
     Default sampling and log-density methods when corresponding distributions are defined.
 """
 
-@default_arg function initialise(
-    rng::AbstractRNG=default_rng(), dynamics::LatentDynamics, extra
-)
+function initialise(rng::AbstractRNG, dynamics::LatentDynamics, extra)
     return rand(rng, initialisation_distribution(dynamics, extra))
 end
+initialise(dynamics::LatentDynamics, extra) = initialise(default_rng(), dynamics, extra)
 function initialisation_logdensity(dynamics::LatentDynamics, state, extra)
     return logpdf(initialisation_distribution(dynamics, extra), state)
 end
 
-@default_arg function transition(
-    rng::AbstractRNG=default_rng(), dynamics::LatentDynamics, state, step, extra
-)
+function transition(rng::AbstractRNG, dynamics::LatentDynamics, state, step, extra)
     return rand(rng, transition_distribution(dynamics, state, step, extra))
+end
+function transition(dynamics::LatentDynamics, state, step, extra)
+    return transition(default_rng(), dynamics, state, step, extra)
 end
 function transition_logdensity(dynamics::LatentDynamics, state, next_state, step, extra)
     return logpdf(transition_distribution(dynamics, state, step, extra), next_state)
 end
 
-@default_arg function observation(
-    rng::AbstractRNG=default_rng(), process::ObservationProcess, state, step, extra
-)
+function observation(rng::AbstractRNG, process::ObservationProcess, state, step, extra)
     return rand(rng, observation_distribution(process, state, step, extra))
+end
+function observation(process::ObservationProcess, state, step, extra)
+    return observation(default_rng(), process, state, step, extra)
 end
 function observation_logdensity(
     process::ObservationProcess, state, observation, step, extra
