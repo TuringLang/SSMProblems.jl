@@ -47,7 +47,7 @@ We can consider a state space model as being made up of two components:
 - A latent Markov chain, describing the evolution of the latent state
 - An observation process, describing the relationship between the latent states and the observations
 
-Through this lense, we see that the distributions ``f_0``, ``f`` fully describe the latent Markov chain, whereas ``g`` describes the observation process.
+Through this lens, we see that the distributions ``f_0``, ``f`` fully describe the latent Markov chain, whereas ``g`` describes the observation process.
 
 A user of `SSMProblems` may define these three distributions directly.
 Alternatively, they can define a subset of methods for sampling and evaluating
@@ -62,18 +62,18 @@ using SSMProblems
 
 struct SimpleLatentDynamics <: LatentDynamics end
 
-function initialisation_distribution(rng::AbstractRNG, dyn::SimpleLatentDynamics, extra::Nothing)
+function distribution(rng::AbstractRNG, dyn::SimpleLatentDynamics, extra::Nothing)
     return Normal(0.0, 1.0)
 end
 
-function transition_distribution(rng::AbstractRNG, dyn::SimpleLatentDynamics, state::Float64, ::Int, extra::Nothing)
+function distribution(rng::AbstractRNG, dyn::SimpleLatentDynamics, step::Int state::Float64, extra::Nothing)
     return Normal(state, 0.1)
 end
 
 struct SimpleObservationProcess <: ObservationProcess end
 
-function observation_distribution(
-    obs::SimpleObservationPRocess, state::Float64, observation::Float64, ::Int, extra::Nothing
+function distribution(
+    obs::SimpleObservationPRocess, state::Float64, step::Int, observation::Float64, extra::Nothing
 )
     return Normal(state, 0.5)
 end
@@ -86,7 +86,9 @@ model = StateSpaceModel(dyn, obs)
 
 There are a few things to note here:
 
-- The omitted integer parameters represent the time step `t` of the state. Since
+- Two methods must be defined for the `LatentDynamics`, one containing
+  `step`/`state` arguments and use for transitioning, and one without these,
+  used for initialisation.
   the model is time-homogeneous, these are not required in the function bodies.
 - Every function takes an `extra` argument. This is part of the "secret sauce"
   of `SSMProblems` that allows it to flexibly represent more exotic models
@@ -95,29 +97,20 @@ There are a few things to note here:
   `Distribution` object, you may implement specific methods for sampling and
   log-density evaluation as documented below.
 
-These distribution definitions are used to define the following functions for
-simulating and evaluating log-densities for the model:
-
-- `initialise`
-- `initialisation_logdensity`
-- `transition`
-- `transition_logdensity`
-- `observe`
-- `observation_logdensity`
-
-Package users can then interact with the state space model through these functions.
+These distribution definitions are used to define `simulate` and `logdensity`
+methods for the latent dynamics and observation process. Package users can then interact with the state space model through these functions.
 
 For example, a bootstrap filter targeting the filtering distribution ``p(x_t | y_{0:t})`` using `N` particles would roughly follow:
 
 ```julia
-dyn, obs = model.latent_dynamics, model.observation_process
+dyn, obs = model.dyn, model.obs
 
 for (i, observation) in enumerate(observations)
     idx = resample(rng, logweights)
     particles = particles[idx]
     for i in 1:N
-        particles[i] = transition(rng, dyn, particles[i], i, nothing)
-        logweights[i] += observation_logdensity(model, particles[i], observation, i, nothing)
+        particles[i] = simulate(rng, dyn, particles[i], i, nothing)
+        logweights[i] += logdensity(obs, particles[i], observation, i, nothing)
     end
 end
 ```
