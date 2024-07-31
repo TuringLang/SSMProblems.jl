@@ -45,7 +45,7 @@ p(x_{0:T}, y_{0:T}) = f_0(x_0) \prod_t g(y_t | x_t) f(x_t | x_{t-1}).
 We can consider a state space model as being made up of two components:
 
 - A latent Markov chain describing the evolution of the latent state
-- An observation process, describing the relationship between the latent states and the observations
+- An observation process describing the relationship between the latent states and the observations
 
 Through this lens, we see that the distributions ``f_0``, ``f`` fully describe the latent Markov chain, whereas ``g`` describes the observation process.
 
