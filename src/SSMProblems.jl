@@ -115,7 +115,7 @@ abstract type ObservationProcess end
 
     See also [`ObservationProcess`](@ref).
 """
-function observation end
+function simulate end
 
 """
     logdensity(
@@ -130,8 +130,7 @@ function observation end
 
     See also [`ObservationProcess`](@ref).
 """
-
-function observation_logdensity end
+function logdensity end
 
 """
     distribution(
@@ -151,6 +150,7 @@ function observation_logdensity end
     # Returns
     - `Distributions.Distribution`: The distribution of the observation.
 """
+function distribution end
 
 """
     An abstract type for state space models.
