@@ -84,8 +84,8 @@ struct KalmanFilter end
 # alias for an SSM with linear Gaussian latent dynamics and observation process, which will
 # be used to dispatch to the correct method.
 
-const LinearGaussianSSM = StateSpaceModel{
-    <:LinearGaussianLatentDynamics,<:LinearGaussianObservationProcess
+const LinearGaussianSSM{T} = StateSpaceModel{
+    <:LinearGaussianLatentDynamics{T},<:LinearGaussianObservationProcess{T}
 }
 
 # We then define a method for the `sample` function. This is a standardised interface which
@@ -93,15 +93,14 @@ const LinearGaussianSSM = StateSpaceModel{
 # observations and any extras.
 
 function AbstractMCMC.sample(
-    model::LinearGaussianSSM,
+    model::LinearGaussianSSM{U},
     ::KalmanFilter,
     observations::AbstractVector,
     extras::AbstractVector,
-)
+) where {U}
     T = length(observations)
-    latent_type = only(typeof(model.dyn).parameters)
-    x_filts = Vector{Vector{latent_type}}(undef, T)
-    P_filts = Vector{Matrix{latent_type}}(undef, T)
+    x_filts = Vector{Vector{U}}(undef, T)
+    P_filts = Vector{Matrix{U}}(undef, T)
 
     @unpack z, P, Φ, b, Q = model.dyn  ## Extract parameters
     @unpack H, R = model.obs
