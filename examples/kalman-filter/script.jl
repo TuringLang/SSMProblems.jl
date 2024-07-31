@@ -53,12 +53,10 @@ end
 # be preferred in this linear Gaussian case, it may be of interest to compare the sampling
 # performance with a general particle filter.
 
-function SSMProblems.initialisation_distribution(
-    model::LinearGaussianLatentDynamics, extra::Nothing
-)
+function SSMProblems.distribution(model::LinearGaussianLatentDynamics, extra::Nothing)
     return MvNormal(model.z, model.P)
 end
-function SSMProblems.transition_distribution(
+function SSMProblems.distribution(
     model::LinearGaussianLatentDynamics{T},
     state::AbstractVector{T},
     step::Int,
@@ -66,7 +64,7 @@ function SSMProblems.transition_distribution(
 ) where {T}
     return MvNormal(model.Φ * state + model.b, model.Q)
 end
-function SSMProblems.observation_distribution(
+function SSMProblems.distribution(
     model::LinearGaussianObservationProcess{T},
     state::AbstractVector{T},
     step::Int,
@@ -101,12 +99,12 @@ function AbstractMCMC.sample(
     extras::AbstractVector,
 )
     T = length(observations)
-    latent_type = only(typeof(model.latent_dynamics).parameters)
+    latent_type = only(typeof(model.dyn).parameters)
     x_filts = Vector{Vector{latent_type}}(undef, T)
     P_filts = Vector{Matrix{latent_type}}(undef, T)
 
-    @unpack z, P, Φ, b, Q = model.latent_dynamics  ## Extract parameters
-    @unpack H, R = model.observation_process
+    @unpack z, P, Φ, b, Q = model.dyn  ## Extract parameters
+    @unpack H, R = model.obs
 
     for t in 1:T
         x_pred, P_pred = if t == 1

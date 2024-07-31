@@ -2,32 +2,30 @@
     Default sampling and log-density methods when corresponding distributions are defined.
 """
 
-function initialise(rng::AbstractRNG, dynamics::LatentDynamics, extra)
-    return rand(rng, initialisation_distribution(dynamics, extra))
+function simulate(rng::AbstractRNG, dynamics::LatentDynamics, extra)
+    return rand(rng, distribution(dynamics, extra))
 end
-initialise(dynamics::LatentDynamics, extra) = initialise(default_rng(), dynamics, extra)
-function initialisation_logdensity(dynamics::LatentDynamics, state, extra)
-    return logpdf(initialisation_distribution(dynamics, extra), state)
-end
-
-function transition(rng::AbstractRNG, dynamics::LatentDynamics, state, step, extra)
-    return rand(rng, transition_distribution(dynamics, state, step, extra))
-end
-function transition(dynamics::LatentDynamics, state, step, extra)
-    return transition(default_rng(), dynamics, state, step, extra)
-end
-function transition_logdensity(dynamics::LatentDynamics, state, next_state, step, extra)
-    return logpdf(transition_distribution(dynamics, state, step, extra), next_state)
+simulate(dynamics::LatentDynamics, extra) = simulate(default_rng(), dynamics, extra)
+function logdensity(dynamics::LatentDynamics, state, extra)
+    return logpdf(distribution(dynamics, extra), state)
 end
 
-function observation(rng::AbstractRNG, process::ObservationProcess, state, step, extra)
-    return rand(rng, observation_distribution(process, state, step, extra))
+function simulate(rng::AbstractRNG, dynamics::LatentDynamics, state, step, extra)
+    return rand(rng, distribution(dynamics, state, step, extra))
 end
-function observation(process::ObservationProcess, state, step, extra)
-    return observation(default_rng(), process, state, step, extra)
+function simulate(dynamics::LatentDynamics, state, step, extra)
+    return simulate(default_rng(), dynamics, state, step, extra)
 end
-function observation_logdensity(
-    process::ObservationProcess, state, observation, step, extra
-)
-    return logpdf(observation_distribution(process, state, step, extra), observation)
+function logdensity(dynamics::LatentDynamics, state, next_state, step, extra)
+    return logpdf(distribution(dynamics, state, step, extra), next_state)
+end
+
+function simulate(rng::AbstractRNG, process::ObservationProcess, state, step, extra)
+    return rand(rng, distribution(process, state, step, extra))
+end
+function simulate(process::ObservationProcess, state, step, extra)
+    return simulate(default_rng(), process, state, step, extra)
+end
+function logdensity(process::ObservationProcess, state, observation, step, extra)
+    return logpdf(distribution(process, state, step, extra), observation)
 end
