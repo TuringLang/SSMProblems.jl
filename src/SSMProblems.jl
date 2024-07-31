@@ -106,8 +106,8 @@ abstract type ObservationProcess end
     simulate(
         rng::AbstractRNG, 
         process::ObservationProcess,
-        state,
         step,
+        state,
         extra
     )
 
@@ -120,9 +120,9 @@ function simulate end
 """
     logdensity(
         process::ObservationProcess,
+        step,
         state,
         observation,
-        step,
         extra
     )
 
@@ -135,8 +135,8 @@ function logdensity end
 """
     distribution(
         process::ObservationProcess,
-        state,
         step,
+        state,
         extra
     )
 

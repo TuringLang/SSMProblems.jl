@@ -73,7 +73,7 @@ end
 struct SimpleObservationProcess <: ObservationProcess end
 
 function distribution(
-    obs::SimpleObservationPRocess, state::Float64, step::Int, observation::Float64, extra::Nothing
+    obs::SimpleObservationPRocess, step::Int, state::Float64, observation::Float64, extra::Nothing
 )
     return Normal(state, 0.5)
 end
@@ -106,11 +106,11 @@ For example, a bootstrap filter targeting the filtering distribution ``p(x_t | y
 dyn, obs = model.dyn, model.obs
 
 for (i, observation) in enumerate(observations)
-    idx = resample(rng, logweights)
+    idx = resample(rng, log_weights)
     particles = particles[idx]
     for i in 1:N
-        particles[i] = simulate(rng, dyn, particles[i], i, nothing)
-        logweights[i] += logdensity(obs, particles[i], observation, i, nothing)
+        particles[i] = simulate(rng, dyn, i, particles[i], nothing)
+        log_weights[i] += logdensity(obs, i, particles[i], observation, nothing)
     end
 end
 ```
