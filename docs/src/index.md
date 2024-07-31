@@ -14,13 +14,13 @@ In the `julia` REPL:
 main objective is to provide a consistent interface for filtering and smoothing
 algorithms to interact with.
 
-Consider a standard (Markovian) state space model from[^Murray]:
+Consider a standard (Markovian) state-space model from[^Murray]:
 ![state space model](images/state_space_model.png)
 
 [^Murray]:
     > Murray, Lawrence & Lee, Anthony & Jacob, Pierre. (2013). Rethinking resampling in the particle filter on graphics processing units.
 
-The model is fully specified by the following three distributions:
+The following three distributions fully specify the model:
 
 - The __initialisation__ distribution, ``f_0``, for the initial latent state ``X_0``
 - The __transition__ distribution, ``f``, for the latent state ``X_t`` given the previous ``X_{t-1}``
@@ -44,8 +44,8 @@ p(x_{0:T}, y_{0:T}) = f_0(x_0) \prod_t g(y_t | x_t) f(x_t | x_{t-1}).
 
 We can consider a state space model as being made up of two components:
 
-- A latent Markov chain, describing the evolution of the latent state
-- An observation process, describing the relationship between the latent states and the observations
+- A latent Markov chain describing the evolution of the latent state
+- An observation process describing the relationship between the latent states and the observations
 
 Through this lens, we see that the distributions ``f_0``, ``f`` fully describe the latent Markov chain, whereas ``g`` describes the observation process.
 
@@ -66,7 +66,7 @@ function distribution(rng::AbstractRNG, dyn::SimpleLatentDynamics, extra::Nothin
     return Normal(0.0, 1.0)
 end
 
-function distribution(rng::AbstractRNG, dyn::SimpleLatentDynamics, step::Int state::Float64, extra::Nothing)
+function distribution(rng::AbstractRNG, dyn::SimpleLatentDynamics, step::Int, state::Float64, extra::Nothing)
     return Normal(state, 0.1)
 end
 
@@ -78,7 +78,7 @@ function distribution(
     return Normal(state, 0.5)
 end
 
-# Construct a SSM from the components
+# Construct an SSM from the components
 dyn = SimpleLatentDynamics()
 obs = SimpleObservationProcess()
 model = StateSpaceModel(dyn, obs)
