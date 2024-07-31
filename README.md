@@ -5,48 +5,71 @@
 [![Build Status](https://github.com/TuringLang/AdvancedPS.jl/workflows/CI/badge.svg?branch=master)](https://github.com/TuringLang/SSMProblems.jl/actions?query=workflow%3ACI%20branch%3Amaster)
 [![Code Style: Blue](https://img.shields.io/badge/code%20style-blue-4495d1.svg)](https://github.com/invenia/BlueStyle)
 
-A minimalist framework to define State Space Models (SSM) and their associated logdensities to feed into inference algorithms.
+A minimalist framework to define state space models (SSMs) and their associated
+log-densities to feed into inference algorithms.
 
-### Basic interface
-This package defines the basic interface needed to run inference on State Space Models as the following:
+## Basic interface
+
+This package defines the basic interface needed to run inference on state space
+as the following:
+
 ```julia
-# State wrapper
-abstract type AbstractStateSpaceModel end
+# Wrapper for model dynamics and observation process
+abstract type LatentDynamics end
+abstract type ObservationDynamics end
 
-"""
-Emits a new state candidate from latent dynamics
-"""
-function transition!! end
+# Define the initialisation/transition distribution for the latent dynamics
+function distribution(dyn::LatentDynamics, ...) end
 
-"""
-Scores the emission transition
-"""
-function emission_logdensity end
+# Define the observation distribution
+function distribution(obs::ObservationProcess, ...) end
 
-
+# Combine the latent dynamics and observation process to form a SSM
+model = StateSpaceModel(dyn, obs)
 ```
 
-### Linear Gaussian State Space Model
-As a concrete example, the following snippet of pseudo-code defines a linear Gaussian state space model:
+For specific details on the interface, please refer to the package [documentation](https://turinglang.github.io/SSMProblems.jl/dev).
+
+## Linear Gaussian State Space Model
+
+As a concrete example, the following snippet of pseudo-code defines a linear
+Gaussian state space model. Note the inclusion of the `extra` parameter in each
+method definition. This is a key feature of the SSMProblems interface which
+allows for the definition of more complex models in a performant fashion,
+explained in more details in the package documentation.
+
 ```julia
-using SSMProblems, Distributions, Random
+using SSMProblems, Distributions
 
-# Model definition
-T, sig_u, sig_v  = 10, 0.1, 0.2
-observations = rand(T)
+# Model parameters
+sig_u, sig_v  = 0.1, 0.2
 
-struct LinearSSM <: AbstractStateSpaceModel end
+struct LinearGaussianLatentDynamics <: LatentDynamics end
 
-# Model dynamics
-function transition!!(rng::AbstractRNG, model::LinearSSM)
-    return rand(rng, Normal(0, 1))
+# Initialisation distribution
+function distribution(dyn::LinearGaussianLatentDynamics, extra::Nothing)
+    return Normal(0.0, sig_u)
 end
 
-function transition!!(rng::AbstractRNG, model::LinearSSM, state::Float64, ::Int)
-    return rand(rng, Normal(state, 1))
+# Transition distribution
+function distribution(
+    dyn::LinearGaussianLatentDynamics,
+    step::Int,
+    state::Float64,
+    extra::Nothing
+)
+    return Normal(state, sig_u)
 end
 
-function emission_logdensity(model::LinearSSM, state::Float64, observation::Float64, ::Int)
-    return logpdf(Normal(0, 1), observation)
+struct LinearGaussianObservationProcess <: ObservationProcess end
+
+# Observation distribution
+function distribution(
+    obs::LinearGaussianObservationProcess,
+    step::Int,
+    state::Float64,
+    extra::Nothing
+)
+    return Normal(state, sig_v)
 end
 ```
