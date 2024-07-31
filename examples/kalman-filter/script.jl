@@ -1,44 +1,145 @@
-# # Kalman filter for a linear SSM 
-using GaussianDistributions: correct, Gaussian
+# # Kalman Filter
+#
+# This example implements a Kalman filter for a linear Gaussian state space model using the
+# SSMProblems interface. 
+
+using AbstractMCMC
+using Distributions
 using LinearAlgebra
-using Statistics
 using Plots
 using Random
+using UnPack
+
 using SSMProblems
 
-# Model definition
-struct LinearGaussianSSM <: AbstractStateSpaceModel
-    """
-        A state space model with linear dynamics and Gaussian noise.
-        The model is defined by the following equations:
-        x[0] = z + ϵ,                 ϵ    ∼ N(0, P)
-        x[k] = Φx[k-1] + b + w[k],    w[k] ∼ N(0, Q)
-        y[k] = Hx[k] + v[k],          v[k] ∼ N(0, R)
-    """
-    z::Vector{Float64}
-    P::Matrix{Float64}
-    Φ::Matrix{Float64}
-    b::Vector{Float64}
-    Q::Matrix{Float64}
-    H::Matrix{Float64}
-    R::Matrix{Float64}
+# ## Model Definition
+
+# We start by defining structs to store the paramaters for our specific latent dynamics and
+# observation process.
+#
+# The latent dynamics have the following form:
+# ```
+# x[0] = z + ϵ,                 ϵ    ∼ N(0, P)
+# x[k] = Φx[k-1] + b + w[k],    w[k] ∼ N(0, Q)
+# ```
+#
+# We store all of these paramaters in a struct.
+
+struct LinearGaussianLatentDynamics{T<:Real} <: LatentDynamics
+    z::Vector{T}
+    P::Matrix{T}
+    Φ::Matrix{T}
+    b::Vector{T}
+    Q::Matrix{T}
 end
 
-f0(model::LinearGaussianSSM) = Gaussian(model.z, model.P)
-f(x::Vector{Float64}, model::LinearGaussianSSM) = Gaussian(model.Φ * x + model.b, model.Q)
-g(y::Vector{Float64}, model::LinearGaussianSSM) = Gaussian(model.H * y, model.R)
+# Similarly, the observation process is defined by the following equation:
+# ```
+# y[k] = Hx[k] + v[k],          v[k] ∼ N(0, R)
+# ```
 
-function transition!!(rng::AbstractRNG, model::LinearGaussianSSM)
-    return Gaussian(model.z, model.P)
+struct LinearGaussianObservationProcess{T<:Real} <: ObservationProcess
+    H::Matrix{T}
+    R::Matrix{T}
 end
 
-function transition!!(rng::AbstractRNG, model::LinearGaussianSSM, state::Gaussian)
-    let Φ = model.Φ, Q = model.Q, μ = state.μ, Σ = state.Σ
-        return Gaussian(Φ * μ, Φ * Σ * Φ' + Q)
+# We then define general transition and observation distributions to be used in forward
+# simulation. Since our model is homogenous (doesn't depend on control variables), we use
+# `Nothing` for the type of `extra`.
+#
+# Even if we did not require forward simulation (e.g. we were given observations), it is
+# still useful to define these methods as they allow us to run a particle filter on our
+# model with no additional implementation required. Although a Kalman filter would generally
+# be preferred in this linear Gaussian case, it may be of interest to compare the sampling
+# performance with a general particle filter.
+
+function SSMProblems.distribution(model::LinearGaussianLatentDynamics, extra::Nothing)
+    return MvNormal(model.z, model.P)
+end
+function SSMProblems.distribution(
+    model::LinearGaussianLatentDynamics{T},
+    state::AbstractVector{T},
+    step::Int,
+    extra::Nothing,
+) where {T}
+    return MvNormal(model.Φ * state + model.b, model.Q)
+end
+function SSMProblems.distribution(
+    model::LinearGaussianObservationProcess{T},
+    state::AbstractVector{T},
+    step::Int,
+    extra::Nothing,
+) where {T}
+    return MvNormal(model.H * state, model.R)
+end
+
+# ## Filtering Algorithm
+
+# We define a concrete type to represent our sampling algorithm. This is used for dispatch
+# to, say, distinguish from using a generic particle filter.
+
+struct KalmanFilter end
+
+# A Kalman filter is only valid for linear Gaussian state space models, so we define an
+# alias for an SSM with linear Gaussian latent dynamics and observation process, which will
+# be used to dispatch to the correct method.
+
+const LinearGaussianSSM{T} = StateSpaceModel{
+    <:LinearGaussianLatentDynamics{T},<:LinearGaussianObservationProcess{T}
+}
+
+# We then define a method for the `sample` function. This is a standardised interface which
+# requires the model we are sampling from, the sampling algorithm as well as the
+# observations and any extras.
+
+function AbstractMCMC.sample(
+    model::LinearGaussianSSM{U},
+    ::KalmanFilter,
+    observations::AbstractVector,
+    extras::AbstractVector,
+) where {U}
+    T = length(observations)
+    x_filts = Vector{Vector{U}}(undef, T)
+    P_filts = Vector{Matrix{U}}(undef, T)
+
+    @unpack z, P, Φ, b, Q = model.dyn  ## Extract parameters
+    @unpack H, R = model.obs
+
+    for t in 1:T
+        x_pred, P_pred = if t == 1
+            z, P
+        else
+            Φ * x_filts[t - 1] + b, Φ * P_filts[t - 1] * Φ' + Q  ## Prediction step
+        end
+
+        y = observations[t]   ## Update step
+        K = P_pred * H' / (H * P_pred * H' + R)
+        x_filt = x_pred + K * (y - H * x_pred)
+        P_filt = P_pred - K * H * P_pred
+
+        x_filts[t] = x_filt
+        P_filts[t] = P_filt
     end
+
+    return x_filts, P_filts
 end
 
-# Simulation parameters
+# In this specific case, however, since our model is homogenous, we do not expect to have
+# any extras passed in. For convenience, we create a method without the `extras` argument
+# which then replaces them with a vector of `nothing`s. This pattern is not specific to
+# linear Gaussian models or Kalman filters so we define it with general types.
+
+function AbstractMCMC.sample(
+    model::StateSpaceModel, algorithm, observations::AbstractVector
+)
+    extras = fill(nothing, length(observations))
+    return sample(model, algorithm, observations, extras)
+end
+
+# ## Simulation and Filtering
+
+# We define the parameters for our model as so.
+
 SEED = 1
 T = 100
 z = [-1.0, 1.0]
@@ -49,57 +150,33 @@ Q = [0.2 0.0; 0.0 0.5]
 H = [1.0 0.0;]
 R = Matrix(0.3I, 1, 1)
 
-model = LinearGaussianSSM(z, P, Φ, b, Q, H, R)
+# We can then construct the latent dynamics and observation process, before combining these
+# to form a state space model.
 
-# Generate synthetic data
+dyn = LinearGaussianLatentDynamics(z, P, Φ, b, Q)
+obs = LinearGaussianObservationProcess(H, R)
+model = StateSpaceModel(dyn, obs)
+
+# Synthetic data can be generated by directly sampling from the model. This calls a utility
+# function from the `SSMProblems` package, which in turn, calls the three distribution
+# functions we defined above.
+
 rng = MersenneTwister(SEED)
-x, y = Vector{Any}(undef, T), Vector{Any}(undef, T)
-x[1] = rand(rng, f0(model))
-for t in 1:T
-    y[t] = rand(rng, g(x[t], model))
-    if t < T
-        x[t + 1] = rand(rng, f(x[t], model))
-    end
-end
+xs, ys = sample(rng, model, T)
 
-# Kalman filter
-function filter(rng::Random.AbstractRNG, model::LinearGaussianSSM, y::Vector{Any})
-    T = length(y)
-    p = transition!!(rng, model)
-    ps = [p]
-    for i in 1:T
-        p = transition!!(rng, model, p)
-        p, yres, _ = correct(p, Gaussian(y[i], model.R), model.H)
-        push!(ps, p)
-    end
-    return ps
-end
+# We can then run the Kalman filter and plot the filtering results against the ground truth.
 
-# Run filter and plot results
-ps = filter(rng, model, y)
+x_filts, P_filts = AbstractMCMC.sample(model, KalmanFilter(), ys)
 
-p_mean = mean.(ps)
-p_cov = sqrt.(cov.(ps))
-
-p1 = scatter(1:T, first.(y); color="red", label="Observations")
+# Plot trajectory for first dimension
+p = plot(; title="First Dimension Kalman Filter Estimates", xlabel="Step", ylabel="Value")
+plot!(p, 1:T, first.(xs); label="Truth")
+scatter!(p, 1:T, first.(ys); label="Observations")
 plot!(
-    p1,
-    0:T,
-    first.(p_mean);
-    color="orange",
-    label="Filtered x1",
-    grid=false,
-    ribbon=getindex.(p_cov, 1, 1),
-    fillalpha=0.5,
-)
-
-plot!(
-    p1,
-    0:T,
-    last.(p_mean);
-    color="blue",
-    label="Filtered x2",
-    grid=false,
-    ribbon=getindex.(p_cov, 2, 2),
-    fillalpha=0.5,
+    p,
+    1:T,
+    first.(x_filts);
+    ribbon=sqrt.(first.(P_filts)),
+    label="Filtered (±1σ)",
+    fillalpha=0.2,
 )
