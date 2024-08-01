@@ -37,16 +37,16 @@ abstract type ObservationProcess end
 """
     distribution(dyn::LatentDynamics, extra)
 
-    Return the initialisation distribution for the latent dynamics.
+Return the initialisation distribution for the latent dynamics.
 
-    The method should return the distribution of the initial state of the latent dynamics.
-    The  returned value should be a `Distributions.Distribution` object that implements
-    sampling and log-density calculations.
+The method should return the distribution of the initial state of the latent dynamics.
+The  returned value should be a `Distributions.Distribution` object that implements
+sampling and log-density calculations.
 
-    See also [`LatentDynamics`](@ref).
+See also [`LatentDynamics`](@ref).
 
-    # Returns
-    - `Distributions.Distribution`: The distribution of the initial state.
+# Returns
+- `Distributions.Distribution`: The distribution of the initial state.
 """
 function distribution(dyn::LatentDynamics, extra)
     throw(MethodError(distribution, (dyn, extra)))
@@ -55,17 +55,17 @@ end
 """
     distribution(dyn::LatentDynamics, step::Integer, state, extra)
 
-    Return the transition distribution for the latent dynamics.
+Return the transition distribution for the latent dynamics.
 
-    The method should return the distribution of the state for the next time step given the
-    current state `state` at time step `step`. The returned value should be a
-    `Distributions.Distribution` object that implements sampling and log-density
-    calculations. 
+The method should return the distribution of the state for the next time step given the
+current state `state` at time step `step`. The returned value should be a
+`Distributions.Distribution` object that implements sampling and log-density
+calculations. 
 
-    See also [`LatentDynamics`](@ref).
+See also [`LatentDynamics`](@ref).
 
-    # Returns
-    - `Distributions.Distribution`: The distribution of the new state.
+# Returns
+- `Distributions.Distribution`: The distribution of the new state.
 """
 function distribution(dyn::LatentDynamics, step::Integer, state, extra)
     throw(MethodError(distribution, (dyn, step, state, extra)))
@@ -74,16 +74,16 @@ end
 """
     distribution(obs::ObservationProcess, step::Integer, state, extra)
 
-    Return the observation distribution for the observation process.
+Return the observation distribution for the observation process.
 
-    The method should return the distribution of an observation given the current state
-    `state` at time step `step`. The returned value should be a `Distributions.Distribution`
-    object that implements sampling and log-density calculations.
+The method should return the distribution of an observation given the current state
+`state` at time step `step`. The returned value should be a `Distributions.Distribution`
+object that implements sampling and log-density calculations.
 
-    See also [`ObservationProcess`](@ref).
+See also [`ObservationProcess`](@ref).
 
-    # Returns
-    - `Distributions.Distribution`: The distribution of the observation.
+# Returns
+- `Distributions.Distribution`: The distribution of the observation.
 """
 function distribution(obs::ObservationProcess, step::Integer, state, extra)
     throw(MethodError(distribution, (obs, step, state, extra)))
@@ -112,15 +112,15 @@ end
 """
     simulate([rng::AbstractRNG], dyn::LatentDynamics, step::Integer, state, extra)
 
-    Simulate a transition of the latent dynamics.
+Simulate a transition of the latent dynamics.
 
-    The method should return a random state for the next time step given the state `state` 
-    at the current time step, `step`.
+The method should return a random state for the next time step given the state `state` 
+at the current time step, `step`.
 
-    The default behaviour is generate a random sample from distribution returned by the
-    corresponding `distribution()` method.
+The default behaviour is generate a random sample from distribution returned by the
+corresponding `distribution()` method.
 
-    See also [`LatentDynamics`](@ref).
+See also [`LatentDynamics`](@ref).
 """
 function simulate(rng::AbstractRNG, dyn::LatentDynamics, step::Integer, state, extra)
     return rand(rng, distribution(dyn, step, state, extra))
@@ -132,15 +132,15 @@ end
 """
     simulate([rng::AbstractRNG], process::ObservationProcess, step::Integer, state, extra)
 
-    Simulate an observation given the current state.
+Simulate an observation given the current state.
 
-    The method should return a random observation given the current state `state` at time
-    step `step`.
+The method should return a random observation given the current state `state` at time
+step `step`.
 
-    The default behaviour is generate a random sample from distribution returned by the
-    corresponding `distribution()` method.
+The default behaviour is generate a random sample from distribution returned by the
+corresponding `distribution()` method.
 
-    See also [`ObservationProcess`](@ref).
+See also [`ObservationProcess`](@ref).
 """
 function simulate(rng::AbstractRNG, obs::ObservationProcess, step::Integer, state, extra)
     return rand(rng, distribution(obs, step, state, extra))
@@ -152,15 +152,15 @@ end
 """
     logdensity(dyn::LatentDynamics, new_state, extra)
 
-    Compute the log-density of an initial state for the latent dynamics.
+Compute the log-density of an initial state for the latent dynamics.
 
-    The method should return the log-density of the initial state `new_state` for the
-    initial time step of the latent dynamics.
+The method should return the log-density of the initial state `new_state` for the
+initial time step of the latent dynamics.
 
-    The default behaviour is to compute the log-density of the distribution return by the
-    corresponding `distribution()` method.
+The default behaviour is to compute the log-density of the distribution return by the
+corresponding `distribution()` method.
 
-    See also [`LatentDynamics`](@ref).
+See also [`LatentDynamics`](@ref).
 """
 function logdensity(dyn::LatentDynamics, new_state, extra)
     return logpdf(distribution(dyn, extra), new_state)
@@ -169,15 +169,15 @@ end
 """
     logdensity(dyn::LatentDynamics, step::Integer, state, new_state, extra)
 
-    Compute the log-density of a transition of the latent dynamics.
+Compute the log-density of a transition of the latent dynamics.
 
-    The method should return the log-density of the new state `new_state` given the current
-    state `state` at time step `step`.
+The method should return the log-density of the new state `new_state` given the current
+state `state` at time step `step`.
 
-    The default behaviour is to compute the log-density of the distribution return by the
-    corresponding `distribution()` method.
+The default behaviour is to compute the log-density of the distribution return by the
+corresponding `distribution()` method.
 
-    See also [`LatentDynamics`](@ref).
+See also [`LatentDynamics`](@ref).
 """
 function logdensity(dyn::LatentDynamics, step::Integer, state, new_state, extra)
     return logpdf(distribution(dyn, step, state, extra), new_state)
@@ -186,15 +186,15 @@ end
 """
     logdensity(obs::ObservationProcess, step::Integer, state, observation, extra)
 
-    Compute the log-density of an observation given the current state.
+Compute the log-density of an observation given the current state.
 
-    The method should return the log-density of the observation `observation` given the
-    current state `state` at time step `step`.
+The method should return the log-density of the observation `observation` given the
+current state `state` at time step `step`.
 
-    The default behaviour is to compute the log-density of the distribution return by the
-    corresponding `distribution()` method.
+The default behaviour is to compute the log-density of the distribution return by the
+corresponding `distribution()` method.
 
-    See also [`ObservationProcess`](@ref).
+See also [`ObservationProcess`](@ref).
 """
 function logdensity(obs::ObservationProcess, step::Integer, state, observation, extra)
     return logpdf(distribution(obs, step, state, extra), observation)
