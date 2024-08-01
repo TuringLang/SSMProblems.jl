@@ -58,16 +58,16 @@ function SSMProblems.distribution(model::LinearGaussianLatentDynamics, extra::No
 end
 function SSMProblems.distribution(
     model::LinearGaussianLatentDynamics{T},
-    state::AbstractVector{T},
     step::Int,
+    state::AbstractVector{T},
     extra::Nothing,
 ) where {T}
     return MvNormal(model.Φ * state + model.b, model.Q)
 end
 function SSMProblems.distribution(
     model::LinearGaussianObservationProcess{T},
-    state::AbstractVector{T},
     step::Int,
+    state::AbstractVector{T},
     extra::Nothing,
 ) where {T}
     return MvNormal(model.H * state, model.R)

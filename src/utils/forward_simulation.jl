@@ -7,7 +7,7 @@ function sample(rng::AbstractRNG, model::AbstractStateSpaceModel, extras::Abstra
     T = length(extras)
 
     x0 = simulate(rng, model.dyn, extras[1])
-    y0 = simulate(rng, model.obs, x0, 1, extras[1])
+    y0 = simulate(rng, model.obs, 1, x0, extras[1])
 
     xs = Vector{typeof(x0)}(undef, T)
     ys = Vector{typeof(y0)}(undef, T)
@@ -16,8 +16,8 @@ function sample(rng::AbstractRNG, model::AbstractStateSpaceModel, extras::Abstra
     ys[1] = y0
 
     for t in 2:T
-        xs[t] = simulate(rng, model.dyn, xs[t - 1], t, extras[t])
-        ys[t] = simulate(rng, model.obs, xs[t], t, extras[t])
+        xs[t] = simulate(rng, model.dyn, t, xs[t - 1], extras[t])
+        ys[t] = simulate(rng, model.obs, t, xs[t], extras[t])
     end
 
     return xs, ys
