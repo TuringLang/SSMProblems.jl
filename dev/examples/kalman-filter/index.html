@@ -1,5 +1,460 @@
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Kalman Filter · SSMProblems</title><meta name="title" content="Kalman Filter · SSMProblems"/><meta property="og:title" content="Kalman Filter · SSMProblems"/><meta property="twitter:title" content="Kalman Filter · SSMProblems"/><meta name="description" content="Documentation for SSMProblems."/><meta property="og:description" content="Documentation for SSMProblems."/><meta property="twitter:description" content="Documentation for SSMProblems."/><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../search_index.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">SSMProblems</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li><span class="tocitem">Examples</span><ul><li class="is-active"><a class="tocitem" href>Kalman Filter</a><ul class="internal"><li><a class="tocitem" href="#Model-Definition"><span>Model Definition</span></a></li><li><a class="tocitem" href="#Filtering-Algorithm"><span>Filtering Algorithm</span></a></li><li><a class="tocitem" href="#Simulation-and-Filtering"><span>Simulation and Filtering</span></a></li></ul></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>Kalman Filter</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Kalman Filter</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/TuringLang/SSMProblems.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/TuringLang/SSMProblems.jl/blob/main/examples/kalman-filter/script.jl" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Kalman-Filter"><a class="docs-heading-anchor" href="#Kalman-Filter">Kalman Filter</a><a id="Kalman-Filter-1"></a><a class="docs-heading-anchor-permalink" href="#Kalman-Filter" title="Permalink"></a></h1><p>This example implements a Kalman filter for a linear Gaussian state space model using the SSMProblems interface.</p><pre><code class="language-julia hljs">using AbstractMCMC
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Kalman Filter · SSMProblems</title><meta name="title" content="Kalman Filter · SSMProblems"/><meta property="og:title" content="Kalman Filter · SSMProblems"/><meta property="twitter:title" content="Kalman Filter · SSMProblems"/><meta name="description" content="Documentation for SSMProblems."/><meta property="og:description" content="Documentation for SSMProblems."/><meta property="twitter:description" content="Documentation for SSMProblems."/><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../search_index.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script></head><body>
+<!-- NAVBAR START -->
+<style>
+    html {
+        scroll-padding-top: calc(55px + 1rem);
+    }
+
+    /* Documenter css tweaks */
+    .docs-sidebar {
+        margin-top: 3.75rem;
+    }
+
+    #documenter {
+        margin-top: 3.75rem;
+    }
+
+    .docs-version-selector {
+        margin-bottom: 60px !important;
+    }
+
+    @media screen and (max-width: 1056px) {
+        .docs-version-selector {
+            margin-bottom: 60px !important;
+        }
+
+        .docs-sidebar {
+            margin-top: 0 !important;
+        }
+    }
+    /* Documenter css tweaks ends here */
+
+    :root {
+        --heading-color: white;
+        --item-color: rgb(165, 165, 165);
+        --primary-bg: #073c44;
+        --hover-color: #8faad2;
+    }
+
+    .ext-navigation {
+        position: fixed;
+        height: 3.75rem;
+        top: 0;
+        width: 100%;
+        background-color: var(--primary-bg);
+        z-index: 1000;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        display: flex;
+        align-items: center;
+        padding: 0 1.0625rem;
+        transition: transform 0.3s;
+    }
+
+    .ext-navbar-logo {
+        margin-left: 0.625rem;
+    }
+
+    .ext-nav-links {
+        display: flex;
+        align-items: center;
+        list-style-type: none;
+        margin: 0;
+        padding: 0;
+        flex-grow: 1;
+    }
+
+    .ext-nav-links li {
+        margin-left: 1rem !important;
+    }
+
+    .ext-nav-link {
+        color: white !important;
+        text-decoration: none;
+        font-size: 1.0625rem !important;
+        transition: color 0.2s ease;
+        cursor: pointer;
+    }
+
+    .ext-nav-link:hover,
+    .ext-navbar-item-single a:hover {
+        color: var(--hover-color) !important;
+    }
+
+    .ext-navbar-item-single a {
+        color: #fff !important;
+    }
+
+    .ext-menu-toggle {
+        display: none;
+        font-size: 1.5rem;
+        color: white;
+        cursor: pointer;
+    }
+
+    .ext-dropdown {
+        display: none;
+        grid-template-columns: 1fr 1fr 1fr 1fr;
+        grid-template-rows: auto auto auto;
+        padding: 1.875rem;
+        position: absolute;
+        width: 100%;
+        left: 0;
+        background-color: #083c44;
+        line-height: 1.875rem;
+        opacity: 0;
+        transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
+        transform: translateY(-0.625rem);
+    }
+
+    #library-handler::after {
+        content: "▼";
+        font-size: 0.6875rem;
+        margin-left: 0.3125rem;
+        transition: transform 0.3s ease-in-out;
+    }
+
+    #library-handler.open::after {
+        content: "▲";
+    }
+
+    .ext-dropdown.show {
+        display: grid;
+        opacity: 1;
+        transform: translateY(0);
+    }
+
+    .ext-dropdown ul {
+        height: auto;
+        width: 12.5rem;
+        margin-bottom: 1.25rem;
+    }
+
+    .ext-dropdown ul li {
+        text-align: left;
+    }
+
+    .navbar-sub-item {
+        list-style: none;
+    }
+
+    .ext-dropdown ul a li {
+        color: var(--item-color);
+        width: 15.625rem;
+        border-radius: 3px;
+        padding: 0.125rem 0.625rem;
+        transition: background-color 0.2s ease;
+    }
+
+    .ext-dropdown ul a li:hover {
+        background-color: rgba(107, 107, 107, 0.5);
+    }
+
+    .ext-dropdown-item-heading {
+        color: var(--heading-color);
+        text-align: center;
+    }
+
+    /* Responsive styling */
+    @media (max-width: 966px) {
+        .ext-dropdown {
+            grid-template-columns: 1fr 1fr 1fr;
+        }
+    }
+
+    @media (max-width: 768px) {
+        .ext-nav-links {
+            display: none;
+            flex-direction: column;
+            width: 100%;
+            background-color: var(--primary-bg);
+            position: absolute;
+            top: 3.75rem;
+            left: 0;
+            padding: 0.625rem 0;
+            height: auto;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: rgb(141, 141, 141) grey;
+        }
+
+        .ext-nav-links.show {
+            display: flex;
+        }
+
+        .ext-nav-links li {
+            margin: 0.625rem 0;
+            text-align: center;
+        }
+
+        .ext-menu-toggle {
+            display: block;
+            margin-left: auto;
+        }
+
+        .ext-navigation.hide {
+            transform: translateY(-3.75rem);
+        }
+
+        .ext-dropdown {
+            place-content: center;
+            text-align: center;
+            grid-template-columns: 1fr;
+            line-height: 1.25rem;
+            padding: 0.625rem;
+        }
+
+        .ext-dropdown ul {
+            width: 100%;
+            text-align: center;
+            margin-bottom: 0.3125rem;
+        }
+
+        .ext-dropdown ul li {
+            text-align: center;
+        }
+
+        .ext-dropdown ul a li {
+            width: 100%;
+        }
+
+        .ext-dropdown ul a li:hover {
+            background-color: var(--primary-bg);
+            color: #fff;
+        }
+
+        /* Modified scroll bar */
+        .ext-nav-links::-webkit-scrollbar {
+            width: 5px;
+        }
+
+        .ext-nav-links::-webkit-scrollbar-track {
+            box-shadow: inset 0 0 5px grey;
+        }
+
+        .ext-nav-links::-webkit-scrollbar-thumb {
+            background: rgb(141, 141, 141);
+            border-radius: 3px;
+        }
+
+        .ext-nav-links::-webkit-scrollbar-thumb:hover {
+            background: #9b9b9b;
+        }
+    }
+</style>
+<nav class="ext-navigation">
+    <a href="https://turinglang.org/">
+        <img src="https://turinglang.org/assets/images/turing-logo.svg" alt="Turing Logo" class="ext-navbar-logo" height="24px" width="40px">
+    </a>
+    <a style="color: white !important; font-size: 21.25px !important; margin-left: 10px;" href="https://turinglang.org/">Turing.jl</a>
+    <ul class="ext-nav-links">
+        <li>
+            <a class="ext-nav-link" href="https://turinglang.org/docs/tutorials/docs-00-getting-started/">Get Started</a>
+        </li>
+        <li>
+            <a class="ext-nav-link" href="https://turinglang.org/docs/tutorials/00-introduction/">Tutorials</a>
+        </li>
+        <li>
+            <p class="ext-nav-link" id="library-handler">Libraries</p>
+            <div class="ext-dropdown" id="ext-dropdown-items">
+                <ul>
+                    <li class="ext-dropdown-item-heading">Modellinglanguages</li>
+                    <a href="https://turinglang.org/DynamicPPL.jl/">
+                        <li>DynamicPPL</li>
+                    </a>
+                    <a href="https://turinglang.org/JuliaBUGS.jl/">
+                        <li>JuliaBUGS</li>
+                    </a>
+                    <a href="https://turinglang.org/TuringGLM.jl/">
+                        <li>TurineGLM</li>
+                    </a>
+                </ul>
+                <ul>
+                    <li class="ext-dropdown-item-heading">MCMC</li>
+                    <a href="https://turinglang.org/AdvancedHMC.jl/">
+                        <li>AdvancedHMC</li>
+                    </a>
+                    <a href="https://turinglang.org/AbstractMCMC.jl/">
+                        <li>AbstractMCMC</li>
+                    </a>
+                    <a href="https://github.com/theogf/ThermodynamicIntegration.jl">
+                        <li>ThermodynamicIntegration</li>
+                    </a>
+                    <a href="https://turinglang.org/AdvancedPS.jl/">
+                        <li>AdvancedPS</li>
+                    </a>
+                    <a href="https://turinglang.org/EllipticalSliceSampling.jl/">
+                        <li>EllipticalSliceSampling</li>
+                    </a>
+                    <a href="https://turinglang.org/NestedSamplers.jl/">
+                        <li>NestedSamplers</li>
+                    </a>
+                </ul>
+                <ul>
+                    <li class="ext-dropdown-item-heading">Diagnostics</li>
+                    <a href="https://turinglang.org/MCMCChains.jl/">
+                        <li>MCMCChains</li>
+                    </a>
+                    <a href="https://turinglang.org/MCMCDiagnosticTools.jl/">
+                        <li>MCMCDiagnosticTools</li>
+                    </a>
+                    <a href="https://turinglang.org/ParetoSmooth.jl/">
+                        <li>ParetoSmooth</li>
+                    </a>
+                </ul>
+                <ul>
+                    <li class="ext-dropdown-item-heading">Gaussion Processes</li>
+                    <a href="https://juliagaussianprocesses.github.io/AbstractGPs.jl/">
+                        <li>AbstractGPs</li>
+                    </a>
+                    <a href="https://juliagaussianprocesses.github.io/KernelFunctions.jl/">
+                        <li>KernelFunctions</li>
+                    </a>
+                    <a href="https://juliagaussianprocesses.github.io/ApproximateGPs.jl/">
+                        <li>ApproximateGPs</li>
+                    </a>
+                </ul>
+                <ul>
+                    <li class="ext-dropdown-item-heading ext-navbar-item-single">
+                        <a href="https://turinglang.org/Bijectors.jl/">Bijectors</a>
+                    </li>
+                </ul>
+                <ul>
+                    <li class="ext-dropdown-item-heading ext-navbar-item-single">
+                        <a href="https://turinglang.org/TuringCallbacks.jl/">TuringCallbacks</a>
+                    </li>
+                </ul>
+                <ul>
+                    <li class="ext-dropdown-item-heading ext-navbar-item-single">
+                        <a href="https://turinglang.org/TuringBenchmarking.jl/">TuringBenchmarking</a>
+                    </li>
+                </ul>
+            </div>
+        </li>
+        <li>
+            <a class="ext-nav-link" href="https://turinglang.org/news/">News</a>
+        </li>
+        <li>
+            <a class="ext-nav-link" href="https://turinglang.org/team/">Team</a>
+        </li>
+    </ul>
+    <a href="https://x.com/TuringLang" style="margin-left: 15px; padding-top: 2px">
+        <svg fill="#ffffff" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="32px" height="32px" viewBox="-209.92 -209.92 931.84 931.84" xml:space="preserve" stroke="#ffffff">
+            <g id="SVGRepo_bgCarrier" stroke-width="0"></g>
+            <g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g>
+            <g id="SVGRepo_iconCarrier">
+                <g id="7935ec95c421cee6d86eb22ecd12f847">
+                    <path style="display: inline"
+                        d="M459.186,151.787c0.203,4.501,0.305,9.023,0.305,13.565 c0,138.542-105.461,298.285-298.274,298.285c-59.209,0-114.322-17.357-160.716-47.104c8.212,0.973,16.546,1.47,25.012,1.47 c49.121,0,94.318-16.759,130.209-44.884c-45.887-0.841-84.596-31.154-97.938-72.804c6.408,1.227,12.968,1.886,19.73,1.886 c9.55,0,18.816-1.287,27.617-3.68c-47.955-9.633-84.1-52.001-84.1-102.795c0-0.446,0-0.882,0.011-1.318 c14.133,7.847,30.294,12.562,47.488,13.109c-28.134-18.796-46.637-50.885-46.637-87.262c0-19.212,5.16-37.218,14.193-52.7 c51.707,63.426,128.941,105.156,216.072,109.536c-1.784-7.675-2.718-15.674-2.718-23.896c0-57.891,46.941-104.832,104.832-104.832 c30.173,0,57.404,12.734,76.525,33.102c23.887-4.694,46.313-13.423,66.569-25.438c-7.827,24.485-24.434,45.025-46.089,58.002 c21.209-2.535,41.426-8.171,60.222-16.505C497.448,118.542,479.666,137.004,459.186,151.787z">
+                    </path>
+                </g>
+            </g>
+        </svg>
+    </a>
+    <a href="https://github.com/TuringLang/Turing.jl">
+        <svg width="32px" height="32px" viewBox="-8.2 -8.2 36.40 36.40" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" fill="#000000">
+            <g id="SVGRepo_bgCarrier" stroke-width="0"></g>
+            <g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g>
+            <g id="SVGRepo_iconCarrier">
+                <title>github [#142]</title>
+                <desc>Created with Sketch.</desc>
+                <defs></defs>
+                <g id="Page-1" stroke-width="0.0002" fill="none" fill-rule="evenodd">
+                    <g id="Dribbble-Light-Preview" transform="translate(-140.000000, -7559.000000)" fill="#ffffff">
+                        <g id="icons" transform="translate(56.000000, 160.000000)">
+                            <path
+                                d="M94,7399 C99.523,7399 104,7403.59 104,7409.253 C104,7413.782 101.138,7417.624 97.167,7418.981 C96.66,7419.082 96.48,7418.762 96.48,7418.489 C96.48,7418.151 96.492,7417.047 96.492,7415.675 C96.492,7414.719 96.172,7414.095 95.813,7413.777 C98.04,7413.523 100.38,7412.656 100.38,7408.718 C100.38,7407.598 99.992,7406.684 99.35,7405.966 C99.454,7405.707 99.797,7404.664 99.252,7403.252 C99.252,7403.252 98.414,7402.977 96.505,7404.303 C95.706,7404.076 94.85,7403.962 94,7403.958 C93.15,7403.962 92.295,7404.076 91.497,7404.303 C89.586,7402.977 88.746,7403.252 88.746,7403.252 C88.203,7404.664 88.546,7405.707 88.649,7405.966 C88.01,7406.684 87.619,7407.598 87.619,7408.718 C87.619,7412.646 89.954,7413.526 92.175,7413.785 C91.889,7414.041 91.63,7414.493 91.54,7415.156 C90.97,7415.418 89.522,7415.871 88.63,7414.304 C88.63,7414.304 88.101,7413.319 87.097,7413.247 C87.097,7413.247 86.122,7413.234 87.029,7413.87 C87.029,7413.87 87.684,7414.185 88.139,7415.37 C88.139,7415.37 88.726,7417.2 91.508,7416.58 C91.513,7417.437 91.522,7418.245 91.522,7418.489 C91.522,7418.76 91.338,7419.077 90.839,7418.982 C86.865,7417.627 84,7413.783 84,7409.253 C84,7403.59 88.478,7399 94,7399"
+                                id="github-[#142]">
+                            </path>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </svg>
+    </a>
+    <span class="ext-menu-toggle">&#9776;</span>
+</nav>
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const menuToggle = document.querySelector(".ext-menu-toggle");
+        const navLinks = document.querySelector(".ext-nav-links");
+        const nav = document.querySelector(".ext-navigation");
+        const navigationHandler = document.getElementById("library-handler");
+        const navigationItemsContainer =
+            document.getElementById("ext-dropdown-items");
+        let lastScrollY = window.scrollY;
+
+        function setAppropriateHeight() {
+            if (window.innerWidth <= 768) {
+                const viewportHeight = window.innerHeight;
+                const navHeight = nav.offsetHeight;
+                navLinks.style.maxHeight = `${viewportHeight - navHeight}px`;
+                navLinks.style.overflowY = "auto";
+            } else {
+                navLinks.style.maxHeight = "";
+                navLinks.style.overflowY = "";
+            }
+        }
+
+        // Toggle main menu for mobile
+        menuToggle.addEventListener("click", () => {
+            navLinks.classList.toggle("show");
+            if (navLinks.classList.contains("show")) {
+                setAppropriateHeight();
+                // Ensure the dropdown is hidden when menu is first opened
+                navigationItemsContainer.style.display = "none";
+                navigationItemsContainer.classList.remove("show");
+            }
+        });
+
+        // Close menus if clicked outside
+        document.addEventListener("click", (event) => {
+            if (
+                !navLinks.contains(event.target) &&
+                !menuToggle.contains(event.target)
+            ) {
+                navLinks.classList.remove("show");
+                navigationItemsContainer.classList.remove("show");
+                navigationHandler.classList.remove("open");
+            }
+        });
+
+        // Hide navigation bar on scroll down in mobile view
+        window.addEventListener("scroll", () => {
+            if (window.innerWidth <= 768) {
+                nav.classList.toggle("hide", window.scrollY > lastScrollY);
+                lastScrollY = window.scrollY;
+            }
+        });
+
+        // Library API script
+        navigationHandler.addEventListener("click", (event) => {
+            event.preventDefault(); // Prevent default action of the link
+            if (navigationItemsContainer.classList.contains("show")) {
+                navigationItemsContainer.classList.remove("show");
+                navigationHandler.classList.remove("open");
+                setTimeout(() => {
+                    navigationItemsContainer.style.display = "none";
+                }, 500); // Match the timeout to the CSS transition duration
+            } else {
+                navigationItemsContainer.style.display = "grid";
+                navigationHandler.classList.add("open");
+                setTimeout(() => {
+                    navigationItemsContainer.classList.add("show");
+                }, 10); // Delay to ensure the display change takes effect before adding class
+            }
+            setAppropriateHeight(); // Recalculate height when dropdown changes
+        });
+
+        // Handle window resize
+        window.addEventListener("resize", setAppropriateHeight);
+
+        // Initial setup
+        setAppropriateHeight();
+    });
+</script>
+<!-- NAVBAR END -->
+<div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">SSMProblems</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li><span class="tocitem">Examples</span><ul><li class="is-active"><a class="tocitem" href>Kalman Filter</a><ul class="internal"><li><a class="tocitem" href="#Model-Definition"><span>Model Definition</span></a></li><li><a class="tocitem" href="#Filtering-Algorithm"><span>Filtering Algorithm</span></a></li><li><a class="tocitem" href="#Simulation-and-Filtering"><span>Simulation and Filtering</span></a></li></ul></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>Kalman Filter</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Kalman Filter</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/TuringLang/SSMProblems.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/TuringLang/SSMProblems.jl/blob/main/examples/kalman-filter/script.jl" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Kalman-Filter"><a class="docs-heading-anchor" href="#Kalman-Filter">Kalman Filter</a><a id="Kalman-Filter-1"></a><a class="docs-heading-anchor-permalink" href="#Kalman-Filter" title="Permalink"></a></h1><p>This example implements a Kalman filter for a linear Gaussian state space model using the SSMProblems interface.</p><pre><code class="language-julia hljs">using AbstractMCMC
 using Distributions
 using LinearAlgebra
 using Plots
@@ -247,3 +702,4 @@ plot!(
 <path clip-path="url(#clip870)" d="M490.069 1262.07 Q484.977 1262.07 481.967 1265.86 Q478.981 1269.66 478.981 1276.21 Q478.981 1282.74 481.967 1286.53 Q484.977 1290.33 490.069 1290.33 Q495.162 1290.33 498.125 1286.53 Q501.111 1282.74 501.111 1276.21 Q501.111 1269.66 498.125 1265.86 Q495.162 1262.07 490.069 1262.07 M490.069 1258.27 Q497.338 1258.27 501.689 1263.16 Q506.041 1268.02 506.041 1276.21 Q506.041 1284.38 501.689 1289.27 Q497.338 1294.13 490.069 1294.13 Q482.778 1294.13 478.403 1289.27 Q474.051 1284.41 474.051 1276.21 Q474.051 1268.02 478.403 1263.16 Q482.778 1258.27 490.069 1258.27 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M531.782 1280.52 Q531.782 1275.82 529.837 1273.16 Q527.916 1270.47 524.537 1270.47 Q521.157 1270.47 519.213 1273.16 Q517.291 1275.82 517.291 1280.52 Q517.291 1285.22 519.213 1287.9 Q521.157 1290.56 524.537 1290.56 Q527.916 1290.56 529.837 1287.9 Q531.782 1285.22 531.782 1280.52 M517.291 1271.47 Q518.634 1269.15 520.671 1268.04 Q522.731 1266.91 525.578 1266.91 Q530.3 1266.91 533.24 1270.66 Q536.203 1274.41 536.203 1280.52 Q536.203 1286.63 533.24 1290.38 Q530.3 1294.13 525.578 1294.13 Q522.731 1294.13 520.671 1293.02 Q518.634 1291.88 517.291 1289.57 L517.291 1293.46 L513.009 1293.46 L513.009 1257.44 L517.291 1257.44 L517.291 1271.47 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M559.791 1268.29 L559.791 1272.32 Q557.985 1271.4 556.041 1270.93 Q554.097 1270.47 552.013 1270.47 Q548.842 1270.47 547.245 1271.44 Q545.671 1272.41 545.671 1274.36 Q545.671 1275.84 546.805 1276.7 Q547.939 1277.53 551.365 1278.29 L552.823 1278.62 Q557.36 1279.59 559.259 1281.37 Q561.18 1283.13 561.18 1286.3 Q561.18 1289.91 558.31 1292.02 Q555.462 1294.13 550.462 1294.13 Q548.379 1294.13 546.111 1293.71 Q543.865 1293.32 541.365 1292.51 L541.365 1288.11 Q543.726 1289.34 546.018 1289.96 Q548.31 1290.56 550.555 1290.56 Q553.564 1290.56 555.185 1289.54 Q556.805 1288.5 556.805 1286.63 Q556.805 1284.89 555.624 1283.97 Q554.467 1283.04 550.509 1282.18 L549.027 1281.84 Q545.069 1281 543.31 1279.29 Q541.55 1277.55 541.55 1274.54 Q541.55 1270.89 544.143 1268.9 Q546.736 1266.91 551.504 1266.91 Q553.865 1266.91 555.948 1267.25 Q558.032 1267.6 559.791 1268.29 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M590.138 1279.43 L590.138 1281.51 L570.555 1281.51 Q570.833 1285.91 573.194 1288.22 Q575.578 1290.52 579.814 1290.52 Q582.268 1290.52 584.559 1289.91 Q586.874 1289.31 589.143 1288.11 L589.143 1292.14 Q586.851 1293.11 584.444 1293.62 Q582.036 1294.13 579.559 1294.13 Q573.356 1294.13 569.722 1290.52 Q566.11 1286.91 566.11 1280.75 Q566.11 1274.38 569.536 1270.66 Q572.985 1266.91 578.819 1266.91 Q584.05 1266.91 587.083 1270.29 Q590.138 1273.64 590.138 1279.43 M585.879 1278.18 Q585.833 1274.68 583.911 1272.6 Q582.013 1270.52 578.865 1270.52 Q575.3 1270.52 573.147 1272.53 Q571.018 1274.54 570.694 1278.2 L585.879 1278.18 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M612.152 1271.51 Q611.434 1271.1 610.578 1270.91 Q609.744 1270.7 608.726 1270.7 Q605.115 1270.7 603.17 1273.06 Q601.249 1275.4 601.249 1279.8 L601.249 1293.46 L596.967 1293.46 L596.967 1267.53 L601.249 1267.53 L601.249 1271.56 Q602.592 1269.2 604.744 1268.06 Q606.897 1266.91 609.976 1266.91 Q610.416 1266.91 610.948 1266.97 Q611.481 1267.02 612.129 1267.14 L612.152 1271.51 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M613.564 1267.53 L618.078 1267.53 L626.18 1289.29 L634.281 1267.53 L638.795 1267.53 L629.073 1293.46 L623.286 1293.46 L613.564 1267.53 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M656.457 1280.42 Q651.295 1280.42 649.304 1281.6 Q647.314 1282.79 647.314 1285.63 Q647.314 1287.9 648.795 1289.24 Q650.3 1290.56 652.869 1290.56 Q656.411 1290.56 658.541 1288.06 Q660.693 1285.54 660.693 1281.37 L660.693 1280.42 L656.457 1280.42 M664.953 1278.66 L664.953 1293.46 L660.693 1293.46 L660.693 1289.52 Q659.235 1291.88 657.059 1293.02 Q654.883 1294.13 651.735 1294.13 Q647.754 1294.13 645.392 1291.91 Q643.054 1289.66 643.054 1285.91 Q643.054 1281.54 645.971 1279.31 Q648.911 1277.09 654.721 1277.09 L660.693 1277.09 L660.693 1276.67 Q660.693 1273.73 658.749 1272.14 Q656.828 1270.52 653.332 1270.52 Q651.11 1270.52 649.004 1271.05 Q646.897 1271.58 644.953 1272.65 L644.953 1268.71 Q647.291 1267.81 649.49 1267.37 Q651.689 1266.91 653.772 1266.91 Q659.397 1266.91 662.175 1269.82 Q664.953 1272.74 664.953 1278.66 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M677.939 1260.17 L677.939 1267.53 L686.712 1267.53 L686.712 1270.84 L677.939 1270.84 L677.939 1284.91 Q677.939 1288.09 678.795 1288.99 Q679.675 1289.89 682.337 1289.89 L686.712 1289.89 L686.712 1293.46 L682.337 1293.46 Q677.406 1293.46 675.531 1291.63 Q673.656 1289.78 673.656 1284.91 L673.656 1270.84 L670.531 1270.84 L670.531 1267.53 L673.656 1267.53 L673.656 1260.17 L677.939 1260.17 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M692.313 1267.53 L696.573 1267.53 L696.573 1293.46 L692.313 1293.46 L692.313 1267.53 M692.313 1257.44 L696.573 1257.44 L696.573 1262.83 L692.313 1262.83 L692.313 1257.44 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M715.531 1270.52 Q712.105 1270.52 710.114 1273.2 Q708.124 1275.86 708.124 1280.52 Q708.124 1285.17 710.091 1287.85 Q712.082 1290.52 715.531 1290.52 Q718.934 1290.52 720.924 1287.83 Q722.915 1285.15 722.915 1280.52 Q722.915 1275.91 720.924 1273.22 Q718.934 1270.52 715.531 1270.52 M715.531 1266.91 Q721.086 1266.91 724.258 1270.52 Q727.429 1274.13 727.429 1280.52 Q727.429 1286.88 724.258 1290.52 Q721.086 1294.13 715.531 1294.13 Q709.952 1294.13 706.781 1290.52 Q703.633 1286.88 703.633 1280.52 Q703.633 1274.13 706.781 1270.52 Q709.952 1266.91 715.531 1266.91 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M756.04 1277.81 L756.04 1293.46 L751.781 1293.46 L751.781 1277.95 Q751.781 1274.27 750.346 1272.44 Q748.91 1270.61 746.04 1270.61 Q742.591 1270.61 740.6 1272.81 Q738.61 1275.01 738.61 1278.8 L738.61 1293.46 L734.327 1293.46 L734.327 1267.53 L738.61 1267.53 L738.61 1271.56 Q740.137 1269.22 742.197 1268.06 Q744.281 1266.91 746.989 1266.91 Q751.457 1266.91 753.748 1269.68 Q756.04 1272.44 756.04 1277.81 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M781.063 1268.29 L781.063 1272.32 Q779.257 1271.4 777.313 1270.93 Q775.369 1270.47 773.285 1270.47 Q770.114 1270.47 768.517 1271.44 Q766.943 1272.41 766.943 1274.36 Q766.943 1275.84 768.077 1276.7 Q769.211 1277.53 772.637 1278.29 L774.095 1278.62 Q778.632 1279.59 780.531 1281.37 Q782.452 1283.13 782.452 1286.3 Q782.452 1289.91 779.582 1292.02 Q776.734 1294.13 771.734 1294.13 Q769.651 1294.13 767.383 1293.71 Q765.137 1293.32 762.637 1292.51 L762.637 1288.11 Q764.998 1289.34 767.29 1289.96 Q769.582 1290.56 771.827 1290.56 Q774.836 1290.56 776.457 1289.54 Q778.077 1288.5 778.077 1286.63 Q778.077 1284.89 776.896 1283.97 Q775.739 1283.04 771.781 1282.18 L770.299 1281.84 Q766.341 1281 764.582 1279.29 Q762.822 1277.55 762.822 1274.54 Q762.822 1270.89 765.415 1268.9 Q768.008 1266.91 772.776 1266.91 Q775.137 1266.91 777.22 1267.25 Q779.304 1267.6 781.063 1268.29 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><polyline clip-path="url(#clip870)" style="stroke:#3da44d; stroke-linecap:round; stroke-linejoin:round; stroke-width:4; stroke-opacity:1; fill:none" points="307.583,1328.02 450.27,1328.02 "/>
 <path clip-path="url(#clip870)" d="M474.051 1310.74 L493.912 1310.74 L493.912 1314.67 L478.727 1314.67 L478.727 1324.86 L492.43 1324.86 L492.43 1328.79 L478.727 1328.79 L478.727 1345.3 L474.051 1345.3 L474.051 1310.74 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M497.685 1319.37 L501.944 1319.37 L501.944 1345.3 L497.685 1345.3 L497.685 1319.37 M497.685 1309.28 L501.944 1309.28 L501.944 1314.67 L497.685 1314.67 L497.685 1309.28 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M510.856 1309.28 L515.115 1309.28 L515.115 1345.3 L510.856 1345.3 L510.856 1309.28 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M528.24 1312.01 L528.24 1319.37 L537.013 1319.37 L537.013 1322.68 L528.24 1322.68 L528.24 1336.75 Q528.24 1339.93 529.097 1340.83 Q529.976 1341.73 532.638 1341.73 L537.013 1341.73 L537.013 1345.3 L532.638 1345.3 Q527.708 1345.3 525.833 1343.47 Q523.958 1341.62 523.958 1336.75 L523.958 1322.68 L520.833 1322.68 L520.833 1319.37 L523.958 1319.37 L523.958 1312.01 L528.24 1312.01 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M564.791 1331.27 L564.791 1333.35 L545.208 1333.35 Q545.486 1337.75 547.847 1340.06 Q550.231 1342.36 554.467 1342.36 Q556.921 1342.36 559.212 1341.75 Q561.527 1341.15 563.796 1339.95 L563.796 1343.98 Q561.504 1344.95 559.097 1345.46 Q556.689 1345.97 554.212 1345.97 Q548.009 1345.97 544.374 1342.36 Q540.763 1338.75 540.763 1332.59 Q540.763 1326.22 544.189 1322.5 Q547.638 1318.75 553.472 1318.75 Q558.703 1318.75 561.735 1322.13 Q564.791 1325.48 564.791 1331.27 M560.532 1330.02 Q560.485 1326.52 558.564 1324.44 Q556.666 1322.36 553.518 1322.36 Q549.953 1322.36 547.8 1324.37 Q545.671 1326.38 545.347 1330.04 L560.532 1330.02 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M586.805 1323.35 Q586.087 1322.94 585.231 1322.75 Q584.397 1322.54 583.379 1322.54 Q579.768 1322.54 577.823 1324.9 Q575.902 1327.24 575.902 1331.64 L575.902 1345.3 L571.62 1345.3 L571.62 1319.37 L575.902 1319.37 L575.902 1323.4 Q577.245 1321.04 579.397 1319.9 Q581.55 1318.75 584.629 1318.75 Q585.069 1318.75 585.601 1318.81 Q586.133 1318.86 586.782 1318.98 L586.805 1323.35 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M612.406 1331.27 L612.406 1333.35 L592.823 1333.35 Q593.101 1337.75 595.462 1340.06 Q597.846 1342.36 602.082 1342.36 Q604.536 1342.36 606.828 1341.75 Q609.143 1341.15 611.411 1339.95 L611.411 1343.98 Q609.119 1344.95 606.712 1345.46 Q604.305 1345.97 601.828 1345.97 Q595.624 1345.97 591.99 1342.36 Q588.379 1338.75 588.379 1332.59 Q588.379 1326.22 591.805 1322.5 Q595.254 1318.75 601.087 1318.75 Q606.319 1318.75 609.351 1322.13 Q612.406 1325.48 612.406 1331.27 M608.147 1330.02 Q608.101 1326.52 606.18 1324.44 Q604.282 1322.36 601.133 1322.36 Q597.569 1322.36 595.416 1324.37 Q593.286 1326.38 592.962 1330.04 L608.147 1330.02 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M636.457 1323.31 L636.457 1309.28 L640.717 1309.28 L640.717 1345.3 L636.457 1345.3 L636.457 1341.41 Q635.115 1343.72 633.055 1344.86 Q631.018 1345.97 628.147 1345.97 Q623.448 1345.97 620.485 1342.22 Q617.545 1338.47 617.545 1332.36 Q617.545 1326.25 620.485 1322.5 Q623.448 1318.75 628.147 1318.75 Q631.018 1318.75 633.055 1319.88 Q635.115 1320.99 636.457 1323.31 M621.943 1332.36 Q621.943 1337.06 623.865 1339.74 Q625.809 1342.4 629.189 1342.4 Q632.568 1342.4 634.513 1339.74 Q636.457 1337.06 636.457 1332.36 Q636.457 1327.66 634.513 1325 Q632.568 1322.31 629.189 1322.31 Q625.809 1322.31 623.865 1325 Q621.943 1327.66 621.943 1332.36 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M674.79 1309.32 Q671.689 1314.65 670.184 1319.86 Q668.679 1325.06 668.679 1330.41 Q668.679 1335.76 670.184 1341.01 Q671.712 1346.25 674.79 1351.55 L671.087 1351.55 Q667.615 1346.11 665.878 1340.85 Q664.165 1335.6 664.165 1330.41 Q664.165 1325.25 665.878 1320.02 Q667.591 1314.79 671.087 1309.32 L674.79 1309.32 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M700.392 1315.57 L700.392 1324.53 L713.286 1324.53 L713.286 1328.47 L700.392 1328.47 L700.392 1337.43 L696.503 1337.43 L696.503 1328.47 L683.61 1328.47 L683.61 1324.53 L696.503 1324.53 L696.503 1315.57 L700.392 1315.57 M683.61 1341.36 L713.286 1341.36 L713.286 1345.3 L683.61 1345.3 L683.61 1341.36 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M724.188 1341.36 L731.827 1341.36 L731.827 1315 L723.517 1316.66 L723.517 1312.4 L731.781 1310.74 L736.457 1310.74 L736.457 1341.36 L744.096 1341.36 L744.096 1345.3 L724.188 1345.3 L724.188 1341.36 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M762.984 1322.75 Q759.466 1322.75 757.568 1325.3 Q755.577 1327.96 755.577 1332.36 Q755.577 1337.01 757.545 1339.69 Q759.535 1342.36 762.984 1342.36 Q766.387 1342.36 768.378 1339.67 Q770.369 1336.99 770.369 1332.36 Q770.369 1328.12 768.378 1325.3 Q766.549 1322.75 762.984 1322.75 M762.984 1319.37 L777.128 1319.37 L777.128 1323.63 L772.359 1323.63 Q774.882 1327.24 774.882 1332.36 Q774.882 1338.72 771.711 1342.33 Q768.54 1345.97 762.984 1345.97 Q757.406 1345.97 754.258 1342.33 Q751.086 1338.72 751.086 1332.36 Q751.086 1325.94 754.258 1322.36 Q756.873 1319.37 762.984 1319.37 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /><path clip-path="url(#clip870)" d="M782.313 1309.32 L786.017 1309.32 Q789.489 1314.79 791.202 1320.02 Q792.938 1325.25 792.938 1330.41 Q792.938 1335.6 791.202 1340.85 Q789.489 1346.11 786.017 1351.55 L782.313 1351.55 Q785.392 1346.25 786.896 1341.01 Q788.424 1335.76 788.424 1330.41 Q788.424 1325.06 786.896 1319.86 Q785.392 1314.65 782.313 1309.32 Z" fill="#000000" fill-rule="nonzero" fill-opacity="1" /></svg>
 <hr/><p><em>This page was generated using <a href="https://github.com/fredrikekre/Literate.jl">Literate.jl</a>.</em></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../../">« Home</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.5.0 on <span class="colophon-date" title="Saturday 3 August 2024 15:27">Saturday 3 August 2024</span>. Using Julia version 1.10.4.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+
