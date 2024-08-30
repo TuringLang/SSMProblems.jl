@@ -1,0 +1,165 @@
+using TestItems
+
+@testitem "Kalman filter test" begin
+    using AnalyticFilters
+    using LinearAlgebra
+    using StableRNGs
+
+    rng = StableRNG(1234)
+    μ0 = rand(rng, 2)
+    Σ0 = rand(rng, 2, 2)
+    Σ0 = Σ0 * Σ0'  # make Σ0 positive definite
+    A = rand(rng, 2, 2)
+    b = rand(rng, 2)
+    Q = rand(rng, 2, 2)
+    Q = Q * Q'  # make Q positive definite
+    H = rand(rng, 2, 2)
+    c = rand(rng, 2)
+    R = rand(rng, 2, 2)
+    R = R * R'  # make R positive definite
+
+    model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
+
+    observations = [rand(rng, 2) for _ in 1:2]
+
+    kf = KalmanFilter()
+
+    states = AnalyticFilters.filter(model, kf, observations, nothing)
+
+    # Let Z = [X; Y] be the joint state vector
+    # Write Z = P.Z + ϵ, where ϵ ~ N(μ_ϵ, Σ_ϵ)
+    P = [
+        zeros(2, 8)
+        A zeros(2, 6)
+        H zeros(2, 6)
+        zeros(2, 2) H zeros(2, 4)
+    ]
+    μ_ϵ = [μ0; b; c; c]
+    Σ_ϵ = [
+        Σ0 zeros(2, 6)
+        zeros(2, 2) Q zeros(2, 4)
+        zeros(2, 4) R zeros(2, 2)
+        zeros(2, 6) R
+    ]
+
+    # Note (I - P)Z = ϵ and solve for Z ~ N(μ_Z, Σ_Z)
+    I_P_inv = inv(I - P)
+    μ_Z = I_P_inv * μ_ϵ
+    Σ_Z = I_P_inv * Σ_ϵ * I_P_inv'
+
+    # Condition on observations using formula for MVN conditional distribution. See: 
+    # https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Conditional_distributions
+    y = vcat(observations...)
+    I_x = 1:4
+    I_y = 5:8
+    μ_X = μ_Z[I_x] + Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ (y - μ_Z[I_y]))
+    Σ_X = Σ_Z[I_x, I_x] - Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ Σ_Z[I_y, I_x])
+
+    @test states[2].μ ≈ μ_X[3:4]
+    @test states[2].Σ ≈ Σ_X[3:4, 3:4]
+end
+
+@testitem "Kalman-RBPF test" begin
+    using AnalyticFilters
+    using Distributions
+    using HypothesisTests
+    using LinearAlgebra
+    using LogExpFunctions: softmax
+    using StableRNGs
+    using StatsBase
+
+    # Define inner dynamics
+    struct InnerDynamics{T} <: LinearGaussianLatentDynamics{T}
+        μ0::Vector{T}
+        Σ0::Matrix{T}
+        A::Matrix{T}
+        b::Vector{T}
+        C::Matrix{T}
+        Q::Matrix{T}
+    end
+    AnalyticFilters.calc_μ0(dyn::InnerDynamics, extra) = dyn.μ0
+    AnalyticFilters.calc_Σ0(dyn::InnerDynamics, extra) = dyn.Σ0
+    AnalyticFilters.calc_A(dyn::InnerDynamics, ::Integer, extra) = dyn.A
+    function AnalyticFilters.calc_b(dyn::InnerDynamics, ::Integer, extra)
+        return dyn.b + dyn.C * extra.last_outer
+    end
+    AnalyticFilters.calc_Q(dyn::InnerDynamics, ::Integer, extra) = dyn.Q
+
+    rng = StableRNG(1234)
+    μ0 = rand(rng, 4)
+    Σ0s = [rand(rng, 2, 2) for _ in 1:2]
+    Σ0s = [Σ * Σ' for Σ in Σ0s]  # make Σ0 positive definite
+    Σ0 = [
+        Σ0s[1] zeros(2, 2)
+        zeros(2, 2) Σ0s[2]
+    ]
+    A = [
+        rand(rng, 2, 2) zeros(2, 2)
+        rand(rng, 2, 4)
+    ]
+    # Make mean-reverting
+    A /= 3.0
+    A[diagind(A)] .= -0.5
+    b = rand(rng, 4)
+    Qs = [rand(rng, 2, 2) / 10.0 for _ in 1:2]
+    Qs = [Q * Q' for Q in Qs]  # make Q positive definite
+    Q = [
+        Qs[1] zeros(2, 2)
+        zeros(2, 2) Qs[2]
+    ]
+    H = [zeros(2, 2) rand(rng, 2, 2)]
+    c = rand(rng, 2)
+    R = rand(rng, 2, 2)
+    R = R * R' / 3.0  # make R positive definite
+
+    N_particles = 1000
+    T = 2
+
+    observations = [rand(rng, 2) for _ in 1:T]
+
+    # Kalman filtering
+
+    full_model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
+    kf = KalmanFilter()
+    kf_states = AnalyticFilters.filter(full_model, kf, observations, nothing)
+
+    # Rao-Blackwellised particle filtering
+
+    outer_dyn = AnalyticFilters.HomogeneousLinearGaussianLatentDynamics(
+        μ0[1:2], Σ0[1:2, 1:2], A[1:2, 1:2], b[1:2], Qs[1]
+    )
+    inner_dyn = InnerDynamics(
+        μ0[3:4], Σ0[3:4, 3:4], A[3:4, 3:4], b[3:4], A[3:4, 1:2], Qs[2]
+    )
+    obs = AnalyticFilters.HomogeneousLinearGaussianObservationProcess(H[:, 3:4], c, R)
+    hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
+
+    rbpf = RBPF(N_particles)
+    # TODO: replace final argument with `nothing` — requires update of SSMProblems first
+    extras = [nothing for _ in 1:T]
+    rb_states = AnalyticFilters.filter(rng, hier_model, rbpf, observations, extras)
+
+    weights = softmax(getproperty.(rb_states[T, :], :log_w))
+
+    # Resample outer states
+    resampled_outer = sample(
+        rng, getproperty.(rb_states[T, :], :x), Weights(weights), N_particles
+    )
+    test = ExactOneSampleKSTest(
+        getindex(resampled_outer, 1), Normal(kf_states[T].μ[1], sqrt(kf_states[T].Σ[1, 1]))
+    )
+    @test pvalue(test) > 0.05
+
+    # Resample inner states and demarginalise
+    resampled_inner_marginalised = sample(
+        rng, rb_states[T, :], Weights(weights), N_particles
+    )
+    resampled_inner = [
+        rand(rng, Normal(p.μ[1], sqrt(p.Σ[1, 1]))) for p in resampled_inner_marginalised
+    ]
+    test = ExactOneSampleKSTest(
+        resampled_inner, Normal(kf_states[T].μ[3], sqrt(kf_states[T].Σ[3, 3]))
+    )
+
+    @test pvalue(test) > 0.05
+end
