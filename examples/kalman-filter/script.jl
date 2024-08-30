@@ -25,7 +25,7 @@ using SSMProblems
 #
 # We store all of these paramaters in a struct.
 
-struct LinearGaussianLatentDynamics{T<:Real} <: LatentDynamics
+struct LinearGaussianLatentDynamics{T<:Real} <: LatentDynamics{Vector{T}}
     z::Vector{T}
     P::Matrix{T}
     Φ::Matrix{T}
@@ -38,7 +38,7 @@ end
 # y[k] = Hx[k] + v[k],          v[k] ∼ N(0, R)
 # ```
 
-struct LinearGaussianObservationProcess{T<:Real} <: ObservationProcess
+struct LinearGaussianObservationProcess{T<:Real} <: ObservationProcess{Vector{T},Vector{T}}
     H::Matrix{T}
     R::Matrix{T}
 end
@@ -53,22 +53,16 @@ end
 # be preferred in this linear Gaussian case, it may be of interest to compare the sampling
 # performance with a general particle filter.
 
-function SSMProblems.distribution(model::LinearGaussianLatentDynamics, extra::Nothing)
+function SSMProblems.distribution(model::LinearGaussianLatentDynamics)
     return MvNormal(model.z, model.P)
 end
 function SSMProblems.distribution(
-    model::LinearGaussianLatentDynamics{T},
-    step::Int,
-    state::AbstractVector{T},
-    extra::Nothing,
+    model::LinearGaussianLatentDynamics{T}, step::Int, prev_state::Vector{T}, extra::Nothing
 ) where {T}
-    return MvNormal(model.Φ * state + model.b, model.Q)
+    return MvNormal(model.Φ * prev_state + model.b, model.Q)
 end
 function SSMProblems.distribution(
-    model::LinearGaussianObservationProcess{T},
-    step::Int,
-    state::AbstractVector{T},
-    extra::Nothing,
+    model::LinearGaussianObservationProcess{T}, step::Int, state::Vector{T}, extra::Nothing
 ) where {T}
     return MvNormal(model.H * state, model.R)
 end
