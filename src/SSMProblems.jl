@@ -20,6 +20,9 @@ export LatentDynamics, ObservationProcess, AbstractStateSpaceModel, StateSpaceMo
 
     Alternatively, you may specify methods for the function `distribution` which will be
     used to define the above methods.
+
+    # Parameters
+    - `T`: The type of the state of the latent dynamics.
 """
 abstract type LatentDynamics{T} end
 
@@ -39,6 +42,10 @@ Base.eltype(::Type{<:LatentDynamics{T}}) where {T} = T
     
     Alternatively, you may specify a method for `distribution`, which will be used to define
     both of the above methods.
+
+    # Parameters
+    - `T`: The type of the state of the latent dynamics.
+    - `U`: The type of the observation.
 """
 abstract type ObservationProcess{T,U} end
 
