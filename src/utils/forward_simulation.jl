@@ -6,17 +6,13 @@ export sample
 function sample(rng::AbstractRNG, model::StateSpaceModel, extras::AbstractVector)
     T = length(extras)
 
-    x0 = simulate(rng, model.dyn, extras[1])
-    y0 = simulate(rng, model.obs, 1, x0, extras[1])
+    T1, T2 = eltype(model)
+    xs = Vector{T1}(undef, T)
+    ys = Vector{T2}(undef, T)
 
-    xs = Vector{typeof(x0)}(undef, T)
-    ys = Vector{typeof(y0)}(undef, T)
-
-    xs[1] = x0
-    ys[1] = y0
-
-    for t in 2:T
-        xs[t] = simulate(rng, model.dyn, t, xs[t - 1], extras[t])
+    x0 = simulate(rng, model.dyn)
+    for t in 1:T
+        xs[t] = simulate(rng, model.dyn, t, t == 1 ? x0 : xs[t - 1], extras[t])
         ys[t] = simulate(rng, model.obs, t, xs[t], extras[t])
     end
 

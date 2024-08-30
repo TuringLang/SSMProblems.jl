@@ -4,6 +4,7 @@ A unified interface to define state space models in the context of particle MCMC
 module SSMProblems
 
 using AbstractMCMC: AbstractMCMC
+import Base: eltype
 import Random: AbstractRNG, default_rng
 import Distributions: logpdf
 
@@ -20,7 +21,14 @@ export LatentDynamics, ObservationProcess, AbstractStateSpaceModel, StateSpaceMo
     Alternatively, you may specify methods for the function `distribution` which will be
     used to define the above methods.
 """
-abstract type LatentDynamics end
+abstract type LatentDynamics{T} end
+
+"""
+    eltype(dyn::LatentDynamics)
+
+    Return the type of the state of the latent dynamics.
+"""
+Base.eltype(::Type{<:LatentDynamics{T}}) where {T} = T
 
 """
     Observation process of a state space model.
@@ -32,10 +40,20 @@ abstract type LatentDynamics end
     Alternatively, you may specify a method for `distribution`, which will be used to define
     both of the above methods.
 """
-abstract type ObservationProcess end
+abstract type ObservationProcess{T,U} end
 
 """
-    distribution(dyn::LatentDynamics, extra)
+    eltype(obs::ObservationProcess)
+
+    Return a pair of types for the state and observation of the observation process.
+
+    The first type is the type of the state of the latent dynamics, and the second type is
+    the type of the observation.
+"""
+Base.eltype(::Type{<:ObservationProcess{T,U}}) where {T,U} = (T, U)
+
+"""
+    distribution(dyn::LatentDynamics)
 
 Return the initialisation distribution for the latent dynamics.
 
@@ -48,8 +66,8 @@ See also [`LatentDynamics`](@ref).
 # Returns
 - `Distributions.Distribution`: The distribution of the initial state.
 """
-function distribution(dyn::LatentDynamics, extra)
-    throw(MethodError(distribution, (dyn, extra)))
+function distribution(dyn::LatentDynamics)
+    throw(MethodError(distribution, (dyn)))
 end
 
 """
@@ -89,7 +107,7 @@ function distribution(obs::ObservationProcess, step::Integer, state, extra)
 end
 
 """
-    simulate([rng::AbstractRNG], dyn::LatentDynamics, extra)
+    simulate([rng::AbstractRNG], dyn::LatentDynamics)
 
     Simulate an initial state for the latent dynamics.
 
@@ -101,11 +119,11 @@ end
 
     See also [`LatentDynamics`](@ref).
 """
-function simulate(rng::AbstractRNG, dyn::LatentDynamics, extra)
-    return rand(rng, distribution(dyn, extra))
+function simulate(rng::AbstractRNG, dyn::LatentDynamics)
+    return rand(rng, distribution(dyn))
 end
-function simulate(dyn::LatentDynamics, extra)
-    return simulate(default_rng(), dyn, extra)
+function simulate(dyn::LatentDynamics)
+    return simulate(default_rng(), dyn)
 end
 
 """
@@ -149,7 +167,7 @@ function simulate(obs::ObservationProcess, step::Integer, state, extra)
 end
 
 """
-    logdensity(dyn::LatentDynamics, new_state, extra)
+    logdensity(dyn::LatentDynamics, new_state)
 
 Compute the log-density of an initial state for the latent dynamics.
 
@@ -161,8 +179,8 @@ corresponding `distribution()` method.
 
 See also [`LatentDynamics`](@ref).
 """
-function logdensity(dyn::LatentDynamics, new_state, extra)
-    return logpdf(distribution(dyn, extra), new_state)
+function logdensity(dyn::LatentDynamics, new_state)
+    return logpdf(distribution(dyn), new_state)
 end
 
 """
@@ -224,7 +242,25 @@ abstract type AbstractStateSpaceModel <: AbstractMCMC.AbstractModel end
 struct StateSpaceModel{LD<:LatentDynamics,OP<:ObservationProcess} <: AbstractStateSpaceModel
     dyn::LD
     obs::OP
+    function StateSpaceModel(dyn::LD, obs::OP) where {LD,OP}
+        # Check state types match
+        if eltype(dyn) != eltype(obs)[1]
+            throw(ArgumentError("State types of `dyn` and `obs` must match"))
+        end
+        return new{LD,OP}(dyn, obs)
+    end
 end
+
+"""
+    eltype(model::StateSpaceModel)
+
+    Return a pair of types for the state and observation of the state space model.
+
+    The first type is the type of the state of the latent dynamics, and the second type is
+    the type of the observation. This is equivalent to calling `eltype` on the observation
+    process.
+"""
+Base.eltype(::Type{<:StateSpaceModel{LD,OP}}) where {LD,OP} = eltype(OP)
 
 include("utils/forward_simulation.jl")
 
