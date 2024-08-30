@@ -6,7 +6,7 @@ export create_homogeneous_linear_gaussian_model
 import SSMProblems: distribution
 import Distributions: MvNormal
 
-abstract type LinearGaussianLatentDynamics{T} <: SSMProblems.LatentDynamics end
+abstract type LinearGaussianLatentDynamics{T} <: SSMProblems.LatentDynamics{Vector{T}} end
 
 function calc_μ0 end
 function calc_Σ0 end
@@ -21,7 +21,8 @@ function calc_params(dyn::LinearGaussianLatentDynamics, step::Integer, extra)
     return (calc_A(dyn, step, extra), calc_b(dyn, step, extra), calc_Q(dyn, step, extra))
 end
 
-abstract type LinearGaussianObservationProcess{T} <: SSMProblems.ObservationProcess end
+abstract type LinearGaussianObservationProcess{T} <:
+              SSMProblems.ObservationProcess{Vector{T},Vector{T}} end
 
 function calc_H end
 function calc_c end

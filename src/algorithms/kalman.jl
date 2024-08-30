@@ -51,15 +51,14 @@ function filter(
     model::LinearGaussianStateSpaceModel{T},
     filter::KalmanFilter,
     data::Vector{Vector{T}},
-    extra,
+    extras,
 ) where {T}
-    μ0, Σ0 = calc_initial(model.dyn, extra)
+    μ0, Σ0 = calc_initial(model.dyn)
     state = (μ=μ0, Σ=Σ0)
-    state = update(model, filter, 1, state, data[1], extra)
-    states = [state]
-    for (i, obs) in enumerate(data[2:end])
-        state = step(model, filter, i, state, obs, extra)
-        push!(states, state)
+    states = Vector{@NamedTuple{μ::Vector{T}, Σ::Matrix{T}}}(undef, length(data))
+    for (i, obs) in enumerate(data[1:end])
+        state = step(model, filter, i, state, obs, extras[i])
+        states[i] = state
     end
     return states
 end

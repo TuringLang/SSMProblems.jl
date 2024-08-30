@@ -20,43 +20,40 @@ using TestItems
 
     model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
 
-    observations = [rand(rng, 2) for _ in 1:2]
+    observations = [rand(rng, 2)]
 
     kf = KalmanFilter()
 
-    states = AnalyticFilters.filter(model, kf, observations, nothing)
+    states = AnalyticFilters.filter(model, kf, observations, [nothing])
 
-    # Let Z = [X; Y] be the joint state vector
+    # Let Z = [X0, X1, Y1] be the joint state vector
     # Write Z = P.Z + ϵ, where ϵ ~ N(μ_ϵ, Σ_ϵ)
     P = [
-        zeros(2, 8)
-        A zeros(2, 6)
-        H zeros(2, 6)
-        zeros(2, 2) H zeros(2, 4)
+        zeros(2, 6)
+        A zeros(2, 4)
+        zeros(2, 2) H zeros(2, 2)
     ]
-    μ_ϵ = [μ0; b; c; c]
+    μ_ϵ = [μ0; b; c]
     Σ_ϵ = [
-        Σ0 zeros(2, 6)
-        zeros(2, 2) Q zeros(2, 4)
-        zeros(2, 4) R zeros(2, 2)
-        zeros(2, 6) R
+        Σ0 zeros(2, 4)
+        zeros(2, 2) Q zeros(2, 2)
+        zeros(2, 4) R
     ]
 
     # Note (I - P)Z = ϵ and solve for Z ~ N(μ_Z, Σ_Z)
-    I_P_inv = inv(I - P)
-    μ_Z = I_P_inv * μ_ϵ
-    Σ_Z = I_P_inv * Σ_ϵ * I_P_inv'
+    μ_Z = (I - P) \ μ_ϵ
+    Σ_Z = ((I - P) \ Σ_ϵ) / (I - P)'
 
     # Condition on observations using formula for MVN conditional distribution. See: 
     # https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Conditional_distributions
-    y = vcat(observations...)
-    I_x = 1:4
-    I_y = 5:8
-    μ_X = μ_Z[I_x] + Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ (y - μ_Z[I_y]))
-    Σ_X = Σ_Z[I_x, I_x] - Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ Σ_Z[I_y, I_x])
+    y = only(observations)
+    I_x = 3:4
+    I_y = 5:6
+    μ_X1 = μ_Z[I_x] + Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ (y - μ_Z[I_y]))
+    Σ_X1 = Σ_Z[I_x, I_x] - Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ Σ_Z[I_y, I_x])
 
-    @test states[2].μ ≈ μ_X[3:4]
-    @test states[2].Σ ≈ Σ_X[3:4, 3:4]
+    @test only(states).μ ≈ μ_X1
+    @test only(states).Σ ≈ Σ_X1
 end
 
 @testitem "Kalman-RBPF test" begin

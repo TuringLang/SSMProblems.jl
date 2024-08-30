@@ -5,7 +5,7 @@ import StatsBase: Weights
 
 export RBPF
 
-struct RBPF <: SSMProblems.AbstractFilter
+struct RBPF <: FilteringAlgorithm
     n_particles::Int
 end
 
