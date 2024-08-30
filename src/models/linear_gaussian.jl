@@ -39,6 +39,13 @@ const LinearGaussianStateSpaceModel{T} = SSMProblems.StateSpaceModel{
     D,O
 } where {T,D<:LinearGaussianLatentDynamics{T},O<:LinearGaussianObservationProcess{T}}
 
+# TODO: this is hacky and should ideally be removed
+# Can't use `eltype` because that is used by SSMProblems for forward simulation and would be
+# used by a particle filtering.
+function rb_eltype(::LinearGaussianStateSpaceModel{T}) where {T}
+    return @NamedTuple{μ::Vector{T}, Σ::Matrix{T}} where {T}
+end
+
 #######################
 #### DISTRIBUTIONS ####
 #######################

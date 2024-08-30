@@ -1,6 +1,13 @@
+import Base: eltype
+
 export KalmanFilter, filter
 
 struct KalmanFilter <: FilteringAlgorithm end
+
+function initialise(model::LinearGaussianStateSpaceModel{T}, filter::KalmanFilter) where {T}
+    μ0, Σ0 = calc_initial(model.dyn)
+    return (μ=μ0, Σ=Σ0)
+end
 
 function predict(
     model::LinearGaussianStateSpaceModel{T},
@@ -60,8 +67,7 @@ function filter(
     data::Vector{Vector{T}},
     extras,
 ) where {T}
-    μ0, Σ0 = calc_initial(model.dyn)
-    state = (μ=μ0, Σ=Σ0)
+    state = initialise(model, filter)
     states = Vector{@NamedTuple{μ::Vector{T}, Σ::Matrix{T}}}(undef, length(data))
     ll = 0.0
     for (i, obs) in enumerate(data[1:end])
