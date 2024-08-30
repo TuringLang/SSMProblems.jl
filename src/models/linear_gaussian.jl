@@ -42,9 +42,9 @@ const LinearGaussianStateSpaceModel{T} = SSMProblems.StateSpaceModel{
 #### DISTRIBUTIONS ####
 #######################
 
-function SSMProblems.distribution(dyn::LinearGaussianLatentDynamics, extra)
-    # TODO: change
-    return MvNormal(dyn.μ0, dyn.Σ0)
+function SSMProblems.distribution(dyn::LinearGaussianLatentDynamics)
+    μ0, Σ0 = calc_initial(dyn)
+    return MvNormal(μ0, Σ0)
 end
 
 function SSMProblems.distribution(
