@@ -3,7 +3,7 @@
 import AbstractMCMC: sample
 export sample
 
-function sample(rng::AbstractRNG, model::AbstractStateSpaceModel, extras::AbstractVector)
+function sample(rng::AbstractRNG, model::StateSpaceModel, extras::AbstractVector)
     T = length(extras)
 
     x0 = simulate(rng, model.dyn, extras[1])
