@@ -10,8 +10,8 @@ abstract type LinearGaussianLatentDynamics{T} <: SSMProblems.LatentDynamics end
 
 function calc_μ0 end
 function calc_Σ0 end
-function calc_initial(dyn::LinearGaussianLatentDynamics, extra)
-    return calc_μ0(dyn, extra), calc_Σ0(dyn, extra)
+function calc_initial(dyn::LinearGaussianLatentDynamics)
+    return calc_μ0(dyn), calc_Σ0(dyn)
 end
 
 function calc_A end
@@ -72,8 +72,8 @@ struct HomogeneousLinearGaussianLatentDynamics{T} <: LinearGaussianLatentDynamic
     b::Vector{T}
     Q::Matrix{T}
 end
-calc_μ0(dyn::HomogeneousLinearGaussianLatentDynamics, extra) = dyn.μ0
-calc_Σ0(dyn::HomogeneousLinearGaussianLatentDynamics, extra) = dyn.Σ0
+calc_μ0(dyn::HomogeneousLinearGaussianLatentDynamics) = dyn.μ0
+calc_Σ0(dyn::HomogeneousLinearGaussianLatentDynamics) = dyn.Σ0
 calc_A(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, extra) = dyn.A
 calc_b(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, extra) = dyn.b
 calc_Q(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, extra) = dyn.Q
