@@ -53,14 +53,13 @@ function distribution(dyn::LatentDynamics, extra)
 end
 
 """
-    distribution(dyn::LatentDynamics, step::Integer, state, extra)
+    distribution(dyn::LatentDynamics, step::Integer, prev_state, extra)
 
 Return the transition distribution for the latent dynamics.
 
-The method should return the distribution of the state for the next time step given the
-current state `state` at time step `step`. The returned value should be a
-`Distributions.Distribution` object that implements sampling and log-density
-calculations. 
+The method should return the distribution of the current state (at time step `step`) given 
+the previous state `prev_state`. The returned value should be a `Distributions.Distribution`
+object that implements sampling and log-density calculations. 
 
 See also [`LatentDynamics`](@ref).
 
@@ -110,23 +109,23 @@ function simulate(dyn::LatentDynamics, extra)
 end
 
 """
-    simulate([rng::AbstractRNG], dyn::LatentDynamics, step::Integer, state, extra)
+    simulate([rng::AbstractRNG], dyn::LatentDynamics, step::Integer, prev_state, extra)
 
 Simulate a transition of the latent dynamics.
 
-The method should return a random state for the next time step given the state `state` 
-at the current time step, `step`.
+The method should return a random state for the current time step, `step`,  given the
+previous state, `prev_state`.
 
 The default behaviour is generate a random sample from distribution returned by the
 corresponding `distribution()` method.
 
 See also [`LatentDynamics`](@ref).
 """
-function simulate(rng::AbstractRNG, dyn::LatentDynamics, step::Integer, state, extra)
-    return rand(rng, distribution(dyn, step, state, extra))
+function simulate(rng::AbstractRNG, dyn::LatentDynamics, step::Integer, prev_state, extra)
+    return rand(rng, distribution(dyn, step, prev_state, extra))
 end
-function simulate(dynamics::LatentDynamics, state, step, extra)
-    return simulate(default_rng(), dynamics, state, step, extra)
+function simulate(dynamics::LatentDynamics, prev_state, step, extra)
+    return simulate(default_rng(), dynamics, prev_state, step, extra)
 end
 
 """
@@ -167,20 +166,20 @@ function logdensity(dyn::LatentDynamics, new_state, extra)
 end
 
 """
-    logdensity(dyn::LatentDynamics, step::Integer, state, new_state, extra)
+    logdensity(dyn::LatentDynamics, step::Integer, prev_state, new_state, extra)
 
 Compute the log-density of a transition of the latent dynamics.
 
-The method should return the log-density of the new state `new_state` given the current
-state `state` at time step `step`.
+The method should return the log-density of the new state `new_state` (at time step `step`)
+given the previous state `prev_state` 
 
 The default behaviour is to compute the log-density of the distribution return by the
 corresponding `distribution()` method.
 
 See also [`LatentDynamics`](@ref).
 """
-function logdensity(dyn::LatentDynamics, step::Integer, state, new_state, extra)
-    return logpdf(distribution(dyn, step, state, extra), new_state)
+function logdensity(dyn::LatentDynamics, step::Integer, prev_state, new_state, extra)
+    return logpdf(distribution(dyn, step, prev_state, extra), new_state)
 end
 
 """
