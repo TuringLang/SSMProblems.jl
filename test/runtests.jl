@@ -24,7 +24,7 @@ using TestItems
 
     kf = KalmanFilter()
 
-    states = AnalyticFilters.filter(model, kf, observations, [nothing])
+    states, _ = AnalyticFilters.filter(model, kf, observations, [nothing])
 
     # Let Z = [X0, X1, Y1] be the joint state vector
     # Write Z = P.Z + ϵ, where ϵ ~ N(μ_ϵ, Σ_ϵ)

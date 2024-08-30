@@ -26,12 +26,19 @@ function update(
 ) where {T}
     μ, Σ = state.μ, state.Σ
     H, c, R = calc_params(model.obs, step, extra)
-    y = obs - H * μ - c
+
+    # Update state
+    m = H * μ + c
+    y = obs - m
     S = H * Σ * H' + R
     K = Σ * H' / S
     μ̂ = μ + K * y
     Σ̂ = Σ - K * H * Σ
-    return (μ=μ̂, Σ=Σ̂)
+
+    # Compute log-likelihood
+    ll = logpdf(MvNormal(m, S), obs)
+
+    return (μ=μ̂, Σ=Σ̂), ll
 end
 
 function step(
@@ -43,8 +50,8 @@ function step(
     extra,
 ) where {T}
     state = predict(model, filter, step, state, extra)
-    state = update(model, filter, step, state, obs, extra)
-    return state
+    state, ll = update(model, filter, step, state, obs, extra)
+    return state, ll
 end
 
 function filter(
@@ -56,9 +63,11 @@ function filter(
     μ0, Σ0 = calc_initial(model.dyn)
     state = (μ=μ0, Σ=Σ0)
     states = Vector{@NamedTuple{μ::Vector{T}, Σ::Matrix{T}}}(undef, length(data))
+    ll = 0.0
     for (i, obs) in enumerate(data[1:end])
-        state = step(model, filter, i, state, obs, extras[i])
+        state, step_ll = step(model, filter, i, state, obs, extras[i])
         states[i] = state
+        ll += step_ll
     end
-    return states
+    return states, ll
 end
