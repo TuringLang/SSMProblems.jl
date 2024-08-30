@@ -1,11 +1,17 @@
-import SSMProblems: LatentDynamics, ObservationProcess, simulate
+import SSMProblems:
+    LatentDynamics, ObservationProcess, AbstractStateSpaceModel, StateSpaceModel, simulate
+
 export HierarchicalSSM
 
-struct HierarchicalSSM{LD1<:LatentDynamics,LD2<:LatentDynamics,OP<:ObservationProcess} <:
-       SSMProblems.AbstractStateSpaceModel
-    outer_dyn::LD1
-    inner_dyn::LD2
-    obs::OP
+struct HierarchicalSSM{OD<:LatentDynamics,M<:AbstractStateSpaceModel} <:
+       AbstractStateSpaceModel
+    outer_dyn::OD
+    inner_model::M
+end
+function HierarchicalSSM(
+    outer_dyn::LatentDynamics, inner_dyn::LatentDynamics, obs::ObservationProcess
+)
+    return HierarchicalSSM(outer_dyn, StateSpaceModel(inner_dyn, obs))
 end
 
 function AbstractMCMC.sample(

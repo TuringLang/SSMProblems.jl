@@ -6,12 +6,12 @@ export create_homogeneous_linear_gaussian_model
 import SSMProblems: distribution
 import Distributions: MvNormal
 
-abstract type LinearGaussianLatentDynamics{T} <: SSMProblems.LatentDynamics end
+abstract type LinearGaussianLatentDynamics{T} <: SSMProblems.LatentDynamics{Vector{T}} end
 
 function calc_μ0 end
 function calc_Σ0 end
-function calc_initial(dyn::LinearGaussianLatentDynamics, extra)
-    return calc_μ0(dyn, extra), calc_Σ0(dyn, extra)
+function calc_initial(dyn::LinearGaussianLatentDynamics)
+    return calc_μ0(dyn), calc_Σ0(dyn)
 end
 
 function calc_A end
@@ -21,7 +21,8 @@ function calc_params(dyn::LinearGaussianLatentDynamics, step::Integer, extra)
     return (calc_A(dyn, step, extra), calc_b(dyn, step, extra), calc_Q(dyn, step, extra))
 end
 
-abstract type LinearGaussianObservationProcess{T} <: SSMProblems.ObservationProcess end
+abstract type LinearGaussianObservationProcess{T} <:
+              SSMProblems.ObservationProcess{Vector{T},Vector{T}} end
 
 function calc_H end
 function calc_c end
@@ -38,13 +39,20 @@ const LinearGaussianStateSpaceModel{T} = SSMProblems.StateSpaceModel{
     D,O
 } where {T,D<:LinearGaussianLatentDynamics{T},O<:LinearGaussianObservationProcess{T}}
 
+# TODO: this is hacky and should ideally be removed
+# Can't use `eltype` because that is used by SSMProblems for forward simulation and would be
+# used by a particle filtering.
+function rb_eltype(::LinearGaussianStateSpaceModel{T}) where {T}
+    return @NamedTuple{μ::Vector{T}, Σ::Matrix{T}} where {T}
+end
+
 #######################
 #### DISTRIBUTIONS ####
 #######################
 
-function SSMProblems.distribution(dyn::LinearGaussianLatentDynamics, extra)
-    # TODO: change
-    return MvNormal(dyn.μ0, dyn.Σ0)
+function SSMProblems.distribution(dyn::LinearGaussianLatentDynamics)
+    μ0, Σ0 = calc_initial(dyn)
+    return MvNormal(μ0, Σ0)
 end
 
 function SSMProblems.distribution(
@@ -72,8 +80,8 @@ struct HomogeneousLinearGaussianLatentDynamics{T} <: LinearGaussianLatentDynamic
     b::Vector{T}
     Q::Matrix{T}
 end
-calc_μ0(dyn::HomogeneousLinearGaussianLatentDynamics, extra) = dyn.μ0
-calc_Σ0(dyn::HomogeneousLinearGaussianLatentDynamics, extra) = dyn.Σ0
+calc_μ0(dyn::HomogeneousLinearGaussianLatentDynamics) = dyn.μ0
+calc_Σ0(dyn::HomogeneousLinearGaussianLatentDynamics) = dyn.Σ0
 calc_A(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, extra) = dyn.A
 calc_b(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, extra) = dyn.b
 calc_Q(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, extra) = dyn.Q

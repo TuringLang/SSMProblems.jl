@@ -1,6 +1,13 @@
+import Base: eltype
+
 export KalmanFilter, filter
 
 struct KalmanFilter <: FilteringAlgorithm end
+
+function initialise(model::LinearGaussianStateSpaceModel{T}, filter::KalmanFilter) where {T}
+    μ0, Σ0 = calc_initial(model.dyn)
+    return (μ=μ0, Σ=Σ0)
+end
 
 function predict(
     model::LinearGaussianStateSpaceModel{T},
@@ -26,12 +33,19 @@ function update(
 ) where {T}
     μ, Σ = state.μ, state.Σ
     H, c, R = calc_params(model.obs, step, extra)
-    y = obs - H * μ - c
+
+    # Update state
+    m = H * μ + c
+    y = obs - m
     S = H * Σ * H' + R
     K = Σ * H' / S
     μ̂ = μ + K * y
     Σ̂ = Σ - K * H * Σ
-    return (μ=μ̂, Σ=Σ̂)
+
+    # Compute log-likelihood
+    ll = logpdf(MvNormal(m, S), obs)
+
+    return (μ=μ̂, Σ=Σ̂), ll
 end
 
 function step(
@@ -43,23 +57,23 @@ function step(
     extra,
 ) where {T}
     state = predict(model, filter, step, state, extra)
-    state = update(model, filter, step, state, obs, extra)
-    return state
+    state, ll = update(model, filter, step, state, obs, extra)
+    return state, ll
 end
 
 function filter(
     model::LinearGaussianStateSpaceModel{T},
     filter::KalmanFilter,
     data::Vector{Vector{T}},
-    extra,
+    extras,
 ) where {T}
-    μ0, Σ0 = calc_initial(model.dyn, extra)
-    state = (μ=μ0, Σ=Σ0)
-    state = update(model, filter, 1, state, data[1], extra)
-    states = [state]
-    for (i, obs) in enumerate(data[2:end])
-        state = step(model, filter, i, state, obs, extra)
-        push!(states, state)
+    state = initialise(model, filter)
+    states = Vector{@NamedTuple{μ::Vector{T}, Σ::Matrix{T}}}(undef, length(data))
+    ll = 0.0
+    for (i, obs) in enumerate(data[1:end])
+        state, step_ll = step(model, filter, i, state, obs, extras[i])
+        states[i] = state
+        ll += step_ll
     end
-    return states
+    return states, ll
 end
