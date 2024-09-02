@@ -1,4 +1,7 @@
 using TestItems
+using TestItemRunner
+
+@run_package_tests
 
 @testitem "Kalman filter test" begin
     using AnalyticFilters
