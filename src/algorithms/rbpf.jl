@@ -50,7 +50,7 @@ function filter(
             new_xs[i] = simulate(rng, outer_dyn, t, xs[j], u)
 
             new_extras = (prev_outer=xs[j], new_outer=new_xs[i])
-            inner_u = isnothing(u) ? new_extras : (u..., new_extras)
+            inner_u = isnothing(u) ? new_extras : (; u..., new_extras...)
 
             new_zs[i], ll = step(inner_model, algo.inner_algo, t, zs[j], y, inner_u)
             new_log_ws[i] = log_ws[j] + ll
