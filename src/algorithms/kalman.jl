@@ -1,5 +1,3 @@
-import Base: eltype
-
 export KalmanFilter, filter
 
 struct KalmanFilter <: FilteringAlgorithm end

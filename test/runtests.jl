@@ -52,6 +52,7 @@ using TestItems
     μ_X1 = μ_Z[I_x] + Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ (y - μ_Z[I_y]))
     Σ_X1 = Σ_Z[I_x, I_x] - Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ Σ_Z[I_y, I_x])
 
+    # TODO: test log-likelihood using marginalisation formula
     @test only(states).μ ≈ μ_X1
     @test only(states).Σ ≈ Σ_X1
 end
