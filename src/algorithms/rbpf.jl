@@ -1,13 +1,39 @@
 import LinearAlgebra: I
 import Distributions: logpdf
-import LogExpFunctions: softmax
+import LogExpFunctions: softmax, logsumexp
 import StatsBase: Weights
 
 export RBPF
 
 struct RBPF{F<:FilteringAlgorithm} <: FilteringAlgorithm
-    n_particles::Int
     inner_algo::F
+    n_particles::Int
+    resample_threshold::Float64
+end
+RBPF(inner_algo::F, n_particles::Int) where {F} = RBPF(inner_algo, n_particles, 1.0)
+
+# TODO: rewrite this in terms of predict/update. This gets quite messy with the extra
+# arguments. 
+function step(rng, model::HierarchicalSSM, algo::RBPF, t::Integer, state, obs, extra)
+    xs, zs, log_ws = state
+
+    N = algo.n_particles
+    outer_dyn, inner_model = model.outer_dyn, model.inner_model
+
+    for i in 1:N
+        prev_x = xs[i]
+        xs[i] = simulate(rng, outer_dyn, t, prev_x, extra)
+
+        new_extra = (prev_outer=prev_x, new_outer=xs[i])
+        inner_extra = isnothing(extra) ? new_extra : (; extra..., new_extra...)
+
+        zs[i], inner_ll = step(inner_model, algo.inner_algo, t, zs[i], obs, inner_extra)
+        log_ws[i] = log_ws[i] + inner_ll
+    end
+
+    # TODO: this is probably incorrect
+    ll = logsumexp(log_ws) - log(N)
+    return (xs, zs, log_ws), ll
 end
 
 function filter(
@@ -17,7 +43,6 @@ function filter(
     observations::AbstractVector,
     extras::AbstractVector,
 )
-    T = length(observations)
     N = algo.n_particles
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
@@ -25,41 +50,36 @@ function filter(
     outer_type, inner_type = eltype(outer_dyn), rb_eltype(inner_model)
     xs = Vector{outer_type}(undef, N)
     zs = Vector{inner_type}(undef, N)
-    new_xs = Vector{outer_type}(undef, N)
-    new_zs = Vector{inner_type}(undef, N)
     log_ws = fill(-log(N), N)
-    new_log_ws = similar(log_ws)
 
     # Initialisation
+    ll = 0.0
     for i in 1:N
         xs[i] = simulate(rng, outer_dyn)
         zs[i] = initialise(inner_model, algo.inner_algo)
     end
 
-    for t in 1:T
-        y = observations[t]
-        u = extras[t]
-
-        # Resampling
+    # Predict-update loop
+    for (i, obs) in enumerate(observations)
+        # Optional resampling
         weights = Weights(softmax(log_ws))
-        parent_idxs = sample(rng, 1:N, weights, N)
-        log_ws .= -log(N)
-
-        for i in 1:N
-            j = parent_idxs[i]
-            new_xs[i] = simulate(rng, outer_dyn, t, xs[j], u)
-
-            new_extras = (prev_outer=xs[j], new_outer=new_xs[i])
-            inner_u = isnothing(u) ? new_extras : (; u..., new_extras...)
-
-            new_zs[i], ll = step(inner_model, algo.inner_algo, t, zs[j], y, inner_u)
-            new_log_ws[i] = log_ws[j] + ll
+        ess = 1 / sum(weights .^ 2)
+        if ess < algo.resample_threshold * N
+            idxs = sample(rng, 1:N, weights, N)
+            xs .= xs[idxs]
+            zs .= zs[idxs]
+            log_ws .= fill(-log(N), N)
         end
-
-        xs .= new_xs
-        zs .= new_zs
-        log_ws .= new_log_ws
+        (xs, zs, log_ws), step_ll = step(
+            rng, model, algo, i, (xs, zs, log_ws), obs, extras[i]
+        )
+        ll += step_ll
     end
+    return (xs, zs, log_ws), ll
+end
 
-    return xs, zs, log_ws
+function filter(
+    model::HierarchicalSSM, algo::RBPF, observations::AbstractVector, extras::AbstractVector
+)
+    return filter(default_rng(), model, algo, observations, extras)
 end
