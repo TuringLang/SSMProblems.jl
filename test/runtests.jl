@@ -162,7 +162,7 @@ end
     R = rand(rng, 2, 2)
     R = R * R' / 3.0  # make R positive definite
 
-    N_particles = 1000
+    N_particles = 100000
     T = 1
 
     observations = [rand(rng, 2) for _ in 1:T]
@@ -184,8 +184,10 @@ end
     obs = AnalyticFilters.HomogeneousLinearGaussianObservationProcess(H[:, 3:4], c, R)
     hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
 
-    rbpf = RBPF(N_particles, KalmanFilter())
-    xs, zs, log_ws = AnalyticFilters.filter(rng, hier_model, rbpf, observations, extras)
+    rbpf = RBPF(KalmanFilter(), N_particles)
+    (xs, zs, log_ws), ll = AnalyticFilters.filter(
+        rng, hier_model, rbpf, observations, extras
+    )
 
     weights = Weights(softmax(log_ws))
 
