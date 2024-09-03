@@ -142,7 +142,7 @@ end
 
     println("ESS: ", 1 / sum(weights .^ 2))
     println("Weighted mean:", sum(xs .* weights))
-    println("Kalman filter mean:", kf_states[T].μ)
+    println("Kalman filter mean:", kf_states[T].μ[1:2])
 
     # Resample outer states
     # resampled_xs = sample(rng, xs, weights, N_particles)
