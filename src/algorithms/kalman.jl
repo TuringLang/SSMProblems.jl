@@ -68,7 +68,7 @@ function filter(
     state = initialise(model, filter)
     states = Vector{@NamedTuple{μ::Vector{T}, Σ::Matrix{T}}}(undef, length(data))
     ll = 0.0
-    for (i, obs) in enumerate(data[1:end])
+    for (i, obs) in enumerate(data)
         state, step_ll = step(model, filter, i, state, obs, extras[i])
         states[i] = state
         ll += step_ll
