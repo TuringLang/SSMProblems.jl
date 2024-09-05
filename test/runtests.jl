@@ -27,7 +27,7 @@ using TestItemRunner
 
     kf = KalmanFilter()
 
-    states, _ = AnalyticFilters.filter(model, kf, observations, [nothing])
+    states, _ = AnalyticFilters.filter(model, kf, observations, nothing, [nothing])
 
     # Let Z = [X0, X1, Y1] be the joint state vector
     # Write Z = P.Z + ϵ, where ϵ ~ N(μ_ϵ, Σ_ϵ)
@@ -78,8 +78,8 @@ end
         C::Matrix{T}
         Q::Matrix{T}
     end
-    AnalyticFilters.calc_μ0(dyn::InnerDynamics) = dyn.μ0
-    AnalyticFilters.calc_Σ0(dyn::InnerDynamics) = dyn.Σ0
+    AnalyticFilters.calc_μ0(dyn::InnerDynamics, extra) = dyn.μ0
+    AnalyticFilters.calc_Σ0(dyn::InnerDynamics, extra) = dyn.Σ0
     AnalyticFilters.calc_A(dyn::InnerDynamics, ::Integer, extra) = dyn.A
     function AnalyticFilters.calc_b(dyn::InnerDynamics, ::Integer, extra)
         return dyn.b + dyn.C * extra.prev_outer
@@ -117,12 +117,15 @@ end
     T = 1
 
     observations = [rand(rng, 2) for _ in 1:T]
+    extra0 = nothing
     extras = [nothing for _ in 1:T]
 
     # Kalman filtering
 
     full_model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
-    kf_states, ll = AnalyticFilters.filter(full_model, KalmanFilter(), observations, extras)
+    kf_states, ll = AnalyticFilters.filter(
+        full_model, KalmanFilter(), observations, extra0, extras
+    )
 
     # Rao-Blackwellised particle filtering
 
@@ -137,7 +140,7 @@ end
 
     rbpf = RBPF(KalmanFilter(), N_particles)
     (xs, zs, log_ws), ll = AnalyticFilters.filter(
-        rng, hier_model, rbpf, observations, extras
+        rng, hier_model, rbpf, observations, extra0, extras
     )
 
     weights = Weights(softmax(log_ws))
