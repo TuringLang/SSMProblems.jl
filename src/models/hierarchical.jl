@@ -13,7 +13,7 @@ function HierarchicalSSM(
 end
 
 function AbstractMCMC.sample(
-    rng::AbstractRNG, model::HierarchicalSSM, extras::AbstractVector
+    rng::AbstractRNG, model::HierarchicalSSM, extra0, extras::AbstractVector
 )
     T = length(extras)
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
@@ -22,7 +22,7 @@ function AbstractMCMC.sample(
     augmented_extras = Vector{NamedTuple}(undef, T)
 
     # Simulate outer dynamics
-    x0 = simulate(rng, outer_dyn)
+    x0 = simulate(rng, outer_dyn, extra0)
     for t in 1:T
         prev_x = t == 1 ? x0 : xs[t - 1]
         xs[t] = simulate(rng, model.outer_dyn, t, prev_x, extras[t])
@@ -34,5 +34,5 @@ function AbstractMCMC.sample(
     # Simulate inner model
     zs, ys = sample(rng, inner_model, augmented_extras)
 
-    return xs, zs, ys
+    return x0, xs, zs, ys
 end
