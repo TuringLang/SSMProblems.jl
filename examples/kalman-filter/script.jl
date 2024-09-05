@@ -100,16 +100,16 @@ function AbstractMCMC.sample(
     @unpack z, P, Φ, b, Q = model.dyn  ## Extract parameters
     @unpack H, R = model.obs
 
-    # Initialise the filter
+    ## Initialise the filter
     x = z
     P = P
 
     for t in 1:T
-        # Prediction step
+        ## Prediction step
         x = Φ * x + b
         P = Φ * P * Φ' + Q
 
-        # Update step
+        ## Update step
         y = observations[t]
         K = P * H' / (H * P * H' + R)
         x = x + K * (y - H * x)
