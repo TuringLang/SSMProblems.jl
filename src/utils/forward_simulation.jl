@@ -3,28 +3,27 @@
 import AbstractMCMC: sample
 export sample
 
-function sample(rng::AbstractRNG, model::StateSpaceModel, extras::AbstractVector)
+function sample(rng::AbstractRNG, model::StateSpaceModel, extra0, extras::AbstractVector)
     T = length(extras)
 
-    T1, T2 = eltype(model)
-    xs = Vector{T1}(undef, T)
-    ys = Vector{T2}(undef, T)
+    T_dyn, T_obs = eltype(model)
+    xs = Vector{T_dyn}(undef, T)
+    ys = Vector{T_obs}(undef, T)
 
-    x0 = simulate(rng, model.dyn)
+    x0 = simulate(rng, model.dyn, extra0)
     for t in 1:T
         xs[t] = simulate(rng, model.dyn, t, t == 1 ? x0 : xs[t - 1], extras[t])
         ys[t] = simulate(rng, model.obs, t, xs[t], extras[t])
     end
 
-    return xs, ys
+    return x0, xs, ys
 end
-function sample(model::AbstractStateSpaceModel, extras::AbstractVector)
-    return sample(default_rng(), model, extras)
+function sample(model::AbstractStateSpaceModel, extra0, extras::AbstractVector)
+    return sample(default_rng(), model, extra0, extras)
 end
 
 function sample(rng::AbstractRNG, model::AbstractStateSpaceModel, T::Integer)
-    extras = [nothing for _ in 1:T]
-    return sample(rng, model, extras)
+    return sample(rng, model, nothing, [nothing for _ in 1:T])
 end
 function sample(model::AbstractStateSpaceModel, T::Integer)
     return sample(default_rng(), model, T)

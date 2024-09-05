@@ -47,7 +47,7 @@ Base.eltype(::Type{<:LatentDynamics{T}}) where {T} = T
     - `T`: The type of the state of the latent dynamics.
     - `U`: The type of the observation.
 """
-abstract type ObservationProcess{T,U} end
+abstract type ObservationProcess{T} end
 
 """
     eltype(obs::ObservationProcess)
@@ -57,10 +57,10 @@ abstract type ObservationProcess{T,U} end
     The first type is the type of the state of the latent dynamics, and the second type is
     the type of the observation.
 """
-Base.eltype(::Type{<:ObservationProcess{T,U}}) where {T,U} = (T, U)
+Base.eltype(::Type{<:ObservationProcess{T}}) where {T} = T
 
 """
-    distribution(dyn::LatentDynamics)
+    distribution(dyn::LatentDynamics, extra)
 
 Return the initialisation distribution for the latent dynamics.
 
@@ -73,7 +73,7 @@ See also [`LatentDynamics`](@ref).
 # Returns
 - `Distributions.Distribution`: The distribution of the initial state.
 """
-function distribution(dyn::LatentDynamics)
+function distribution(dyn::LatentDynamics, extra)
     throw(MethodError(distribution, (dyn)))
 end
 
@@ -126,12 +126,10 @@ end
 
     See also [`LatentDynamics`](@ref).
 """
-function simulate(rng::AbstractRNG, dyn::LatentDynamics)
-    return rand(rng, distribution(dyn))
+function simulate(rng::AbstractRNG, dyn::LatentDynamics, extra)
+    return rand(rng, distribution(dyn, extra))
 end
-function simulate(dyn::LatentDynamics)
-    return simulate(default_rng(), dyn)
-end
+simulate(dyn::LatentDynamics, extra) = simulate(default_rng(), dyn, extra)
 
 """
     simulate([rng::AbstractRNG], dyn::LatentDynamics, step::Integer, prev_state, extra)
@@ -186,8 +184,8 @@ corresponding `distribution()` method.
 
 See also [`LatentDynamics`](@ref).
 """
-function logdensity(dyn::LatentDynamics, new_state)
-    return logpdf(distribution(dyn), new_state)
+function logdensity(dyn::LatentDynamics, new_state, extra)
+    return logpdf(distribution(dyn, extra), new_state)
 end
 
 """
@@ -249,13 +247,6 @@ abstract type AbstractStateSpaceModel <: AbstractMCMC.AbstractModel end
 struct StateSpaceModel{LD<:LatentDynamics,OP<:ObservationProcess} <: AbstractStateSpaceModel
     dyn::LD
     obs::OP
-    function StateSpaceModel(dyn::LD, obs::OP) where {LD,OP}
-        # Check state types match
-        if eltype(dyn) != eltype(obs)[1]
-            throw(ArgumentError("State types of `dyn` and `obs` must match"))
-        end
-        return new{LD,OP}(dyn, obs)
-    end
 end
 
 """
@@ -267,7 +258,7 @@ end
     the type of the observation. This is equivalent to calling `eltype` on the observation
     process.
 """
-Base.eltype(::Type{<:StateSpaceModel{LD,OP}}) where {LD,OP} = eltype(OP)
+Base.eltype(::Type{<:StateSpaceModel{LD,OP}}) where {LD,OP} = (eltype(LD), eltype(OP))
 
 include("utils/forward_simulation.jl")
 
