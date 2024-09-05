@@ -5,24 +5,28 @@ export HomogeneousDiscreteLatentDynamics
 import SSMProblems: distribution
 import Distributions: Categorical
 
-abstract type DiscreteLatentDynamics{T<:Integer} <: SSMProblems.LatentDynamics{T} end
+abstract type DiscreteLatentDynamics{T_state<:Integer,T_prob<:Real} <:
+              SSMProblems.LatentDynamics{T_state} end
 
 function calc_α0 end
 function calc_P end
 
-const DiscreteStateSpaceModel{T} = SSMProblems.StateSpaceModel{
-    D,O
-} where {T,D<:DiscreteLatentDynamics{T},O<:ObservationProcess{T}}
+const DiscreteStateSpaceModel{LD,OD} = SSMProblems.StateSpaceModel{
+    LD,OD
+} where {LD<:DiscreteLatentDynamics,OD<:ObservationProcess}
 
-# TODO: how do we inference this type? Depends on the type of α0/P
-rb_eltype(::DiscreteStateSpaceModel) = Vector{Float64}
+function rb_eltype(
+    ::DiscreteStateSpaceModel{LD}
+) where {T_state,T_prob,LD<:DiscreteLatentDynamics{T_state,T_prob}}
+    return Vector{T_prob}
+end
 
 #######################
 #### DISTRIBUTIONS ####
 #######################
 
-function SSMProblems.distribution(dyn::DiscreteLatentDynamics)
-    α0 = calc_α0(dyn)
+function SSMProblems.distribution(dyn::DiscreteLatentDynamics, extra)
+    α0 = calc_α0(dyn, extra)
     return Categorical(α0)
 end
 
@@ -38,9 +42,10 @@ end
 ####################################
 
 # TODO: likewise, where do these types come from?
-struct HomogeneousDiscreteLatentDynamics{T<:Integer} <: DiscreteLatentDynamics{T}
-    α0::Vector{Float64}
-    P::Matrix{Float64}
+struct HomogeneousDiscreteLatentDynamics{T_state<:Integer,T_prob<:Real} <:
+       DiscreteLatentDynamics{T_state,T_prob}
+    α0::Vector{T_prob}
+    P::Matrix{T_prob}
 end
-calc_α0(dyn::HomogeneousDiscreteLatentDynamics) = dyn.α0
+calc_α0(dyn::HomogeneousDiscreteLatentDynamics, extra) = dyn.α0
 calc_P(dyn::HomogeneousDiscreteLatentDynamics, ::Integer, extra) = dyn.P

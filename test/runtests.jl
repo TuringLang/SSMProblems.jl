@@ -72,8 +72,8 @@ end
     P = rand(rng, 3, 3)
     P = P ./ sum(P; dims=2)
 
-    struct MixtureModelObservation{T<:Integer,U} <: SSMProblems.ObservationProcess{T,U}
-        μs::Vector{U}
+    struct MixtureModelObservation{T} <: SSMProblems.ObservationProcess{T}
+        μs::Vector{T}
     end
 
     function SSMProblems.logdensity(
@@ -84,13 +84,15 @@ end
 
     μs = [0.0, 1.0, 2.0]
 
-    dyn = HomogeneousDiscreteLatentDynamics{Int64}(α0, P)
-    obs = MixtureModelObservation{Int64,Float64}(μs)
+    dyn = HomogeneousDiscreteLatentDynamics{Int,Float64}(α0, P)
+    obs = MixtureModelObservation(μs)
     model = StateSpaceModel(dyn, obs)
 
     observations = [rand(rng)]
 
-    states, ll = AnalyticFilters.filter(model, ForwardAlgorithm(), observations, [nothing])
+    states, ll = AnalyticFilters.filter(
+        model, ForwardAlgorithm(), observations, nothing, [nothing]
+    )
 
     # Brute force calculations of each conditional path probability p(x_{1:T} | y_{1:T})
     T = 1

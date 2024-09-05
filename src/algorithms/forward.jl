@@ -2,8 +2,8 @@ export ForwardAlgorithm, filter
 
 struct ForwardAlgorithm <: FilteringAlgorithm end
 
-function initialise(model::DiscreteStateSpaceModel{T}, ::ForwardAlgorithm) where {T}
-    return calc_α0(model.dyn)
+function initialise(model::DiscreteStateSpaceModel{T}, ::ForwardAlgorithm, extra) where {T}
+    return calc_α0(model.dyn, extra)
 end
 
 function predict(
@@ -50,10 +50,14 @@ function step(
 end
 
 function filter(
-    model::DiscreteStateSpaceModel{T}, filter::ForwardAlgorithm, data::Vector, extras
+    model::DiscreteStateSpaceModel{T},
+    filter::ForwardAlgorithm,
+    data::Vector,
+    extra0,
+    extras,
 ) where {T}
-    state = initialise(model, filter)
-    states = Vector{Vector{Float64}}(undef, length(data))
+    state = initialise(model, filter, extra0)
+    states = Vector{rb_eltype(model)}(undef, length(data))
     ll = 0.0
     for (i, obs) in enumerate(data[1:end])
         state, step_ll = step(model, filter, i, state, obs, extras[i])
