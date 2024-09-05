@@ -60,6 +60,57 @@ using TestItemRunner
     @test only(states).Σ ≈ Σ_X1
 end
 
+@testitem "Forward algorithm test" begin
+    using AnalyticFilters
+    using Distributions
+    using StableRNGs
+    using SSMProblems
+
+    rng = StableRNG(1234)
+    α0 = rand(rng, 3)
+    α0 = α0 / sum(α0)
+    P = rand(rng, 3, 3)
+    P = P ./ sum(P; dims=2)
+
+    struct MixtureModelObservation{T} <: SSMProblems.ObservationProcess{T}
+        μs::Vector{T}
+    end
+
+    function SSMProblems.logdensity(
+        obs::MixtureModelObservation, ::Integer, state::Integer, y, extra
+    )
+        return logpdf(Normal(obs.μs[state], 1.0), y)
+    end
+
+    μs = [0.0, 1.0, 2.0]
+
+    dyn = HomogeneousDiscreteLatentDynamics{Int,Float64}(α0, P)
+    obs = MixtureModelObservation(μs)
+    model = StateSpaceModel(dyn, obs)
+
+    observations = [rand(rng)]
+
+    states, ll = AnalyticFilters.filter(
+        model, ForwardAlgorithm(), observations, nothing, [nothing]
+    )
+
+    # Brute force calculations of each conditional path probability p(x_{1:T} | y_{1:T})
+    T = 1
+    K = 3
+    y = only(observations)
+    path_probs = Dict{Tuple{Int,Int},Float64}()
+    for x0 in 1:K, x1 in 1:K
+        prior_prob = α0[x0] * P[x0, x1]
+        likelihood = exp(SSMProblems.logdensity(obs, 1, x1, y, nothing))
+        path_probs[(x0, x1)] = prior_prob * likelihood
+    end
+    marginal = sum(values(path_probs))
+
+    filtered_paths = Base.filter(((k, v),) -> k[end] == 1, path_probs)
+    @test states[end][1] ≈ sum(values(filtered_paths)) / marginal
+    @test ll ≈ log(marginal)
+end
+
 @testitem "Kalman-RBPF test" begin
     using AnalyticFilters
     using Distributions
