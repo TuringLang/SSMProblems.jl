@@ -4,6 +4,7 @@ A unified interface to define state space models in the context of particle MCMC
 module SSMProblems
 
 using AbstractMCMC: AbstractMCMC
+import Base: eltype
 import Random: AbstractRNG, default_rng
 import Distributions: logpdf
 
@@ -19,8 +20,18 @@ export LatentDynamics, ObservationProcess, AbstractStateSpaceModel, StateSpaceMo
 
     Alternatively, you may specify methods for the function `distribution` which will be
     used to define the above methods.
+
+    # Parameters
+    - `T`: The type of the state of the latent dynamics.
 """
-abstract type LatentDynamics end
+abstract type LatentDynamics{T} end
+
+"""
+    eltype(dyn::LatentDynamics)
+
+    Return the type of the state of the latent dynamics.
+"""
+Base.eltype(::Type{<:LatentDynamics{T}}) where {T} = T
 
 """
     Observation process of a state space model.
@@ -31,8 +42,22 @@ abstract type LatentDynamics end
     
     Alternatively, you may specify a method for `distribution`, which will be used to define
     both of the above methods.
+
+    # Parameters
+    - `T`: The type of the state of the latent dynamics.
+    - `U`: The type of the observation.
 """
-abstract type ObservationProcess end
+abstract type ObservationProcess{T} end
+
+"""
+    eltype(obs::ObservationProcess)
+
+    Return a pair of types for the state and observation of the observation process.
+
+    The first type is the type of the state of the latent dynamics, and the second type is
+    the type of the observation.
+"""
+Base.eltype(::Type{<:ObservationProcess{T}}) where {T} = T
 
 """
     distribution(dyn::LatentDynamics, extra)
@@ -49,18 +74,17 @@ See also [`LatentDynamics`](@ref).
 - `Distributions.Distribution`: The distribution of the initial state.
 """
 function distribution(dyn::LatentDynamics, extra)
-    throw(MethodError(distribution, (dyn, extra)))
+    throw(MethodError(distribution, (dyn)))
 end
 
 """
-    distribution(dyn::LatentDynamics, step::Integer, state, extra)
+    distribution(dyn::LatentDynamics, step::Integer, prev_state, extra)
 
 Return the transition distribution for the latent dynamics.
 
-The method should return the distribution of the state for the next time step given the
-current state `state` at time step `step`. The returned value should be a
-`Distributions.Distribution` object that implements sampling and log-density
-calculations. 
+The method should return the distribution of the current state (at time step `step`) given 
+the previous state `prev_state`. The returned value should be a `Distributions.Distribution`
+object that implements sampling and log-density calculations. 
 
 See also [`LatentDynamics`](@ref).
 
@@ -90,7 +114,7 @@ function distribution(obs::ObservationProcess, step::Integer, state, extra)
 end
 
 """
-    simulate([rng::AbstractRNG], dyn::LatentDynamics, extra)
+    simulate([rng::AbstractRNG], dyn::LatentDynamics)
 
     Simulate an initial state for the latent dynamics.
 
@@ -105,28 +129,26 @@ end
 function simulate(rng::AbstractRNG, dyn::LatentDynamics, extra)
     return rand(rng, distribution(dyn, extra))
 end
-function simulate(dyn::LatentDynamics, extra)
-    return simulate(default_rng(), dyn, extra)
-end
+simulate(dyn::LatentDynamics, extra) = simulate(default_rng(), dyn, extra)
 
 """
-    simulate([rng::AbstractRNG], dyn::LatentDynamics, step::Integer, state, extra)
+    simulate([rng::AbstractRNG], dyn::LatentDynamics, step::Integer, prev_state, extra)
 
 Simulate a transition of the latent dynamics.
 
-The method should return a random state for the next time step given the state `state` 
-at the current time step, `step`.
+The method should return a random state for the current time step, `step`,  given the
+previous state, `prev_state`.
 
 The default behaviour is generate a random sample from distribution returned by the
 corresponding `distribution()` method.
 
 See also [`LatentDynamics`](@ref).
 """
-function simulate(rng::AbstractRNG, dyn::LatentDynamics, step::Integer, state, extra)
-    return rand(rng, distribution(dyn, step, state, extra))
+function simulate(rng::AbstractRNG, dyn::LatentDynamics, step::Integer, prev_state, extra)
+    return rand(rng, distribution(dyn, step, prev_state, extra))
 end
-function simulate(dynamics::LatentDynamics, state, step, extra)
-    return simulate(default_rng(), dynamics, state, step, extra)
+function simulate(dynamics::LatentDynamics, prev_state, step, extra)
+    return simulate(default_rng(), dynamics, prev_state, step, extra)
 end
 
 """
@@ -150,7 +172,7 @@ function simulate(obs::ObservationProcess, step::Integer, state, extra)
 end
 
 """
-    logdensity(dyn::LatentDynamics, new_state, extra)
+    logdensity(dyn::LatentDynamics, new_state)
 
 Compute the log-density of an initial state for the latent dynamics.
 
@@ -167,20 +189,20 @@ function logdensity(dyn::LatentDynamics, new_state, extra)
 end
 
 """
-    logdensity(dyn::LatentDynamics, step::Integer, state, new_state, extra)
+    logdensity(dyn::LatentDynamics, step::Integer, prev_state, new_state, extra)
 
 Compute the log-density of a transition of the latent dynamics.
 
-The method should return the log-density of the new state `new_state` given the current
-state `state` at time step `step`.
+The method should return the log-density of the new state `new_state` (at time step `step`)
+given the previous state `prev_state` 
 
 The default behaviour is to compute the log-density of the distribution return by the
 corresponding `distribution()` method.
 
 See also [`LatentDynamics`](@ref).
 """
-function logdensity(dyn::LatentDynamics, step::Integer, state, new_state, extra)
-    return logpdf(distribution(dyn, step, state, extra), new_state)
+function logdensity(dyn::LatentDynamics, step::Integer, prev_state, new_state, extra)
+    return logpdf(distribution(dyn, step, prev_state, extra), new_state)
 end
 
 """
@@ -226,6 +248,17 @@ struct StateSpaceModel{LD<:LatentDynamics,OP<:ObservationProcess} <: AbstractSta
     dyn::LD
     obs::OP
 end
+
+"""
+    eltype(model::StateSpaceModel)
+
+    Return a pair of types for the state and observation of the state space model.
+
+    The first type is the type of the state of the latent dynamics, and the second type is
+    the type of the observation. This is equivalent to calling `eltype` on the observation
+    process.
+"""
+Base.eltype(::Type{<:StateSpaceModel{LD,OP}}) where {LD,OP} = (eltype(LD), eltype(OP))
 
 include("utils/forward_simulation.jl")
 

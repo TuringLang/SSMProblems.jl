@@ -25,7 +25,7 @@ using SSMProblems
 #
 # We store all of these paramaters in a struct.
 
-struct LinearGaussianLatentDynamics{T<:Real} <: LatentDynamics
+struct LinearGaussianLatentDynamics{T<:Real} <: LatentDynamics{Vector{T}}
     z::Vector{T}
     P::Matrix{T}
     Φ::Matrix{T}
@@ -38,7 +38,7 @@ end
 # y[k] = Hx[k] + v[k],          v[k] ∼ N(0, R)
 # ```
 
-struct LinearGaussianObservationProcess{T<:Real} <: ObservationProcess
+struct LinearGaussianObservationProcess{T<:Real} <: ObservationProcess{Vector{T}}
     H::Matrix{T}
     R::Matrix{T}
 end
@@ -57,18 +57,12 @@ function SSMProblems.distribution(model::LinearGaussianLatentDynamics, extra::No
     return MvNormal(model.z, model.P)
 end
 function SSMProblems.distribution(
-    model::LinearGaussianLatentDynamics{T},
-    step::Int,
-    state::AbstractVector{T},
-    extra::Nothing,
+    model::LinearGaussianLatentDynamics{T}, step::Int, prev_state::Vector{T}, extra::Nothing
 ) where {T}
-    return MvNormal(model.Φ * state + model.b, model.Q)
+    return MvNormal(model.Φ * prev_state + model.b, model.Q)
 end
 function SSMProblems.distribution(
-    model::LinearGaussianObservationProcess{T},
-    step::Int,
-    state::AbstractVector{T},
-    extra::Nothing,
+    model::LinearGaussianObservationProcess{T}, step::Int, state::Vector{T}, extra::Nothing
 ) where {T}
     return MvNormal(model.H * state, model.R)
 end
@@ -96,6 +90,7 @@ function AbstractMCMC.sample(
     model::LinearGaussianSSM{U},
     ::KalmanFilter,
     observations::AbstractVector,
+    extra0,
     extras::AbstractVector,
 ) where {U}
     T = length(observations)
@@ -105,35 +100,40 @@ function AbstractMCMC.sample(
     @unpack z, P, Φ, b, Q = model.dyn  ## Extract parameters
     @unpack H, R = model.obs
 
+    ## Initialise the filter
+    x = z
+    P = P
+
     for t in 1:T
-        x_pred, P_pred = if t == 1
-            z, P
-        else
-            Φ * x_filts[t - 1] + b, Φ * P_filts[t - 1] * Φ' + Q  ## Prediction step
-        end
+        ## Prediction step
+        x = Φ * x + b
+        P = Φ * P * Φ' + Q
 
-        y = observations[t]   ## Update step
-        K = P_pred * H' / (H * P_pred * H' + R)
-        x_filt = x_pred + K * (y - H * x_pred)
-        P_filt = P_pred - K * H * P_pred
+        ## Update step
+        y = observations[t]
+        K = P * H' / (H * P * H' + R)
+        x = x + K * (y - H * x)
+        P = P - K * H * P
 
-        x_filts[t] = x_filt
-        P_filts[t] = P_filt
+        x_filts[t] = x
+        P_filts[t] = P
     end
 
     return x_filts, P_filts
 end
 
 # In this specific case, however, since our model is homogenous, we do not expect to have
-# any extras passed in. For convenience, we create a method without the `extras` argument
-# which then replaces them with a vector of `nothing`s. This pattern is not specific to
-# linear Gaussian models or Kalman filters so we define it with general types.
+# any extras passed in. For convenience, we create a method without the `extra0` and
+# `extras` argument which then replaces them with `nothing` and a vector of `nothing`s,
+# respectively. This pattern is not specific to linear Gaussian models or Kalman filters so
+# we define it with general types.
 
 function AbstractMCMC.sample(
     model::StateSpaceModel, algorithm, observations::AbstractVector
 )
+    extra0 = nothing
     extras = fill(nothing, length(observations))
-    return sample(model, algorithm, observations, extras)
+    return sample(model, algorithm, observations, extra0, extras)
 end
 
 # ## Simulation and Filtering
@@ -162,7 +162,7 @@ model = StateSpaceModel(dyn, obs);
 # functions we defined above.
 
 rng = MersenneTwister(SEED);
-xs, ys = sample(rng, model, T);
+x0, xs, ys = sample(rng, model, T);
 
 # We can then run the Kalman filter and plot the filtering results against the ground truth.
 
