@@ -1,4 +1,8 @@
+using TestEnv
+TestEnv.activate()
+
 using AnalyticFilters
+using BenchmarkTools
 using Distributions
 using HypothesisTests
 using LinearAlgebra
@@ -64,7 +68,7 @@ c = rand(rng, 2)
 R = rand(rng, 2, 2)
 R = R * R' / 3.0  # make R positive definite
 
-N_particles = 1000000
+N_particles = 10000
 T = 1
 
 observations = [rand(rng, 2) for _ in 1:T]
@@ -90,18 +94,16 @@ println("Finish ground truth")
 ## Initialisation
 
 function batch_calc_μ0s(dyn::InnerDynamics{T}, N::Integer) where {T}
-    μ0 = cu(dyn.μ0)
-    μ0s = repeat(μ0, 1, N)
-    return μ0s
+    μ0s = CuArray{Float32}(undef, length(dyn.μ0), N)
+    return μ0s[:, :] .= cu(dyn.μ0)
 end
 
 # (..., N)
 μ0s = batch_calc_μ0s(inner_dyn, N_particles)
 
 function batch_calc_Σ0s(dyn::InnerDynamics{T}, N::Integer) where {T}
-    Σ0 = cu(reshape(dyn.Σ0, (size(dyn.Σ0)..., 1)))
-    Σ0s = repeat(Σ0, 1, 1, N)
-    return Σ0s
+    Σ0s = CuArray{Float32}(undef, size(dyn.Σ0)..., N)
+    return Σ0s[:, :, :] .= cu(dyn.Σ0)
 end
 
 # (..., N)
@@ -113,7 +115,9 @@ function batch_simulate(
     μ0, Σ0 = AnalyticFilters.calc_initial(dyn)
     D = length(μ0)
     L = cholesky(Σ0).L
-    Ls = repeat(cu(reshape(Σ0, (size(Σ0)..., 1))), 1, 1, N)
+    # Ls = repeat(cu(reshape(Σ0, (size(Σ0)..., 1))), 1, 1, N)
+    Ls = CuArray{Float32}(undef, size(Σ0)..., N)
+    Ls[:, :, :] .= cu(Σ0)
     return cu(μ0) .+ NNlib.batched_vec(Ls, CUDA.randn(D, N))
 end
 
@@ -134,8 +138,10 @@ function batch_simulate(
     A, b, Q = AnalyticFilters.calc_params(dyn, step, extra)
     D = length(b)
     L = cholesky(Q).L
-    Ls = repeat(cu(reshape(Q, (size(Q)..., 1))), 1, 1, N)
-    As = repeat(cu(reshape(A, (size(A)..., 1))), 1, 1, N)
+    Ls = CuArray{Float32}(undef, size(Q)..., N)
+    Ls[:, :, :] .= cu(Q)
+    As = CuArray{Float32}(undef, size(A)..., N)
+    As[:, :, :] .= cu(A)
     return (NNlib.batched_vec(As, prev_state) .+ cu(b)) +
            NNlib.batched_vec(Ls, CUDA.randn(D, N))
 end
@@ -143,18 +149,19 @@ end
 x1s = batch_simulate(outer_dyn, 1, x0s, nothing, N_particles);
 
 function batch_calc_A(dyn::InnerDynamics, ::Integer, extra, N::Integer)
-    A = cu(reshape(dyn.A, (size(dyn.A)..., 1)))
-    As = repeat(A, 1, 1, N)
+    As = CuArray{Float32}(undef, size(dyn.A)..., N)
+    As[:, :, :] .= cu(dyn.A)
     return As
 end
 function batch_calc_b(dyn::InnerDynamics, ::Integer, extra, N::Integer)
     # return dyn.b + dyn.C * extra.prev_outer
-    Cs = repeat(cu(reshape(dyn.C, (size(dyn.C)..., 1))), 1, 1, N)
+    Cs = CuArray{Float32}(undef, size(dyn.C)..., N)
+    Cs[:, :, :] .= cu(dyn.C)
     return NNlib.batched_vec(Cs, extra.prev_outer) .+ cu(dyn.b)
 end
 function batch_calc_Q(dyn::InnerDynamics, ::Integer, extra, N::Integer)
-    Q = cu(reshape(dyn.Q, (size(dyn.Q)..., 1)))
-    return repeat(Q, 1, 1, N)
+    Q = CuArray{Float32}(undef, size(dyn.Q)..., N)
+    return Q[:, :, :] .= cu(dyn.Q)
 end
 
 extra = (prev_outer=x0s, new_outer=x1s)
@@ -174,16 +181,16 @@ Qs = batch_calc_Q(inner_dyn, 1, extra, N_particles)
 ## Update
 
 function batch_calc_H(obs::LinearGaussianObservationProcess, ::Integer, extra, N::Integer)
-    H = cu(reshape(obs.H, (size(obs.H)..., 1)))
-    return repeat(H, 1, 1, N)
+    H = CuArray{Float32}(undef, size(obs.H)..., N)
+    return H[:, :, :] .= cu(obs.H)
 end
 function batch_calc_c(obs::LinearGaussianObservationProcess, ::Integer, extra, N::Integer)
-    c = cu(obs.c)
-    return repeat(c, 1, N)
+    c = CuArray{Float32}(undef, size(obs.c)..., N)
+    return c[:, :] .= cu(obs.c)
 end
 function batch_calc_R(obs::LinearGaussianObservationProcess, ::Integer, extra, N::Integer)
-    R = cu(reshape(obs.R, (size(obs.R)..., 1)))
-    return repeat(R, 1, 1, N)
+    R = CuArray{Float32}(undef, size(obs.R)..., N)
+    return R[:, :, :] .= cu(obs.R)
 end
 
 Hs = batch_calc_H(obs, 1, nothing, N_particles)
@@ -191,7 +198,7 @@ cs = batch_calc_c(obs, 1, nothing, N_particles)
 Rs = batch_calc_R(obs, 1, nothing, N_particles)
 
 m = NNlib.batched_vec(Hs, μs_pred) .+ cs
-y = CuArray(observations[1]) .- m
+y = cu(observations[1]) .- m
 S = NNlib.batched_mul(NNlib.batched_mul(Hs, Σs_pred), NNlib.batched_transpose(Hs)) .+ Rs
 
 S[:, :, 1]
@@ -202,12 +209,13 @@ HΣ = NNlib.batched_mul(Hs, Σs_pred)
 
 d_ipiv, _, d_S = CUDA.CUBLAS.getrf_strided_batched(S, true)
 
-# TODO: make this work/match direct inversion
-# _, K_s = CUDA.CUBLAS.getrs_strided_batched('N', d_S, HΣ, d_ipiv)
+# TODO: try to find a non-transpose version
+_, K_s = CUDA.CUBLAS.getrs_strided_batched('N', d_S, HΣ, d_ipiv)
+K = NNlib.batched_transpose(K_s)
 
 S_inv = CuArray{Float32}(undef, 2, 2, N_particles)
 CUDA.CUBLAS.getri_strided_batched!(d_S, S_inv, d_ipiv)
-K = NNlib.batched_mul(ΣH_T, S_inv)
+# K = NNlib.batched_mul(ΣH_T, S_inv)
 
 μ_filt = μs_pred .+ NNlib.batched_vec(K, y)
 Σ_filt = Σs_pred .- NNlib.batched_mul(K, NNlib.batched_mul(Hs, Σs_pred))
@@ -229,9 +237,11 @@ log_dets = sum(log, diags; dims=1)
 logdet(Array(S[:, :, 1]))
 
 o = cu(observations[1])
-log_likes =
-    -0.5f0 *
-    NNlib.batched_vec(reshape(o .- m, 1, 2, N_particles), NNlib.batched_vec(S_inv, o .- m))
+_, inv_term = CUDA.CUBLAS.getrs_strided_batched(
+    'N', d_S, reshape(o .- m, (2, 1, N_particles)), d_ipiv
+)
+inv_term = dropdims(inv_term; dims=2)
+log_likes = -0.5f0 * NNlib.batched_vec(reshape(o .- m, 1, 2, N_particles), inv_term)
 
 log_likes = log_likes .- 0.5f0 * log_dets .- convert(Float32, log(2π))
 
@@ -250,11 +260,11 @@ println(sum(getfield.(zs, :μ) .* weights))
 
 # GPU weighted inner mean
 weights = softmax(log_likes)
-println(sum(μ_filt .* weights; dims=2))
+println(convert.(Float64, Array(dropdims(sum(μ_filt .* weights; dims=2); dims=2))))
 
 # Without weights
-println(mean(getfield.(zs, :μ)))
-println(mean(μ_filt; dims=2))
+# println(mean(getfield.(zs, :μ)))
+# println(mean(μ_filt; dims=2))
 
 println()
 
@@ -264,21 +274,157 @@ println(sum(xs .* weights))
 
 # GPU weighted outer mean
 weights = softmax(log_likes)
-println(sum(x1s .* weights; dims=2))
+println(convert.(Float64, Array(dropdims(sum(x1s .* weights; dims=2); dims=2))))
 
 # Without weights
-println(mean(xs))
-println(mean(x1s; dims=2))
+# println(mean(xs))
+# println(mean(x1s; dims=2))
 
-# Ground truth averacge of covariances
-println(mean(getfield.(zs, :Σ)))
+# # Ground truth averacge of covariances
+# println(mean(getfield.(zs, :Σ)))
 
-# GPU average of covariances
-println(mean(Σ_filt; dims=3))
+# # GPU average of covariances
+# println(mean(Σ_filt; dims=3))
 
-## Profile
+## Component Benchmarking
 
-using Profile
+# # Not present in CPU version
+# @benchmark CUDA.@sync batch_calc_μ0s(inner_dyn, N_particles)
+
+# # Not present in CPU version
+# @benchmark CUDA.@sync batch_calc_Σ0s(inner_dyn, N_particles)
+
+# # TODO: Both of these use the inefficient `repeat`
+# @benchmark CUDA.@sync batch_simulate(outer_dyn, N_particles)
+# @benchmark CUDA.@sync batch_simulate(outer_dyn, 1, x0s, nothing, N_particles)
+
+# # Not present in CPU version
+# @benchmark CUDA.@sync batch_calc_A(inner_dyn, 1, extra, N_particles)
+
+# @benchmark CUDA.@sync batch_calc_b(inner_dyn, 1, extra, N_particles)
+
+# # Not present in CPU version
+# @benchmark CUDA.@sync batch_calc_Q(inner_dyn, 1, extra, N_particles)
+
+# # This is crazy amounts faster than the other functions
+# @benchmark CUDA.@sync NNlib.batched_vec(As, μ0s) .+ bs
+
+# # Maybe we can still make it faster by avoiding allocations
+# function fast_batch_Ab_plus_c(As, bs, cs)
+#     cs_copy = copy(cs)
+#     CUDA.CUBLAS.gemv_strided_batched!('N', 1.0f0, As, bs, 1.0f0, cs_copy)
+#     return cs_copy
+# end
+
+# NNlib.batched_vec(As, μ0s) .+ bs
+# fast_batch_Ab_plus_c(As, μ0s, bs)
+
+# # Still 500. Allocations don't seem to be a big deal
+# @benchmark CUDA.@sync fast_batch_Ab_plus_c(As, μ0s, bs)
+# @benchmark CUDA.@sync CuArray{Float32}(undef, 2, N_particles)  # yeah...basically 1μs
+
+# # Attempt to speed up
+# # function batch_calc_A(dyn::InnerDynamics, ::Integer, extra, N::Integer)
+# #     A = cu(reshape(dyn.A, (size(dyn.A)..., 1)))
+# #     As = repeat(A, 1, 1, N)
+# #     return As
+# # end
+
+# @benchmark CUDA.@sync batch_calc_A(inner_dyn, 1, extra, N_particles)
+
+# function batch_calc_A_1(dyn::InnerDynamics, ::Integer, extra, N::Integer)
+#     A = CuArray{Float32}(undef, 2, 2, N)
+#     return A[:, :, :] .= cu(dyn.A)
+# end
+# batch_calc_A_1(inner_dyn, 1, extra, N_particles)
+
+# @benchmark CUDA.@sync batch_calc_A_1(inner_dyn, 1, extra, N_particles)
+
+# # 3000x speedup! Looks like most of the time was spent on this
+
+# # TODO: find out why minimum is so much less than the median...CUDA.@sync seems to fix it
+
+# # A lot more than the calculation of μs_pred!
+# @benchmark CUDA.@sync NNlib.batched_mul(
+#     NNlib.batched_mul(As, Σ0s), NNlib.batched_transpose(As)
+# ) .+ Qs
+
+# @benchmark CUDA.@sync NNlib.batched_transpose(As)
+# @benchmark CUDA.@sync NNlib.batched_mul(As, Σ0s)
+# @benchmark CUDA.@sync NNlib.batched_mul(
+#     NNlib.batched_mul(As, Σ0s), NNlib.batched_transpose(As)
+# )
+
+function transpose_first(As, Bs)
+    Bs_new = CuArray{Float32}(undef, size(Bs))
+    Bs_new[1, 1, :] .= Bs[1, 1, :]
+    Bs_new[1, 2, :] .= Bs[2, 1, :]
+    Bs_new[2, 1, :] .= Bs[1, 2, :]
+    Bs_new[2, 2, :] .= Bs[2, 2, :]
+    return NNlib.batched_mul(As, Bs_new)
+end
+
+# @benchmark CUDA.@sync transpose_first(NNlib.batched_mul(As, Σ0s), As)
+
+# # Seems to call a slower version when transpose present even though transpose itself is fast
+# @benchmark CUDA.@sync NNlib.batched_mul(NNlib.batched_mul(As, Σ0s), As)
+
+# # Weird...still present when using gemm. Is it a memory contiguity issue?
+# @benchmark CUDA.@sync CUDA.CUBLAS.gemm_strided_batched(
+#     'N', 'T', 1.0f0, NNlib.batched_mul(As, Σ0s), As
+# )
+
+# # MORE INEFFICIENT CALC FUNCTIONS...
+
+# @benchmark CUDA.@sync NNlib.batched_vec(Hs, μs_pred) .+ cs
+
+# @benchmark CUDA.@sync NNlib.batched_mul(
+#     NNlib.batched_mul(Hs, Σs_pred), NNlib.batched_transpose(Hs)
+# ) .+ Rs
+
+# # biggest things so far 17ms * 2 = 34ms.  Could potentially be made faster if figure out how
+# # to avoid the transpose slow down
+
+# @benchmark CUDA.@sync NNlib.batched_mul(Σs_pred, NNlib.batched_transpose(Hs))
+
+# # This is expensive at 200ms. Could improve by using Cholesky (roughly 2x faster)
+# # Surprised it takes so long for such a small matrix. Doesn't feel that much harder than
+# # gemv
+# # Same speed as TensorFlow using Cholesky. Weirdly LU was faster (strided?) at 170ms
+# # Worse, CPU is 237ms
+# # Code on Germain is far faster (though perhaps not as numerically stable). Roughly 7ms
+# @benchmark CUDA.@sync CUDA.CUBLAS.getrf_strided_batched(S, true)
+
+# # What about a super fast implementation for 2x2 matrices?
+# function fast_cholesky(S)
+#     out = CUDA.zeros(size(S))
+#     out[1, 1, :] .= sqrt.(S[1, 1, :])
+#     out[2, 1, :] .= S[2, 1, :] ./ out[1, 1, :]
+#     out[2, 2, :] .= sqrt.(S[2, 2, :] .- out[2, 1, :] .^ 2)
+#     return out
+# end
+# S1 = Array(S[:, :, 1])
+# S1 = (S1 + S1') / 2
+# cholesky(S1).L - Array(fast_cholesky(S)[:, :, 1])
+
+# # 74 μs !!!
+# @benchmark CUDA.@sync fast_cholesky(S)
+
+# # Even slower–450ms but can be avoided at least
+# @benchmark CUDA.@sync CUDA.CUBLAS.getri_strided_batched!(d_S, S_inv, d_ipiv)
+
+# @benchmark CUDA.@sync NNlib.batched_mul(ΣH_T, S_inv)
+
+# # These will also be quick
+# # μ_filt = μs_pred .+ NNlib.batched_vec(K, y)
+# # Σ_filt = Σs_pred .- NNlib.batched_mul(K, NNlib.batched_mul(Hs, Σs_pred))
+
+# @benchmark CUDA.@sync sum(log, [d_S[1, 1, :]; d_S[2, 2, :]]; dims=1)
+
+# # Note, got around transpose by reshaping
+# @benchmark CUDA.@sync -0.5f0 * NNlib.batched_vec(
+#     reshape(o .- m, 1, 2, N_particles), NNlib.batched_vec(S_inv, o .- m)
+# )
 
 function filter(
     model::HierarchicalSSM, N_particles::Integer, observations::Vector{Vector{Float64}}
@@ -302,6 +448,7 @@ function filter(
     μs_pred = NNlib.batched_vec(As, μ0s) .+ bs
     Σs_pred =
         NNlib.batched_mul(NNlib.batched_mul(As, Σ0s), NNlib.batched_transpose(As)) .+ Qs
+    # Σs_pred = transpose_first(NNlib.batched_mul(As, Σ0s), As) .+ Qs
 
     Hs = batch_calc_H(obs, 1, nothing, N_particles)
     cs = batch_calc_c(obs, 1, nothing, N_particles)
@@ -310,10 +457,16 @@ function filter(
     m = NNlib.batched_vec(Hs, μs_pred) .+ cs
     y = cu(observations[1]) .- m
     S = NNlib.batched_mul(NNlib.batched_mul(Hs, Σs_pred), NNlib.batched_transpose(Hs)) .+ Rs
+    # S = transpose_first(NNlib.batched_mul(Hs, Σs_pred), Hs) .+ Rs
 
     ΣH_T = NNlib.batched_mul(Σs_pred, NNlib.batched_transpose(Hs))
+    # ΣH_T = transpose_first(Σs_pred, Hs)
 
     d_ipiv, _, d_S = CUDA.CUBLAS.getrf_strided_batched(S, true)
+
+    # _, K_s = CUDA.CUBLAS.getrs_strided_batched('N', d_S, ΣH_T, d_ipiv)
+    # K = NNlib.batched_transpose(K_s)
+
     S_inv = CuArray{Float32}(undef, 2, 2, N_particles)
     CUDA.CUBLAS.getri_strided_batched!(d_S, S_inv, d_ipiv)
     K = NNlib.batched_mul(ΣH_T, S_inv)
@@ -323,142 +476,22 @@ function filter(
 
     o = cu(observations[1])
     log_dets = sum(log, [d_S[1, 1, :]; d_S[2, 2, :]]; dims=1)
-    log_likes =
-        -0.5f0 * NNlib.batched_vec(
-            reshape(o .- m, 1, 2, N_particles), NNlib.batched_vec(S_inv, o .- m)
-        )
+    # _, inv_term = CUDA.CUBLAS.getrs_strided_batched(
+    #     'N', d_S, reshape(o .- m, (2, 1, N_particles)), d_ipiv
+    # )
+    # inv_term = dropdims(inv_term; dims=2)
+    inv_term = NNlib.batched_vec(S_inv, o .- m)
+    log_likes = -0.5f0 * NNlib.batched_vec(reshape(o .- m, 1, 2, N_particles), inv_term)
     log_likes = log_likes .- 0.5f0 * log_dets .- convert(Float32, log(2π))
 
     return μ_filt, Σ_filt, log_likes
 end
 
-using BenchmarkTools
+## Combined Benchmarking
 
-@benchmark CUDA.@sync filter(hier_model, N_particles, observations)
+io = IOContext(stdout)
 
-# Not present in CPU version
-@benchmark CUDA.@sync batch_calc_μ0s(inner_dyn, N_particles)
-
-# Not present in CPU version
-@benchmark CUDA.@sync batch_calc_Σ0s(inner_dyn, N_particles)
-
-# TODO: Both of these use the inefficient `repeat`
-@benchmark CUDA.@sync batch_simulate(outer_dyn, N_particles)
-@benchmark CUDA.@sync batch_simulate(outer_dyn, 1, x0s, nothing, N_particles)
-
-# Not present in CPU version
-@benchmark CUDA.@sync batch_calc_A(inner_dyn, 1, extra, N_particles)
-
-@benchmark CUDA.@sync batch_calc_b(inner_dyn, 1, extra, N_particles)
-
-# Not present in CPU version
-@benchmark CUDA.@sync batch_calc_Q(inner_dyn, 1, extra, N_particles)
-
-# This is crazy amounts faster than the other functions
-@benchmark CUDA.@sync NNlib.batched_vec(As, μ0s) .+ bs
-
-# Maybe we can still make it faster by avoiding allocations
-function fast_batch_Ab_plus_c(As, bs, cs)
-    cs_copy = copy(cs)
-    CUDA.CUBLAS.gemv_strided_batched!('N', 1.0f0, As, bs, 1.0f0, cs_copy)
-    return cs_copy
-end
-
-NNlib.batched_vec(As, μ0s) .+ bs
-fast_batch_Ab_plus_c(As, μ0s, bs)
-
-# Still 500. Allocations don't seem to be a big deal
-@benchmark CUDA.@sync fast_batch_Ab_plus_c(As, μ0s, bs)
-@benchmark CUDA.@sync CuArray{Float32}(undef, 2, N_particles)  # yeah...basically 1μs
-
-# Attempt to speed up
-# function batch_calc_A(dyn::InnerDynamics, ::Integer, extra, N::Integer)
-#     A = cu(reshape(dyn.A, (size(dyn.A)..., 1)))
-#     As = repeat(A, 1, 1, N)
-#     return As
-# end
-
-@benchmark CUDA.@sync batch_calc_A(inner_dyn, 1, extra, N_particles)
-
-function batch_calc_A_1(dyn::InnerDynamics, ::Integer, extra, N::Integer)
-    A = CuArray{Float32}(undef, 2, 2, N)
-    return A[:, :, :] .= cu(dyn.A)
-end
-batch_calc_A_1(inner_dyn, 1, extra, N_particles)
-
-@benchmark CUDA.@sync batch_calc_A_1(inner_dyn, 1, extra, N_particles)
-
-# 3000x speedup! Looks like most of the time was spent on this
-
-# TODO: find out why minimum is so much less than the median...CUDA.@sync seems to fix it
-
-# A lot more than the calculation of μs_pred!
-@benchmark CUDA.@sync NNlib.batched_mul(
-    NNlib.batched_mul(As, Σ0s), NNlib.batched_transpose(As)
-) .+ Qs
-
-@benchmark CUDA.@sync NNlib.batched_transpose(As)
-@benchmark CUDA.@sync NNlib.batched_mul(As, Σ0s)
-@benchmark CUDA.@sync NNlib.batched_mul(
-    NNlib.batched_mul(As, Σ0s), NNlib.batched_transpose(As)
-)
-
-# Seems to call a slower version when transpose present even though transpose itself is fast
-@benchmark CUDA.@sync NNlib.batched_mul(NNlib.batched_mul(As, Σ0s), As)
-
-# Weird...still present when using gemm. Is it a memory contiguity issue?
-@benchmark CUDA.@sync CUDA.CUBLAS.gemm_strided_batched(
-    'N', 'T', 1.0f0, NNlib.batched_mul(As, Σ0s), As
-)
-
-# MORE INEFFICIENT CALC FUNCTIONS...
-
-@benchmark CUDA.@sync NNlib.batched_vec(Hs, μs_pred) .+ cs
-
-@benchmark CUDA.@sync NNlib.batched_mul(
-    NNlib.batched_mul(Hs, Σs_pred), NNlib.batched_transpose(Hs)
-) .+ Rs
-
-# biggest things so far 17ms * 2 = 34ms.  Could potentially be made faster if figure out how
-# to avoid the transpose slow down
-
-@benchmark CUDA.@sync NNlib.batched_mul(Σs_pred, NNlib.batched_transpose(Hs))
-
-# This is expensive at 200ms. Could improve by using Cholesky (roughly 2x faster)
-# Surprised it takes so long for such a small matrix. Doesn't feel that much harder than
-# gemv
-# Same speed as TensorFlow using Cholesky. Weirdly LU was faster (strided?) at 170ms
-# Worse, CPU is 237ms
-# Code on Germain is far faster (though perhaps not as numerically stable). Roughly 7ms
-@benchmark CUDA.@sync CUDA.CUBLAS.getrf_strided_batched(S, true)
-
-# What about a super fast implementation for 2x2 matrices?
-function fast_cholesky(S)
-    out = CUDA.zeros(size(S))
-    out[1, 1, :] .= sqrt.(S[1, 1, :])
-    out[2, 1, :] .= S[2, 1, :] ./ out[1, 1, :]
-    out[2, 2, :] .= sqrt.(S[2, 2, :] .- out[2, 1, :] .^ 2)
-    return out
-end
-S1 = Array(S[:, :, 1])
-S1 = (S1 + S1') / 2
-cholesky(S1).L - Array(fast_cholesky(S)[:, :, 1])
-
-# 74 μs !!!
-@benchmark CUDA.@sync fast_cholesky(S)
-
-# Even slower–450ms but can be avoided at least
-@benchmark CUDA.@sync CUDA.CUBLAS.getri_strided_batched!(d_S, S_inv, d_ipiv)
-
-@benchmark CUDA.@sync NNlib.batched_mul(ΣH_T, S_inv)
-
-# These will also be quick
-# μ_filt = μs_pred .+ NNlib.batched_vec(K, y)
-# Σ_filt = Σs_pred .- NNlib.batched_mul(K, NNlib.batched_mul(Hs, Σs_pred))
-
-@benchmark CUDA.@sync sum(log, [d_S[1, 1, :]; d_S[2, 2, :]]; dims=1)
-
-# Note, got around transpose by reshaping
-@benchmark CUDA.@sync -0.5f0 * NNlib.batched_vec(
-    reshape(o .- m, 1, 2, N_particles), NNlib.batched_vec(S_inv, o .- m)
-)
+res_cpu = @benchmark AnalyticFilters.filter(hier_model, rbpf, observations, extras)
+show(io, MIME("text/plain"), res_cpu)
+res_gpu = @benchmark CUDA.@sync filter(hier_model, N_particles, observations)
+show(io, MIME("text/plain"), res_gpu)
