@@ -29,7 +29,7 @@ function calc_c end
 function calc_R end
 function calc_params(obs::LinearGaussianObservationProcess, step::Integer, extra)
     return (
-        AnalyticFilters.calc_H(obs, step, extra),
+        AnalyticalFilters.calc_H(obs, step, extra),
         calc_c(obs, step, extra),
         calc_R(obs, step, extra),
     )

@@ -4,7 +4,7 @@ using TestItemRunner
 @run_package_tests
 
 @testitem "Kalman filter test" begin
-    using AnalyticFilters
+    using AnalyticalFilters
     using LinearAlgebra
     using StableRNGs
 
@@ -27,7 +27,7 @@ using TestItemRunner
 
     kf = KalmanFilter()
 
-    states, _ = AnalyticFilters.filter(model, kf, observations, [nothing])
+    states, _ = AnalyticalFilters.filter(model, kf, observations, [nothing])
 
     # Let Z = [X0, X1, Y1] be the joint state vector
     # Write Z = P.Z + ϵ, where ϵ ~ N(μ_ϵ, Σ_ϵ)
@@ -61,7 +61,7 @@ using TestItemRunner
 end
 
 @testitem "Kalman-RBPF test" begin
-    using AnalyticFilters
+    using AnalyticalFilters
     using Distributions
     using HypothesisTests
     using LinearAlgebra
@@ -78,13 +78,13 @@ end
         C::Matrix{T}
         Q::Matrix{T}
     end
-    AnalyticFilters.calc_μ0(dyn::InnerDynamics) = dyn.μ0
-    AnalyticFilters.calc_Σ0(dyn::InnerDynamics) = dyn.Σ0
-    AnalyticFilters.calc_A(dyn::InnerDynamics, ::Integer, extra) = dyn.A
-    function AnalyticFilters.calc_b(dyn::InnerDynamics, ::Integer, extra)
+    AnalyticalFilters.calc_μ0(dyn::InnerDynamics) = dyn.μ0
+    AnalyticalFilters.calc_Σ0(dyn::InnerDynamics) = dyn.Σ0
+    AnalyticalFilters.calc_A(dyn::InnerDynamics, ::Integer, extra) = dyn.A
+    function AnalyticalFilters.calc_b(dyn::InnerDynamics, ::Integer, extra)
         return dyn.b + dyn.C * extra.prev_outer
     end
-    AnalyticFilters.calc_Q(dyn::InnerDynamics, ::Integer, extra) = dyn.Q
+    AnalyticalFilters.calc_Q(dyn::InnerDynamics, ::Integer, extra) = dyn.Q
 
     rng = StableRNG(1234)
     μ0 = rand(rng, 4)
@@ -122,21 +122,23 @@ end
     # Kalman filtering
 
     full_model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
-    kf_states, ll = AnalyticFilters.filter(full_model, KalmanFilter(), observations, extras)
+    kf_states, ll = AnalyticalFilters.filter(
+        full_model, KalmanFilter(), observations, extras
+    )
 
     # Rao-Blackwellised particle filtering
 
-    outer_dyn = AnalyticFilters.HomogeneousLinearGaussianLatentDynamics(
+    outer_dyn = AnalyticalFilters.HomogeneousLinearGaussianLatentDynamics(
         μ0[1:2], Σ0[1:2, 1:2], A[1:2, 1:2], b[1:2], Qs[1]
     )
     inner_dyn = InnerDynamics(
         μ0[3:4], Σ0[3:4, 3:4], A[3:4, 3:4], b[3:4], A[3:4, 1:2], Qs[2]
     )
-    obs = AnalyticFilters.HomogeneousLinearGaussianObservationProcess(H[:, 3:4], c, R)
+    obs = AnalyticalFilters.HomogeneousLinearGaussianObservationProcess(H[:, 3:4], c, R)
     hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
 
     rbpf = RBPF(KalmanFilter(), N_particles)
-    (xs, zs, log_ws), ll = AnalyticFilters.filter(
+    (xs, zs, log_ws), ll = AnalyticalFilters.filter(
         rng, hier_model, rbpf, observations, extras
     )
 
