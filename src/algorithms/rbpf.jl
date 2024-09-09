@@ -41,6 +41,7 @@ function filter(
     model::HierarchicalSSM,
     algo::RBPF,
     observations::AbstractVector,
+    extra0,
     extras::AbstractVector,
 )
     N = algo.n_particles
@@ -55,8 +56,10 @@ function filter(
     # Initialisation
     ll = 0.0
     for i in 1:N
-        xs[i] = simulate(rng, outer_dyn)
-        zs[i] = initialise(inner_model, algo.inner_algo)
+        xs[i] = simulate(rng, outer_dyn, extra0)
+        new_extra0 = (; new_outer=xs[i])
+        inner_extra0 = isnothing(extra0) ? new_extra0 : (; extra0..., new_extra0...)
+        zs[i] = initialise(inner_model, algo.inner_algo, inner_extra0)
     end
 
     # Predict-update loop

@@ -2,8 +2,10 @@ export KalmanFilter, filter
 
 struct KalmanFilter <: FilteringAlgorithm end
 
-function initialise(model::LinearGaussianStateSpaceModel{T}, filter::KalmanFilter) where {T}
-    μ0, Σ0 = calc_initial(model.dyn)
+function initialise(
+    model::LinearGaussianStateSpaceModel{T}, filter::KalmanFilter, extra
+) where {T}
+    μ0, Σ0 = calc_initial(model.dyn, extra)
     return (μ=μ0, Σ=Σ0)
 end
 
@@ -63,9 +65,10 @@ function filter(
     model::LinearGaussianStateSpaceModel{T},
     filter::KalmanFilter,
     data::Vector{Vector{T}},
+    extra0,
     extras,
 ) where {T}
-    state = initialise(model, filter)
+    state = initialise(model, filter, extra0)
     states = Vector{@NamedTuple{μ::Vector{T}, Σ::Matrix{T}}}(undef, length(data))
     ll = 0.0
     for (i, obs) in enumerate(data)
