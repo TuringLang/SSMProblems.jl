@@ -1,6 +1,7 @@
 module AnalyticalFilters
 
 using AbstractMCMC: AbstractMCMC
+using CUDA
 import Distributions: MvNormal
 import Random: AbstractRNG, default_rng
 using SSMProblems
