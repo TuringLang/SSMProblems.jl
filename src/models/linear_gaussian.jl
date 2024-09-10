@@ -10,8 +10,8 @@ abstract type LinearGaussianLatentDynamics{T} <: SSMProblems.LatentDynamics{Vect
 
 function calc_μ0 end
 function calc_Σ0 end
-function calc_initial(dyn::LinearGaussianLatentDynamics)
-    return calc_μ0(dyn), calc_Σ0(dyn)
+function calc_initial(dyn::LinearGaussianLatentDynamics, extra)
+    return calc_μ0(dyn, extra), calc_Σ0(dyn, extra)
 end
 
 function calc_A end
@@ -22,14 +22,14 @@ function calc_params(dyn::LinearGaussianLatentDynamics, step::Integer, extra)
 end
 
 abstract type LinearGaussianObservationProcess{T} <:
-              SSMProblems.ObservationProcess{Vector{T},Vector{T}} end
+              SSMProblems.ObservationProcess{Vector{T}} end
 
 function calc_H end
 function calc_c end
 function calc_R end
 function calc_params(obs::LinearGaussianObservationProcess, step::Integer, extra)
     return (
-        AnalyticFilters.calc_H(obs, step, extra),
+        AnalyticalFilters.calc_H(obs, step, extra),
         calc_c(obs, step, extra),
         calc_R(obs, step, extra),
     )
@@ -50,8 +50,8 @@ end
 #### DISTRIBUTIONS ####
 #######################
 
-function SSMProblems.distribution(dyn::LinearGaussianLatentDynamics)
-    μ0, Σ0 = calc_initial(dyn)
+function SSMProblems.distribution(dyn::LinearGaussianLatentDynamics, extra)
+    μ0, Σ0 = calc_initial(dyn, extra)
     return MvNormal(μ0, Σ0)
 end
 
@@ -80,8 +80,8 @@ struct HomogeneousLinearGaussianLatentDynamics{T} <: LinearGaussianLatentDynamic
     b::Vector{T}
     Q::Matrix{T}
 end
-calc_μ0(dyn::HomogeneousLinearGaussianLatentDynamics) = dyn.μ0
-calc_Σ0(dyn::HomogeneousLinearGaussianLatentDynamics) = dyn.Σ0
+calc_μ0(dyn::HomogeneousLinearGaussianLatentDynamics, extra) = dyn.μ0
+calc_Σ0(dyn::HomogeneousLinearGaussianLatentDynamics, extra) = dyn.Σ0
 calc_A(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, extra) = dyn.A
 calc_b(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, extra) = dyn.b
 calc_Q(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, extra) = dyn.Q

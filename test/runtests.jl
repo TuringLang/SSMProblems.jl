@@ -4,7 +4,7 @@ using TestItemRunner
 @run_package_tests
 
 @testitem "Kalman filter test" begin
-    using AnalyticFilters
+    using AnalyticalFilters
     using LinearAlgebra
     using StableRNGs
 
@@ -27,7 +27,7 @@ using TestItemRunner
 
     kf = KalmanFilter()
 
-    states, _ = AnalyticFilters.filter(model, kf, observations, [nothing])
+    states, _ = AnalyticalFilters.filter(model, kf, observations, nothing, [nothing])
 
     # Let Z = [X0, X1, Y1] be the joint state vector
     # Write Z = P.Z + ϵ, where ϵ ~ N(μ_ϵ, Σ_ϵ)
@@ -60,8 +60,59 @@ using TestItemRunner
     @test only(states).Σ ≈ Σ_X1
 end
 
-@testitem "Kalman-RBPF test" begin
+@testitem "Forward algorithm test" begin
     using AnalyticFilters
+    using Distributions
+    using StableRNGs
+    using SSMProblems
+
+    rng = StableRNG(1234)
+    α0 = rand(rng, 3)
+    α0 = α0 / sum(α0)
+    P = rand(rng, 3, 3)
+    P = P ./ sum(P; dims=2)
+
+    struct MixtureModelObservation{T} <: SSMProblems.ObservationProcess{T}
+        μs::Vector{T}
+    end
+
+    function SSMProblems.logdensity(
+        obs::MixtureModelObservation, ::Integer, state::Integer, y, extra
+    )
+        return logpdf(Normal(obs.μs[state], 1.0), y)
+    end
+
+    μs = [0.0, 1.0, 2.0]
+
+    dyn = HomogeneousDiscreteLatentDynamics{Int,Float64}(α0, P)
+    obs = MixtureModelObservation(μs)
+    model = StateSpaceModel(dyn, obs)
+
+    observations = [rand(rng)]
+
+    states, ll = AnalyticFilters.filter(
+        model, ForwardAlgorithm(), observations, nothing, [nothing]
+    )
+
+    # Brute force calculations of each conditional path probability p(x_{1:T} | y_{1:T})
+    T = 1
+    K = 3
+    y = only(observations)
+    path_probs = Dict{Tuple{Int,Int},Float64}()
+    for x0 in 1:K, x1 in 1:K
+        prior_prob = α0[x0] * P[x0, x1]
+        likelihood = exp(SSMProblems.logdensity(obs, 1, x1, y, nothing))
+        path_probs[(x0, x1)] = prior_prob * likelihood
+    end
+    marginal = sum(values(path_probs))
+
+    filtered_paths = Base.filter(((k, v),) -> k[end] == 1, path_probs)
+    @test states[end][1] ≈ sum(values(filtered_paths)) / marginal
+    @test ll ≈ log(marginal)
+end
+
+@testitem "Kalman-RBPF test" begin
+    using AnalyticalFilters
     using Distributions
     using HypothesisTests
     using LinearAlgebra
@@ -78,13 +129,13 @@ end
         C::Matrix{T}
         Q::Matrix{T}
     end
-    AnalyticFilters.calc_μ0(dyn::InnerDynamics) = dyn.μ0
-    AnalyticFilters.calc_Σ0(dyn::InnerDynamics) = dyn.Σ0
-    AnalyticFilters.calc_A(dyn::InnerDynamics, ::Integer, extra) = dyn.A
-    function AnalyticFilters.calc_b(dyn::InnerDynamics, ::Integer, extra)
+    AnalyticalFilters.calc_μ0(dyn::InnerDynamics, extra) = dyn.μ0
+    AnalyticalFilters.calc_Σ0(dyn::InnerDynamics, extra) = dyn.Σ0
+    AnalyticalFilters.calc_A(dyn::InnerDynamics, ::Integer, extra) = dyn.A
+    function AnalyticalFilters.calc_b(dyn::InnerDynamics, ::Integer, extra)
         return dyn.b + dyn.C * extra.prev_outer
     end
-    AnalyticFilters.calc_Q(dyn::InnerDynamics, ::Integer, extra) = dyn.Q
+    AnalyticalFilters.calc_Q(dyn::InnerDynamics, ::Integer, extra) = dyn.Q
 
     rng = StableRNG(1234)
     μ0 = rand(rng, 4)
@@ -117,27 +168,30 @@ end
     T = 1
 
     observations = [rand(rng, 2) for _ in 1:T]
+    extra0 = nothing
     extras = [nothing for _ in 1:T]
 
     # Kalman filtering
 
     full_model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
-    kf_states, ll = AnalyticFilters.filter(full_model, KalmanFilter(), observations, extras)
+    kf_states, ll = AnalyticalFilters.filter(
+        full_model, KalmanFilter(), observations, extra0, extras
+    )
 
     # Rao-Blackwellised particle filtering
 
-    outer_dyn = AnalyticFilters.HomogeneousLinearGaussianLatentDynamics(
+    outer_dyn = AnalyticalFilters.HomogeneousLinearGaussianLatentDynamics(
         μ0[1:2], Σ0[1:2, 1:2], A[1:2, 1:2], b[1:2], Qs[1]
     )
     inner_dyn = InnerDynamics(
         μ0[3:4], Σ0[3:4, 3:4], A[3:4, 3:4], b[3:4], A[3:4, 1:2], Qs[2]
     )
-    obs = AnalyticFilters.HomogeneousLinearGaussianObservationProcess(H[:, 3:4], c, R)
+    obs = AnalyticalFilters.HomogeneousLinearGaussianObservationProcess(H[:, 3:4], c, R)
     hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
 
     rbpf = RBPF(KalmanFilter(), N_particles)
-    (xs, zs, log_ws), ll = AnalyticFilters.filter(
-        rng, hier_model, rbpf, observations, extras
+    (xs, zs, log_ws), ll = AnalyticalFilters.filter(
+        rng, hier_model, rbpf, observations, extra0, extras
     )
 
     weights = Weights(softmax(log_ws))
