@@ -366,6 +366,40 @@ end
 
 # @benchmark CUDA.@sync transpose_first(NNlib.batched_mul(As, Σ0s), As)
 
+# # Custom kernel for batched transposing
+# function batch_transpose(As)
+#     out = CuArray{Float32}(undef, size(As))
+#     @cuda threads = 256 blocks = div(length(As), 256) _batch_transpose!(As, out)
+#     return out
+# end
+
+# function _batch_transpose!(As, out)
+#     index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+#     stride = gridDim().x * blockDim().x
+#     for i in index:stride:size(As, 3)
+#         for j in 1:size(As, 2)
+#             for k in 1:size(As, 1)
+#                 @inbounds out[k, j, i] = As[j, k, i]
+#             end
+#         end
+#     end
+#     return nothing
+# end
+
+# function batch_transpose_thread_optim(As)
+#     out = CuArray{Float32}(undef, size(As))
+#     kernel = @cuda launch = false _batch_transpose!(As, out)
+#     config = launch_configuration(kernel.fun)
+#     threads = min(size(As, 3), config.threads)
+#     blocks = cld(size(As, 3), threads)
+#     @cuda threads = threads blocks = blocks _batch_transpose!(As, out)
+#     return out
+# end
+
+# @benchmark CUDA.@sync CuArray(NNlib.batched_transpose(As))
+# @benchmark CUDA.@sync batch_transpose(As)
+# @benchmark CUDA.@sync batch_transpose_thread_optim(As)
+
 # # Seems to call a slower version when transpose present even though transpose itself is fast
 # @benchmark CUDA.@sync NNlib.batched_mul(NNlib.batched_mul(As, Σ0s), As)
 
