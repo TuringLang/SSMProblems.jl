@@ -1,4 +1,4 @@
-export KalmanFilter, filter
+export KalmanFilter, filter, BatchKalmanFilter
 
 struct KalmanFilter <: FilteringAlgorithm end
 
@@ -79,43 +79,47 @@ function filter(
     return states, ll
 end
 
-struct BatchKalmanFilter <: FilteringAlgorithm end
+struct BatchKalmanFilter <: FilteringAlgorithm
+    batch_size::Int
+end
 
-function initialise(model::LinearGaussianStateSpaceModel{T}, ::BatchKalmanFilter) where {T}
-    μ0s, Σ0s = batch_calc_initial(model.dyn)
+function initialise(
+    model::LinearGaussianStateSpaceModel{T}, algo::BatchKalmanFilter, extra
+) where {T}
+    μ0s, Σ0s = batch_calc_initial(model.dyn, extra, algo.batch_size)
     return (μs=μ0s, Σs=Σ0s)
 end
 
 function predict(
     model::LinearGaussianStateSpaceModel{T},
-    ::BatchKalmanFilter,
+    algo::BatchKalmanFilter,
     step::Integer,
-    state::@NamedTuple{μs::CuArray, Σs::CuArray},
+    state::@NamedTuple{μs::A1, Σs::A2},
     extra,
-) where {T}
+) where {T,A1<:CuArray,A2<:CuArray}
     μs, Σs = state.μs, state.Σs
-    As, bs, Qs = batch_calc_params(model.dyn, step, extra)
-    μ̂s = NNlib.batched_vec(As, μ0s) .+ bs
-    Σ̂s = NNlib.batched_mul(NNlib.batched_mul(As, Σ0s), NNlib.batched_transpose(As)) .+ Qs
+    As, bs, Qs = batch_calc_params(model.dyn, step, extra, algo.batch_size)
+    μ̂s = NNlib.batched_vec(As, μs) .+ bs
+    Σ̂s = NNlib.batched_mul(NNlib.batched_mul(As, Σs), NNlib.batched_transpose(As)) .+ Qs
     return (μs=μ̂s, Σs=Σ̂s)
 end
 
 function update(
     model::LinearGaussianStateSpaceModel{T},
-    ::BatchKalmanFilter,
+    algo::BatchKalmanFilter,
     step::Integer,
-    state::@NamedTuple{μs::CuArray, Σs::CuArray},
+    state::@NamedTuple{μs::A1, Σs::A2},
     obs::Vector{T},
     extra,
-) where {T}
+) where {T,A1<:CuArray,A2<:CuArray}
     μs, Σs = state.μs, state.Σs
-    Hs, cs, Rs = batch_calc_params(model.obs, step, extra)
+    Hs, cs, Rs = batch_calc_params(model.obs, step, extra, algo.batch_size)
 
     m = NNlib.batched_vec(Hs, μs) .+ cs
     y_res = cu(obs) .- m
     S = NNlib.batched_mul(NNlib.batched_mul(Hs, Σs), NNlib.batched_transpose(Hs)) .+ Rs
 
-    ΣH_T = NNlib.batched_mul(Σs_pred, NNlib.batched_transpose(Hs))
+    ΣH_T = NNlib.batched_mul(Σs, NNlib.batched_transpose(Hs))
 
     # LU decomposition to compute S^{-1}
     # TODO: Replace with custom fast Cholesky kernel
@@ -131,8 +135,8 @@ function update(
     y = cu(obs)
     # TODO: replace with custom kernel
     diags = CuArray{Float32}(undef, size(S, 1), size(S, 3))
-    for i in 1:size(S, 3)
-        diags[:, i] .= d_S[:, :, i]
+    for i in 1:size(S, 1)
+        diags[i, :] .= d_S[i, i, :]
     end
     # L has ones on the diagonal so we can just multiply the diagonals of U
     log_dets = sum(log, diags; dims=1)
@@ -140,17 +144,17 @@ function update(
     log_likes = -0.5f0 * NNlib.batched_vec(reshape(y .- m, 1, 2, size(S, 3)), inv_term)
     log_likes = log_likes .- 0.5f0 * log_dets .- convert(Float32, log(2π))
 
-    return (μs=μ_filt, Σs=Σ_filt), log_likes
+    return (μs=μ_filt, Σs=Σ_filt), dropdims(log_likes; dims=1)
 end
 
 function step(
     model::LinearGaussianStateSpaceModel{T},
     filter::BatchKalmanFilter,
     step::Integer,
-    state::@NamedTuple{μs::CuArray, Σs::CuArray},
+    state::@NamedTuple{μs::A1, Σs::A2},
     obs::Vector{T},
     extra,
-) where {T}
+) where {T,A1<:CuArray,A2<:CuArray}
     state = predict(model, filter, step, state, extra)
     state, lls = update(model, filter, step, state, obs, extra)
     return state, lls

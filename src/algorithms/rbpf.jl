@@ -3,7 +3,7 @@ import Distributions: logpdf
 import LogExpFunctions: softmax, logsumexp
 import StatsBase: Weights
 
-export RBPF
+export RBPF, BatchRBPF
 
 struct RBPF{F<:FilteringAlgorithm} <: FilteringAlgorithm
     inner_algo::F
@@ -82,9 +82,13 @@ function filter(
 end
 
 function filter(
-    model::HierarchicalSSM, algo::RBPF, observations::AbstractVector, extras::AbstractVector
+    model::HierarchicalSSM,
+    algo::RBPF,
+    observations::AbstractVector,
+    extra,
+    extras::AbstractVector,
 )
-    return filter(default_rng(), model, algo, observations, extras)
+    return filter(default_rng(), model, algo, observations, extra, extras)
 end
 
 struct BatchRBPF{F<:FilteringAlgorithm} <: FilteringAlgorithm
@@ -115,14 +119,12 @@ function searchsorted!(ws_cdf, us, idxs)
     end
 end
 
-function step(
-    model::HierarchicalSSM, algo::FilteringAlgorithm, t::Integer, state, obs, extra
-)
+function step(model::HierarchicalSSM, algo::BatchRBPF, t::Integer, state, obs, extra)
     xs, zs, log_ws = state
     N = algo.n_particles
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
-    new_xs = batch_simulate(outer_dyn, N, xs)
+    new_xs = batch_simulate(outer_dyn, t, xs, extra, N)
     new_extras = (prev_outer=xs, new_outer=new_xs)
     inner_extra = isnothing(extra) ? new_extras : (; extra..., new_extras)
 
@@ -130,14 +132,16 @@ function step(
 
     log_ws += inner_lls
 
-    ll = logsumexp(log_ws) - log(N)
-    return (xs, zs, log_ws), ll
+    # HACK: this is only correct if resamping every time step
+    ll = logsumexp(log_ws)
+    return (new_xs, zs, log_ws), ll
 end
 
 function filter(
     model::HierarchicalSSM,
     algo::BatchRBPF,
     observations::AbstractVector,
+    extra0,
     extras::AbstractVector,
 )
     N = algo.n_particles
@@ -145,8 +149,10 @@ function filter(
 
     # Initialisation
     ll = 0.0
-    xs = batch_simulate(outer_dyn, N)
-    zs = initialise(inner_model, algo.inner_algo)
+    xs = batch_simulate(outer_dyn, N, extra0)
+    new_extra0 = (; new_outer=xs)
+    inner_extra0 = isnothing(extra0) ? new_extra0 : (; extra0..., new_extra0...)
+    zs = initialise(inner_model, algo.inner_algo, inner_extra0)
     log_ws = CUDA.fill(convert(Float32, -log(N)), N)
 
     # Predict-update loop
@@ -157,7 +163,7 @@ function filter(
         if ess < algo.resample_threshold * N
             cdf = cumsum(weights)
             us = CUDA.rand(N)
-            idxs = CuArray{Int32}(N)
+            idxs = CuArray{Int32}(undef, N)
             @cuda threads = 256 blocks = 4096 searchsorted!(cdf, us, idxs)
             xs .= xs[:, idxs]
             # TODO: generalise this by creating a `resample` function
@@ -166,9 +172,7 @@ function filter(
             zs = (μs=μs, Σs=Σs)
             log_ws .= convert(Float32, -log(N))
         end
-        (xs, zs, log_ws), step_ll = step(
-            model, algo.inner_algo, i, (xs, zs, log_ws), obs, extras[i]
-        )
+        (xs, zs, log_ws), step_ll = step(model, algo, i, (xs, zs, log_ws), obs, extras[i])
         ll += step_ll
     end
     return (xs, zs, log_ws), ll
