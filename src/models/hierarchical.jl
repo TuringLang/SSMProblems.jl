@@ -31,8 +31,11 @@ function AbstractMCMC.sample(
             isnothing(extras[t]) ? new_extras : (; extras[t]..., new_extras...)
     end
 
-    # Simulate inner model
-    zs, ys = sample(rng, inner_model, augmented_extras)
+    new_extra0 = (; new_outer=x0)
+    augmented_extra0 = isnothing(extra0) ? new_extra0 : (; extra0..., new_extra0...)
 
-    return x0, xs, zs, ys
+    # Simulate inner model
+    z0, zs, ys = sample(rng, inner_model, augmented_extra0, augmented_extras)
+
+    return x0, z0, xs, zs, ys
 end

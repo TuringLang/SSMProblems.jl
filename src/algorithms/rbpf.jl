@@ -12,13 +12,42 @@ struct RBPF{F<:FilteringAlgorithm} <: FilteringAlgorithm
 end
 RBPF(inner_algo::F, n_particles::Int) where {F} = RBPF(inner_algo, n_particles, 1.0)
 
-# TODO: rewrite this in terms of predict/update. This gets quite messy with the extra
-# arguments. 
+function initialise(rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, extra)
+    N = algo.n_particles
+    outer_dyn, inner_model = model.outer_dyn, model.inner_model
+
+    # Create containers
+    outer_type, inner_type = eltype(outer_dyn), rb_eltype(inner_model)
+    xs = Vector{outer_type}(undef, N)
+    zs = Vector{inner_type}(undef, N)
+    log_ws = fill(-log(N), N)
+
+    # Initialise containers
+    for i in 1:N
+        xs[i] = simulate(rng, outer_dyn, extra)
+        new_extra = (; new_outer=xs[i])
+        inner_extra = isnothing(extra) ? new_extra : (; extra..., new_extra...)
+        zs[i] = initialise(inner_model, algo.inner_algo, inner_extra)
+    end
+
+    return xs, zs, log_ws
+end
+
 function step(rng, model::HierarchicalSSM, algo::RBPF, t::Integer, state, obs, extra)
     xs, zs, log_ws = state
 
     N = algo.n_particles
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
+
+    # Optional resampling
+    weights = Weights(softmax(log_ws))
+    ess = 1 / sum(weights .^ 2)
+    if ess < algo.resample_threshold * N
+        idxs = sample(rng, 1:N, weights, N)
+        xs .= xs[idxs]
+        zs .= zs[idxs]
+        log_ws .= fill(-log(N), N)
+    end
 
     for i in 1:N
         prev_x = xs[i]
@@ -44,41 +73,13 @@ function filter(
     extra0,
     extras::AbstractVector,
 )
-    N = algo.n_particles
-    outer_dyn, inner_model = model.outer_dyn, model.inner_model
-
-    # Containers
-    outer_type, inner_type = eltype(outer_dyn), rb_eltype(inner_model)
-    xs = Vector{outer_type}(undef, N)
-    zs = Vector{inner_type}(undef, N)
-    log_ws = fill(-log(N), N)
-
-    # Initialisation
+    state = initialise(rng, model, algo, extra0)
     ll = 0.0
-    for i in 1:N
-        xs[i] = simulate(rng, outer_dyn, extra0)
-        new_extra0 = (; new_outer=xs[i])
-        inner_extra0 = isnothing(extra0) ? new_extra0 : (; extra0..., new_extra0...)
-        zs[i] = initialise(inner_model, algo.inner_algo, inner_extra0)
-    end
-
-    # Predict-update loop
     for (i, obs) in enumerate(observations)
-        # Optional resampling
-        weights = Weights(softmax(log_ws))
-        ess = 1 / sum(weights .^ 2)
-        if ess < algo.resample_threshold * N
-            idxs = sample(rng, 1:N, weights, N)
-            xs .= xs[idxs]
-            zs .= zs[idxs]
-            log_ws .= fill(-log(N), N)
-        end
-        (xs, zs, log_ws), step_ll = step(
-            rng, model, algo, i, (xs, zs, log_ws), obs, extras[i]
-        )
+        state, step_ll = step(rng, model, algo, i, state, obs, extras[i])
         ll += step_ll
     end
-    return (xs, zs, log_ws), ll
+    return state, ll
 end
 
 function filter(
