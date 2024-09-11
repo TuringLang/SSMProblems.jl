@@ -127,7 +127,7 @@ function step(model::HierarchicalSSM, algo::BatchRBPF, t::Integer, state, obs, e
 
     new_xs = batch_simulate(outer_dyn, t, xs, extra, N)
     new_extras = (prev_outer=xs, new_outer=new_xs)
-    inner_extra = isnothing(extra) ? new_extras : (; extra..., new_extras)
+    inner_extra = isnothing(extra) ? new_extras : (; extra..., new_extras...)
 
     zs, inner_lls = step(inner_model, algo.inner_algo, t, zs, obs, inner_extra)
 
@@ -150,7 +150,7 @@ function filter(
 
     # Initialisation
     ll = 0.0
-    xs = batch_simulate(outer_dyn, N, extra0)
+    xs = batch_simulate(outer_dyn, extra0, N)
     new_extra0 = (; new_outer=xs)
     inner_extra0 = isnothing(extra0) ? new_extra0 : (; extra0..., new_extra0...)
     zs = initialise(inner_model, algo.inner_algo, inner_extra0)
@@ -166,8 +166,9 @@ function filter(
             us = CUDA.rand(N)
             idxs = CuArray{Int32}(undef, N)
             @cuda threads = 256 blocks = 4096 searchsorted!(cdf, us, idxs)
+            # TODO: generalise this for non-`Vector` containers
             xs .= xs[:, idxs]
-            # TODO: generalise this by creating a `resample` function
+            # TODO: generalise this for other inner types
             μs = zs.μs[:, idxs]
             Σs = zs.Σs[:, :, idxs]
             zs = (μs=μs, Σs=Σs)
