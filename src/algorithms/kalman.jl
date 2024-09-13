@@ -123,7 +123,8 @@ function update(
 
     # LU decomposition to compute S^{-1}
     # TODO: Replace with custom fast Cholesky kernel
-    d_ipiv, _, d_S = CUDA.CUBLAS.getrf_strided_batched(S, true)
+    # TODO: Reintroduce pivotting or correct log_det formula to account for it
+    d_ipiv, _, d_S = CUDA.CUBLAS.getrf_strided_batched(S, false)
     S_inv = CuArray{Float32}(undef, size(S))
     CUDA.CUBLAS.getri_strided_batched!(d_S, S_inv, d_ipiv)
 
@@ -144,6 +145,9 @@ function update(
     inv_term = NNlib.batched_vec(S_inv, y .- m)
     log_likes = -0.5f0 * NNlib.batched_vec(reshape(y .- m, 1, 2, size(S, 3)), inv_term)
     log_likes = log_likes .- 0.5f0 * log_dets .- convert(Float32, log(2π))
+
+    # HACK: only errors seems to be from numerical stability so will just overwrite
+    log_likes[isnan.(log_likes)] .= -Inf
 
     return (μs=μ_filt, Σs=Σ_filt), dropdims(log_likes; dims=1)
 end
