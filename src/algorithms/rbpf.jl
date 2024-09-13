@@ -92,6 +92,10 @@ function filter(
     return filter(default_rng(), model, algo, observations, extra, extras)
 end
 
+#################################
+#### GPU-ACCELERATED VERSION ####
+#################################
+
 struct BatchRBPF{F<:FilteringAlgorithm} <: FilteringAlgorithm
     inner_algo::F
     n_particles::Int
@@ -120,10 +124,45 @@ function searchsorted!(ws_cdf, us, idxs)
     end
 end
 
+function initialise(model::HierarchicalSSM, algo::BatchRBPF, extra)
+    N = algo.n_particles
+    outer_dyn, inner_model = model.outer_dyn, model.inner_model
+
+    xs = batch_simulate(outer_dyn, extra, N)
+    new_extra = (; new_outer=xs)
+    inner_extra = isnothing(extra) ? new_extra : (; extra..., new_extra...)
+    zs = initialise(inner_model, algo.inner_algo, inner_extra)
+    log_ws = CUDA.fill(convert(Float32, -log(N)), N)
+
+    return xs, zs, log_ws
+end
+
+resample(states::AbstractMatrix, idxs) = states[:, idxs]
+# TODO: write a proper `resample` function (should probably be in Lévy SSM package)
+# Note for now though that since Lévy SSM is independent, resampling isn't needed
+resample(states, idxs) = states
+
 function step(model::HierarchicalSSM, algo::BatchRBPF, t::Integer, state, obs, extra)
     xs, zs, log_ws = state
     N = algo.n_particles
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
+
+    # Optional resampling
+    weights = softmax(log_ws)
+    ess = 1 / sum(weights .^ 2)
+    if ess < algo.resample_threshold * N
+        cdf = cumsum(weights)
+        us = CUDA.rand(N)
+        idxs = CuArray{Int32}(undef, N)
+        @cuda threads = 256 blocks = 4096 searchsorted!(cdf, us, idxs)
+        # TODO: generalise this for non-`Vector` containers
+        xs = resample(xs, idxs)
+        # TODO: generalise this for other inner types
+        μs = zs.μs[:, idxs]
+        Σs = zs.Σs[:, :, idxs]
+        zs = (μs=μs, Σs=Σs)
+        log_ws .= convert(Float32, -log(N))
+    end
 
     new_xs = batch_simulate(outer_dyn, t, xs, extra, N)
     new_extras = (prev_outer=xs, new_outer=new_xs)
@@ -145,37 +184,11 @@ function filter(
     extra0,
     extras::AbstractVector,
 )
-    N = algo.n_particles
-    outer_dyn, inner_model = model.outer_dyn, model.inner_model
-
-    # Initialisation
+    state = initialise(model, algo, extra0)
     ll = 0.0
-    xs = batch_simulate(outer_dyn, extra0, N)
-    new_extra0 = (; new_outer=xs)
-    inner_extra0 = isnothing(extra0) ? new_extra0 : (; extra0..., new_extra0...)
-    zs = initialise(inner_model, algo.inner_algo, inner_extra0)
-    log_ws = CUDA.fill(convert(Float32, -log(N)), N)
-
-    # Predict-update loop
     for (i, obs) in enumerate(observations)
-        # Optional resampling
-        weights = softmax(log_ws)
-        ess = 1 / sum(weights .^ 2)
-        if ess < algo.resample_threshold * N
-            cdf = cumsum(weights)
-            us = CUDA.rand(N)
-            idxs = CuArray{Int32}(undef, N)
-            @cuda threads = 256 blocks = 4096 searchsorted!(cdf, us, idxs)
-            # TODO: generalise this for non-`Vector` containers
-            xs .= xs[:, idxs]
-            # TODO: generalise this for other inner types
-            μs = zs.μs[:, idxs]
-            Σs = zs.Σs[:, :, idxs]
-            zs = (μs=μs, Σs=Σs)
-            log_ws .= convert(Float32, -log(N))
-        end
-        (xs, zs, log_ws), step_ll = step(model, algo, i, (xs, zs, log_ws), obs, extras[i])
+        state, step_ll = step(model, algo, i, state, obs, extras[i])
         ll += step_ll
     end
-    return (xs, zs, log_ws), ll
+    return state, ll
 end
