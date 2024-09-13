@@ -141,7 +141,7 @@ function batch_calc_params(
     )
 end
 
-function batch_simulate(dyn::HomogeneousLinearGaussianLatentDynamics, N::Integer, extra)
+function batch_simulate(dyn::HomogeneousLinearGaussianLatentDynamics, extra, N::Integer)
     μ0, Σ0 = AnalyticalFilters.calc_initial(dyn, extra)
     D = length(μ0)
     L = cholesky(Σ0).L

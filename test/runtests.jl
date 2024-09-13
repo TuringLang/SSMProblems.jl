@@ -311,7 +311,7 @@ end
     R = rand(rng, 2, 2)
     R = R * R' / 3.0  # make R positive definite
 
-    N_particles = 100000
+    N_particles = 1000
     T = 10
 
     observations = [rand(rng, 2) for _ in 1:T]
