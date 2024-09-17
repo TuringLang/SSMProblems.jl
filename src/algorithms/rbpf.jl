@@ -173,8 +173,7 @@ function step(model::HierarchicalSSM, algo::BatchRBPF, t::Integer, state, obs, e
 
     log_ws += inner_lls
 
-    # HACK: this is only correct if resamping every time step
-    ll = logsumexp(log_ws)
+    ll = logsumexp(inner_lls) - log(N)
     return (new_xs, zs, log_ws), ll
 end
 
