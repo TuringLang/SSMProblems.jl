@@ -170,8 +170,8 @@ end
     R = rand(rng, 2, 2)
     R = R * R' / 3.0  # make R positive definite
 
-    N_particles = 100000
-    T = 1
+    N_particles = 1000
+    T = 20
 
     observations = [rand(rng, 2) for _ in 1:T]
     extra0 = nothing
@@ -180,7 +180,7 @@ end
     # Kalman filtering
 
     full_model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
-    kf_states, ll = AnalyticalFilters.filter(
+    kf_states, kf_ll = AnalyticalFilters.filter(
         full_model, KalmanFilter(), observations, extra0, extras
     )
 
@@ -195,10 +195,14 @@ end
     obs = AnalyticalFilters.HomogeneousLinearGaussianObservationProcess(H[:, 3:4], c, R)
     hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
 
-    rbpf = RBPF(KalmanFilter(), N_particles)
+    rbpf = RBPF(KalmanFilter(), N_particles, 0.99)
     (xs, zs, log_ws), ll = AnalyticalFilters.filter(
         rng, hier_model, rbpf, observations, extra0, extras
     )
+
+    # Compare log-likelihoods
+    println("Kalman filter log-likelihood:", kf_ll)
+    println("RBPF log-likelihood:", ll)
 
     weights = Weights(softmax(log_ws))
 

@@ -49,6 +49,7 @@ function step(rng, model::HierarchicalSSM, algo::RBPF, t::Integer, state, obs, e
         log_ws .= fill(-log(N), N)
     end
 
+    inner_lls = Vector{Float64}(undef, N)
     for i in 1:N
         prev_x = xs[i]
         xs[i] = simulate(rng, outer_dyn, t, prev_x, extra)
@@ -58,10 +59,10 @@ function step(rng, model::HierarchicalSSM, algo::RBPF, t::Integer, state, obs, e
 
         zs[i], inner_ll = step(inner_model, algo.inner_algo, t, zs[i], obs, inner_extra)
         log_ws[i] = log_ws[i] + inner_ll
+        inner_lls[i] = inner_ll
     end
 
-    # TODO: this is probably incorrect
-    ll = logsumexp(log_ws) - log(N)
+    ll = logsumexp(inner_lls) - log(N)
     return (xs, zs, log_ws), ll
 end
 
