@@ -5,6 +5,8 @@ using Plots
 using Random
 using SSMProblems
 
+import AnalyticalFilters: FilteringAlgorithm
+
 struct TargetDynamics{T<:Real} <: LinearGaussianLatentDynamics{T}
     μ0::Vector{T}
     Σ0::Matrix{T}
@@ -94,3 +96,71 @@ t_test = T
 meas_x = getindex.(ys[t_test], 1)
 meas_y = getindex.(ys[t_test], 2)
 scatter!(meas_x, meas_y; label="Measurements")
+
+###################
+#### FILTERING ####
+###################
+
+abstract type Associator end
+
+struct NearestNeighborAssociator <: Associator end
+
+function associate(::NearestNeighborAssociator, x::Vector, ys::Vector)
+    return argmin(norm.([x] .- ys))
+end
+
+struct AssociationFilter{A<:Associator,F<:FilteringAlgorithm} <: FilteringAlgorithm
+    associator::A
+    filter::F
+end
+
+# HACK: this should be combined with usual initialisation function which should only use
+# dynamics
+function initialise(model, filter, extra)
+    μ0, Σ0 = AnalyticalFilters.calc_initial(model.dyn, extra)
+    return (μ=μ0, Σ=Σ0)
+end
+
+function filter(
+    model::StateSpaceModel{<:Any,<:ClutterAndTargetObservations},
+    assoc_filter::AssociationFilter,
+    Ys::Vector{Vector{Vector{Float64}}},
+    extra0,
+    extras,
+)
+    state = initialise(model, assoc_filter.filter, extra0)
+    ll = 0.0
+    for (t, ys) in enumerate(Ys)
+        state, l = step(model, assoc_filter, t, state, ys, extras[t])
+        ll += l
+    end
+    return state, ll
+end
+
+function step(
+    model::StateSpaceModel{<:Any,<:ClutterAndTargetObservations},
+    assoc_filter::AssociationFilter,
+    t::Integer,
+    state,
+    ys::Vector{Vector{Float64}},
+    extra,
+)
+    # HACK: need a clean way to pass conditioned model to the analytical filter
+    conditioned_model = StateSpaceModel(model.dyn, model.obs.target_obs)
+
+    state = AnalyticalFilters.predict(
+        conditioned_model, assoc_filter.filter, t, state, extra
+    )
+    # HACK: assuming form of state
+    x = model.obs.target_obs.H * state.μ
+    assoc = associate(assoc_filter.associator, x, ys)
+    state, ll = AnalyticalFilters.update(
+        conditioned_model, assoc_filter.filter, t, state, ys[assoc], extra
+    )
+    return state, ll
+end
+
+# Test filter runs
+assoc_filter = AssociationFilter(NearestNeighborAssociator(), KalmanFilter())
+extras = fill(nothing, T)
+state, ll = filter(model, assoc_filter, ys, nothing, extras)
