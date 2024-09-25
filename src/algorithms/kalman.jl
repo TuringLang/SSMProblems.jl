@@ -143,7 +143,8 @@ function update(
     # L has ones on the diagonal so we can just multiply the diagonals of U
     log_dets = sum(log, diags; dims=1)
     inv_term = NNlib.batched_vec(S_inv, y .- m)
-    log_likes = -0.5f0 * NNlib.batched_vec(reshape(y .- m, 1, 2, size(S, 3)), inv_term)
+    log_likes =
+        -0.5f0 * NNlib.batched_vec(reshape(y .- m, 1, size(y, 1), size(S, 3)), inv_term)
     log_likes = log_likes .- 0.5f0 * log_dets .- convert(Float32, log(2π))
 
     # HACK: only errors seems to be from numerical stability so will just overwrite
