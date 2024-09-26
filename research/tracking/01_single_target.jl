@@ -105,6 +105,11 @@ abstract type Associator end
 
 struct NearestNeighborAssociator <: Associator end
 
+# x_t
+# -> x_{t+1}_pred
+# -> y_{t+1}_pred = H x_{t+1}_pred (noiseless)
+# -> y_{t+1} compare with y_{t+1}_pred
+
 function associate(::NearestNeighborAssociator, x::Vector, ys::Vector)
     return argmin(norm.([x] .- ys))
 end
@@ -152,8 +157,9 @@ function step(
         conditioned_model, assoc_filter.filter, t, state, extra
     )
     # HACK: assuming form of state
-    x = model.obs.target_obs.H * state.μ
-    assoc = associate(assoc_filter.associator, x, ys)
+    y_pred = model.obs.target_obs.H * state.μ
+    # y_pred = simulate(model.obs, t, state.μ, extra, noise=false)  # H * x or H * x + R
+    assoc = associate(assoc_filter.associator, y_pred, ys)
     state, ll = AnalyticalFilters.update(
         conditioned_model, assoc_filter.filter, t, state, ys[assoc], extra
     )
