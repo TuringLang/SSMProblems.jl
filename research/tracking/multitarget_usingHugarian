@@ -4,6 +4,7 @@ using LinearAlgebra
 using Plots
 using Random
 using SSMProblems
+using Hungarian
 
 import AnalyticalFilters: FilteringAlgorithm
 
@@ -126,11 +127,37 @@ H = [1.0 0.0 0.0 0.0; 0.0 0.0 1.0 0.0];
 R = Matrix(0.3I, 2, 2);
 v = 500.0
 # pd = 0.9
-λ = 50.0
+λ = 1.0
 
 N = 4
 μ0s = repeat([μ0], N)
 Σ0s = repeat([Σ0], N)
+
+# Define different initial mean vectors (μ0) for each target
+μ0s = [
+    [-1.0, 0.0, -2.0, 0.0],  # Target 1
+    [2.0, -1.0, 3.0, 0.5],   # Target 2
+    [-0.5, 1.5, -3.0, 1.0],  # Target 3
+    [1.5, 0.5, -1.5, -0.5]   # Target 4
+]
+
+# Define different initial covariance matrices (Σ0) for each target
+Σ0s = [
+    Matrix(1.0I, 4, 4),           # Covariance for Target 1
+    Matrix([0.5 0.1 0.0 0.0;      # Covariance for Target 2
+            0.1 0.5 0.0 0.0;
+            0.0 0.0 0.8 0.2;
+            0.0 0.0 0.2 0.8]),
+    Matrix([0.7 0.2 0.0 0.0;      # Covariance for Target 3
+            0.2 0.7 0.0 0.0;
+            0.0 0.0 0.9 0.1;
+            0.0 0.0 0.1 0.9]),
+    Matrix([0.9 0.3 0.0 0.0;      # Covariance for Target 4
+            0.3 0.9 0.0 0.0;
+            0.0 0.0 0.6 0.1;
+            0.0 0.0 0.1 0.6])
+]
+
 As = repeat([A], N)
 bs = repeat([b], N)
 Qs = repeat([Q], N)
@@ -173,15 +200,24 @@ struct GlobalNearestNeighborAssociator <: Associator end
 # -> y_{t+1}_pred = H x_{t+1}_pred (noiseless)
 # -> y_{t+1} compare with y_{t+1}_pred
 
+
 function associate(::GlobalNearestNeighborAssociator, y_preds::Vector, ys::Vector)
-    # HACK: very inefficient
-    ys_copy = copy(ys)
-    assocs = Vector{Int}(undef, length(y_preds))
-    for (i, y_pred) in enumerate(y_preds)
-        idx = argmin(norm.([y_pred] .- ys_copy))
-        assocs[i] = idx
-        deleteat!(ys_copy, idx)
+    n_preds = length(y_preds)
+    n_ys = length(ys)
+    
+    # Create the cost matrix where cost(i, j) = euclidean_distance(y_preds[i], ys[j])
+    cost_matrix = zeros(Float64, n_preds, n_ys)
+    for i in 1:n_preds
+        for j in 1:n_ys
+            cost_matrix[i, j] = norm(y_preds[i] - ys[j])
+        end
     end
+
+    # Solve the assignment problem using the Hungarian algorithm
+    row_indices, col_indices = hungarian(cost_matrix)
+
+    # Prepare the associations
+    assocs = row_indices
     return assocs
 end
 
@@ -251,7 +287,7 @@ state, ll = filter(model, assoc_filter, ys, nothing, extras)
 
 filt_x = getindex.(history, 1)
 filt_y = getindex.(history, 3)
-plot!(filt_x, filt_y; label="Filtered trajectory", linestyle=:dash,  linewidth=3, legend=:topleft)
+plot!(filt_x, filt_y; label="Filtered trajectory", linestyle=:dash,linewidth=3, legend=:topleft)
 
 # Filtered trajectory plot for second target with different linewidth
 filt_x2 = getindex.(history, 5)
