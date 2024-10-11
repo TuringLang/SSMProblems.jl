@@ -94,7 +94,10 @@ function SSMProblems.distribution(
 end
 
 function SSMProblems.distribution(
-    proc::LinearGaussianObservationProcess{T}, step::Int, state::AbstractVector{T}; kwargs...
+    proc::LinearGaussianObservationProcess{T},
+    step::Int,
+    state::AbstractVector{T};
+    kwargs...,
 ) where {T<:Real}
     return MvNormal(proc.H * state, proc.R)
 end
@@ -147,9 +150,7 @@ function sample(
     log_evidence = zero(eltype(model))
 
     for t in eachindex(observations)
-        proposed_states = predict(
-            rng, model, filter, t, filtered_states; kwargs...
-        )
+        proposed_states = predict(rng, model, filter, t, filtered_states; kwargs...)
 
         filtered_states, log_marginal = update(
             model, filter, t, proposed_states, observations[t]; kwargs...
@@ -283,7 +284,7 @@ function update(
 )
     log_marginals = map(
         x -> SSMProblems.logdensity(model.obs, step, x, observation; kwargs...),
-        states.proposed
+        states.proposed,
     )
 
     prev_log_marginal = logsumexp(states.log_weights)

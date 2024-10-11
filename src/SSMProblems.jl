@@ -144,7 +144,9 @@ corresponding `distribution()` method.
 
 See also [`LatentDynamics`](@ref).
 """
-function simulate(rng::AbstractRNG, dyn::LatentDynamics, step::Integer, prev_state; kwargs...)
+function simulate(
+    rng::AbstractRNG, dyn::LatentDynamics, step::Integer, prev_state; kwargs...
+)
     return rand(rng, distribution(dyn, step, prev_state; kwargs...))
 end
 function simulate(dynamics::LatentDynamics, prev_state, step; kwargs...)
@@ -164,7 +166,9 @@ corresponding `distribution()` method.
 
 See also [`ObservationProcess`](@ref).
 """
-function simulate(rng::AbstractRNG, obs::ObservationProcess, step::Integer, state; kwargs...)
+function simulate(
+    rng::AbstractRNG, obs::ObservationProcess, step::Integer, state; kwargs...
+)
     return rand(rng, distribution(obs, step, state; kwargs...))
 end
 function simulate(obs::ObservationProcess, step::Integer, state; kwargs...)
