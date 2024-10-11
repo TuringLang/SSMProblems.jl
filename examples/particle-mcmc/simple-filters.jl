@@ -81,20 +81,20 @@ function LinearGaussianObservationProcess(H::AbstractMatrix, R::AbstractVector)
 end
 
 function SSMProblems.distribution(
-    proc::LinearGaussianLatentDynamics{T}, extra
+    proc::LinearGaussianLatentDynamics{T}; kwargs...
 ) where {T<:Real}
     dx = size(proc.A, 1)
     return MvNormal(proc.init.μ, proc.init.Σ)
 end
 
 function SSMProblems.distribution(
-    proc::LinearGaussianLatentDynamics{T}, step::Int, state::AbstractVector{T}, extra
+    proc::LinearGaussianLatentDynamics{T}, step::Int, state::AbstractVector{T}; kwargs...
 ) where {T<:Real}
     return MvNormal(proc.A * state + proc.b, proc.Q)
 end
 
 function SSMProblems.distribution(
-    proc::LinearGaussianObservationProcess{T}, step::Int, state::AbstractVector{T}, extra
+    proc::LinearGaussianObservationProcess{T}, step::Int, state::AbstractVector{T}; kwargs...
 ) where {T<:Real}
     return MvNormal(proc.H * state, proc.R)
 end
@@ -143,16 +143,16 @@ function sample(
     callback=nothing,
     kwargs...,
 )
-    filtered_states = initialise(rng, model, filter, nothing; kwargs...)
+    filtered_states = initialise(rng, model, filter; kwargs...)
     log_evidence = zero(eltype(model))
 
     for t in eachindex(observations)
         proposed_states = predict(
-            rng, model, filter, t, filtered_states, nothing; kwargs...
+            rng, model, filter, t, filtered_states; kwargs...
         )
 
         filtered_states, log_marginal = update(
-            model, filter, t, proposed_states, observations[t], nothing; kwargs...
+            model, filter, t, proposed_states, observations[t]; kwargs...
         )
 
         log_evidence += log_marginal
@@ -171,9 +171,9 @@ struct KalmanFilter <: AbstractFilter end
 KF() = KalmanFilter()
 
 function initialise(
-    rng::AbstractRNG, model::LinearGaussianModel, filter::KalmanFilter, extras; kwargs...
+    rng::AbstractRNG, model::LinearGaussianModel, filter::KalmanFilter; kwargs...
 )
-    init_dist = SSMProblems.distribution(model.dyn, extras)
+    init_dist = SSMProblems.distribution(model.dyn; kwargs...)
     return Gaussian(init_dist.μ, Matrix(init_dist.Σ))
 end
 
@@ -182,8 +182,7 @@ function predict(
     model::LinearGaussianModel,
     filter::KalmanFilter,
     step::Integer,
-    states::Gaussian,
-    extra;
+    states::Gaussian;
     kwargs...,
 )
     @unpack A, b, Q = model.dyn
@@ -200,8 +199,7 @@ function update(
     filter::KalmanFilter,
     step::Integer,
     proposed_states::Gaussian,
-    observation,
-    extra;
+    observation;
     kwargs...,
 )
     @unpack H, R = model.obs
@@ -232,12 +230,11 @@ resample_threshold(filter::BootstrapFilter) = filter.threshold * filter.N
 function initialise(
     rng::AbstractRNG,
     model::StateSpaceModel,
-    filter::BootstrapFilter,
-    extra;
+    filter::BootstrapFilter;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    initial_states = map(x -> SSMProblems.simulate(rng, model.dyn, extra), 1:(filter.N))
+    initial_states = map(x -> SSMProblems.simulate(rng, model.dyn; kwargs...), 1:(filter.N))
     initial_weights = zeros(eltype(model), filter.N)
 
     return update_ref!(ParticleContainer(initial_states, initial_weights), ref_state)
@@ -263,14 +260,13 @@ function predict(
     model::StateSpaceModel,
     filter::BootstrapFilter,
     step::Integer,
-    states::ParticleContainer{T},
-    extra;
+    states::ParticleContainer{T};
     ref_state::Union{Nothing,AbstractVector{T}}=nothing,
     kwargs...,
 ) where {T}
     states.ancestors = resample(rng, states, filter)
     states.proposed = map(
-        x -> SSMProblems.simulate(rng, model.dyn, step, x, extra),
+        x -> SSMProblems.simulate(rng, model.dyn, step, x; kwargs...),
         states.filtered[states.ancestors],
     )
 
@@ -282,12 +278,12 @@ function update(
     filter::BootstrapFilter,
     step::Integer,
     states::ParticleContainer,
-    observation,
-    extra;
+    observation;
     kwargs...,
 )
     log_marginals = map(
-        x -> SSMProblems.logdensity(model.obs, step, x, observation, extra), states.proposed
+        x -> SSMProblems.logdensity(model.obs, step, x, observation; kwargs...),
+        states.proposed
     )
 
     prev_log_marginal = logsumexp(states.log_weights)

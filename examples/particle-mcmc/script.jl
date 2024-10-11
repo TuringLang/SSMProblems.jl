@@ -10,7 +10,7 @@ include("simple-filters.jl")
 # use a local level trend model
 function simulation_model(σx²::T, σy²::T) where {T<:Real}
     init = Gaussian(zeros(T, 2), PDMat(diagm(ones(T, 2))))
-    dyn = LinearGaussianLatentDynamics(T[1 1; 0 1], T[0; 0], [σx² 0; 0 0], init)
+    dyn = LinearGaussianLatentDynamics(T[1 1; 0 1], T[0; 0], PDiagMat([σx²; 0]), init)
     obs = LinearGaussianObservationProcess(T[1 0], [σy²;;])
     return StateSpaceModel(dyn, obs)
 end

@@ -73,7 +73,7 @@ See also [`LatentDynamics`](@ref).
 # Returns
 - `Distributions.Distribution`: The distribution of the initial state.
 """
-function distribution(dyn::LatentDynamics, extra)
+function distribution(dyn::LatentDynamics; kwargs...)
     throw(MethodError(distribution, (dyn)))
 end
 
@@ -91,8 +91,8 @@ See also [`LatentDynamics`](@ref).
 # Returns
 - `Distributions.Distribution`: The distribution of the new state.
 """
-function distribution(dyn::LatentDynamics, step::Integer, state, extra)
-    throw(MethodError(distribution, (dyn, step, state, extra)))
+function distribution(dyn::LatentDynamics, step::Integer, state; kwargs...)
+    throw(MethodError(distribution, (dyn, step, state, kwargs...)))
 end
 
 """
@@ -109,8 +109,8 @@ See also [`ObservationProcess`](@ref).
 # Returns
 - `Distributions.Distribution`: The distribution of the observation.
 """
-function distribution(obs::ObservationProcess, step::Integer, state, extra)
-    throw(MethodError(distribution, (obs, step, state, extra)))
+function distribution(obs::ObservationProcess, step::Integer, state; kwargs...)
+    throw(MethodError(distribution, (obs, step, state, kwargs...)))
 end
 
 """
@@ -126,10 +126,10 @@ end
 
     See also [`LatentDynamics`](@ref).
 """
-function simulate(rng::AbstractRNG, dyn::LatentDynamics, extra)
-    return rand(rng, distribution(dyn, extra))
+function simulate(rng::AbstractRNG, dyn::LatentDynamics; kwargs...)
+    return rand(rng, distribution(dyn; kwargs...))
 end
-simulate(dyn::LatentDynamics, extra) = simulate(default_rng(), dyn, extra)
+simulate(dyn::LatentDynamics; kwargs...) = simulate(default_rng(), dyn; kwargs...)
 
 """
     simulate([rng::AbstractRNG], dyn::LatentDynamics, step::Integer, prev_state, extra)
@@ -144,11 +144,11 @@ corresponding `distribution()` method.
 
 See also [`LatentDynamics`](@ref).
 """
-function simulate(rng::AbstractRNG, dyn::LatentDynamics, step::Integer, prev_state, extra)
-    return rand(rng, distribution(dyn, step, prev_state, extra))
+function simulate(rng::AbstractRNG, dyn::LatentDynamics, step::Integer, prev_state; kwargs...)
+    return rand(rng, distribution(dyn, step, prev_state; kwargs...))
 end
-function simulate(dynamics::LatentDynamics, prev_state, step, extra)
-    return simulate(default_rng(), dynamics, prev_state, step, extra)
+function simulate(dynamics::LatentDynamics, prev_state, step; kwargs...)
+    return simulate(default_rng(), dynamics, prev_state, step; kwargs...)
 end
 
 """
@@ -164,11 +164,11 @@ corresponding `distribution()` method.
 
 See also [`ObservationProcess`](@ref).
 """
-function simulate(rng::AbstractRNG, obs::ObservationProcess, step::Integer, state, extra)
-    return rand(rng, distribution(obs, step, state, extra))
+function simulate(rng::AbstractRNG, obs::ObservationProcess, step::Integer, state; kwargs...)
+    return rand(rng, distribution(obs, step, state; kwargs...))
 end
-function simulate(obs::ObservationProcess, step::Integer, state, extra)
-    return simulate(default_rng(), obs, step, state, extra)
+function simulate(obs::ObservationProcess, step::Integer, state; kwargs...)
+    return simulate(default_rng(), obs, step, state; kwargs...)
 end
 
 """
@@ -184,8 +184,8 @@ corresponding `distribution()` method.
 
 See also [`LatentDynamics`](@ref).
 """
-function logdensity(dyn::LatentDynamics, new_state, extra)
-    return logpdf(distribution(dyn, extra), new_state)
+function logdensity(dyn::LatentDynamics, new_state; kwargs...)
+    return logpdf(distribution(dyn; kwargs...), new_state)
 end
 
 """
@@ -201,8 +201,8 @@ corresponding `distribution()` method.
 
 See also [`LatentDynamics`](@ref).
 """
-function logdensity(dyn::LatentDynamics, step::Integer, prev_state, new_state, extra)
-    return logpdf(distribution(dyn, step, prev_state, extra), new_state)
+function logdensity(dyn::LatentDynamics, step::Integer, prev_state, new_state; kwargs...)
+    return logpdf(distribution(dyn, step, prev_state; kwargs...), new_state)
 end
 
 """
@@ -218,8 +218,8 @@ corresponding `distribution()` method.
 
 See also [`ObservationProcess`](@ref).
 """
-function logdensity(obs::ObservationProcess, step::Integer, state, observation, extra)
-    return logpdf(distribution(obs, step, state, extra), observation)
+function logdensity(obs::ObservationProcess, step::Integer, state, observation; kwargs...)
+    return logpdf(distribution(obs, step, state; kwargs...), observation)
 end
 
 """
