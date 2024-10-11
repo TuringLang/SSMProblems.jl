@@ -13,12 +13,11 @@ resample_threshold(filter::BootstrapFilter) = filter.threshold * filter.N
 function initialise(
     rng::AbstractRNG,
     model::StateSpaceModel,
-    filter::BootstrapFilter,
-    extra;
+    filter::BootstrapFilter;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    initial_states = map(x -> SSMProblems.simulate(rng, model.dyn, extra), 1:(filter.N))
+    initial_states = map(x -> SSMProblems.simulate(rng, model.dyn; kwargs...), 1:(filter.N))
     initial_weights = zeros(eltype(model), filter.N)
 
     return update_ref!(ParticleContainer(initial_states, initial_weights), ref_state)
@@ -44,14 +43,13 @@ function predict(
     model::StateSpaceModel,
     filter::BootstrapFilter,
     step::Integer,
-    states::ParticleContainer{T},
-    extra;
+    states::ParticleContainer{T};
     ref_state::Union{Nothing,AbstractVector{T}}=nothing,
     kwargs...,
 ) where {T}
     states.ancestors = resample(rng, states, filter)
     states.proposed = map(
-        x -> SSMProblems.simulate(rng, model.dyn, step, x, extra),
+        x -> SSMProblems.simulate(rng, model.dyn, step, x; kwargs...),
         states.filtered[states.ancestors],
     )
 
@@ -63,12 +61,12 @@ function update(
     filter::BootstrapFilter,
     step::Integer,
     states::ParticleContainer,
-    observation,
-    extra;
+    observation;
     kwargs...,
 )
     log_marginals = map(
-        x -> SSMProblems.logdensity(model.obs, step, x, observation, extra), states.proposed
+        x -> SSMProblems.logdensity(model.obs, step, x, observation; kwargs...),
+        states.proposed
     )
 
     prev_log_marginal = logsumexp(states.log_weights)
@@ -77,3 +75,4 @@ function update(
 
     return (states, logsumexp(states.log_weights) - prev_log_marginal)
 end
+

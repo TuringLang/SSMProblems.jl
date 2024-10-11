@@ -107,7 +107,7 @@ end
     path_probs = Dict{Tuple{Int,Int},Float64}()
     for x0 in 1:K, x1 in 1:K
         prior_prob = α0[x0] * P[x0, x1]
-        likelihood = exp(SSMProblems.logdensity(obs, 1, x1, y, nothing))
+        likelihood = exp(SSMProblems.logdensity(obs, 1, x1, y))
         path_probs[(x0, x1)] = prior_prob * likelihood
     end
     marginal = sum(values(path_probs))
@@ -174,8 +174,6 @@ end
     T = 20
 
     observations = [rand(rng, 2) for _ in 1:T]
-    extra0 = nothing
-    extras = [nothing for _ in 1:T]
 
     # Kalman filtering
 
