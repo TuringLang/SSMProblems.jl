@@ -5,14 +5,14 @@ import StatsBase: Weights
 
 export RBPF
 
-struct RBPF{F<:FilteringAlgorithm} <: FilteringAlgorithm
+struct RBPF{F<:AbstractFilter} <: AbstractFilter
     inner_algo::F
     n_particles::Int
     resample_threshold::Float64
 end
 RBPF(inner_algo::F, n_particles::Int) where {F} = RBPF(inner_algo, n_particles, 1.0)
 
-function initialise(rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, extra)
+function initialise(rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF; extra=nothing, kwargs...)
     N = algo.n_particles
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
@@ -24,7 +24,7 @@ function initialise(rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, extra)
 
     # Initialise containers
     for i in 1:N
-        xs[i] = simulate(rng, outer_dyn, extra)
+        xs[i] = simulate(rng, outer_dyn, extra; kwargs...)
         new_extra = (; new_outer=xs[i])
         inner_extra = isnothing(extra) ? new_extra : (; extra..., new_extra...)
         zs[i] = initialise(inner_model, algo.inner_algo, inner_extra)
@@ -33,7 +33,7 @@ function initialise(rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, extra)
     return xs, zs, log_ws
 end
 
-function step(rng, model::HierarchicalSSM, algo::RBPF, t::Integer, state, obs, extra)
+function step(rng, model::HierarchicalSSM, algo::RBPF, t::Integer, state, obs; extra=nothing, kwargs...)
     xs, zs, log_ws = state
 
     N = algo.n_particles
@@ -64,27 +64,4 @@ function step(rng, model::HierarchicalSSM, algo::RBPF, t::Integer, state, obs, e
 
     ll = logsumexp(inner_lls) - log(N)
     return (xs, zs, log_ws), ll
-end
-
-function filter(
-    rng::AbstractRNG,
-    model::HierarchicalSSM,
-    algo::RBPF,
-    observations::AbstractVector,
-    extra0,
-    extras::AbstractVector,
-)
-    state = initialise(rng, model, algo, extra0)
-    ll = 0.0
-    for (i, obs) in enumerate(observations)
-        state, step_ll = step(rng, model, algo, i, state, obs, extras[i])
-        ll += step_ll
-    end
-    return state, ll
-end
-
-function filter(
-    model::HierarchicalSSM, algo::RBPF, observations::AbstractVector, extras::AbstractVector
-)
-    return filter(default_rng(), model, algo, observations, extras)
 end

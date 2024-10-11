@@ -1,68 +1,43 @@
-export ForwardAlgorithm, filter
+export ForwardAlgorithm, FW
 
-struct ForwardAlgorithm <: FilteringAlgorithm end
+struct ForwardAlgorithm <: AbstractFilter end
 
-function initialise(model::DiscreteStateSpaceModel{T}, ::ForwardAlgorithm, extra) where {T}
-    return calc_α0(model.dyn, extra)
+FW() = ForwardAlgorithm()
+
+function initialise(
+    rng::AbstractRNG, model::DiscreteStateSpaceModel, ::ForwardAlgorithm; kwargs...
+)
+    return calc_α0(model.dyn; kwargs...)
 end
 
 function predict(
+    rng::AbstractRNG,
     model::DiscreteStateSpaceModel{T},
-    ::ForwardAlgorithm,
+    filter::ForwardAlgorithm,
     step::Integer,
-    state::Vector,
-    extra,
+    states::AbstractVector;
+    kwargs...,
 ) where {T}
-    P = calc_P(model.dyn, step, extra)
-    return (state' * P)'
+    P = calc_P(model.dyn, step; kwargs...)
+    return (states' * P)'
 end
 
 function update(
     model::DiscreteStateSpaceModel{T},
-    ::ForwardAlgorithm,
+    filter::ForwardAlgorithm,
     step::Integer,
-    state::Vector,
-    obs,
-    extra,
+    states::AbstractVector,
+    observation;
+    kwargs...,
 ) where {T}
     # Compute emission probability vector
     # TODO: should we define density as part of the interface or run the whole algorithm in
     # log space?
-    b = [
-        exp(SSMProblems.logdensity(model.obs, step, i, obs, extra)) for i in 1:length(state)
-    ]
-    filt_state = b .* state
-    likelihood = sum(filt_state)
-    return filt_state / likelihood, log(likelihood)
-end
-
-function step(
-    model::DiscreteStateSpaceModel{T},
-    filter::ForwardAlgorithm,
-    step::Integer,
-    state::Vector,
-    obs,
-    extra,
-) where {T}
-    state = predict(model, filter, step, state, extra)
-    state, ll = update(model, filter, step, state, obs, extra)
-    return state, ll
-end
-
-function filter(
-    model::DiscreteStateSpaceModel{T},
-    filter::ForwardAlgorithm,
-    data::Vector,
-    extra0,
-    extras,
-) where {T}
-    state = initialise(model, filter, extra0)
-    states = Vector{rb_eltype(model)}(undef, length(data))
-    ll = 0.0
-    for (i, obs) in enumerate(data[1:end])
-        state, step_ll = step(model, filter, i, state, obs, extras[i])
-        states[i] = state
-        ll += step_ll
-    end
-    return states, ll
+    b = map(
+        x -> exp(SSMProblems.logdensity(model.obs, step, x, observation; kwargs...)),
+        eachindex(states)
+    )
+    filtered_states = b .* states
+    likelihood = sum(filtered_states)
+    return (filtered_states / likelihood), log(likelihood)
 end

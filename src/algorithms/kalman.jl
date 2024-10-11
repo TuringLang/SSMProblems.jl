@@ -1,80 +1,54 @@
-export KalmanFilter, filter
+using GaussianDistributions
 
-struct KalmanFilter <: FilteringAlgorithm end
+export KalmanFilter, KF
+
+struct KalmanFilter <: AbstractFilter end
+
+KF() = KalmanFilter()
 
 function initialise(
-    model::LinearGaussianStateSpaceModel{T}, filter::KalmanFilter, extra
-) where {T}
-    μ0, Σ0 = calc_initial(model.dyn, extra)
-    return (μ=μ0, Σ=Σ0)
+    rng::AbstractRNG, model::LinearGaussianStateSpaceModel, filter::KalmanFilter; kwargs...
+)
+    μ0, Σ0 = calc_initial(model.dyn; kwargs...)
+    # TODO: preallocate innovations and Kalman gain
+    return GaussianContainer(Gaussian(μ0, Σ0), Gaussian(μ0, Σ0))
 end
 
 function predict(
-    model::LinearGaussianStateSpaceModel{T},
+    rng::AbstractRNG,
+    model::LinearGaussianStateSpaceModel,
     filter::KalmanFilter,
     step::Integer,
-    state::@NamedTuple{μ::Vector{T}, Σ::Matrix{T}},
-    extra,
-) where {T}
-    μ, Σ = state.μ, state.Σ
-    A, b, Q = calc_params(model.dyn, step, extra)
-    μ̂ = A * μ + b
-    Σ̂ = A * Σ * A' + Q
-    return (μ=μ̂, Σ=Σ̂)
+    states::GaussianContainer;
+    kwargs...,
+)
+    μ, Σ = GaussianDistributions.pair(states.filtered)
+    A, b, Q = calc_params(model.dyn, step; kwargs...)
+    states.proposed = Gaussian(A * μ + b, A * Σ * A' + Q)
+    return states
 end
 
 function update(
-    model::LinearGaussianStateSpaceModel{T},
+    model::LinearGaussianStateSpaceModel,
     filter::KalmanFilter,
     step::Integer,
-    state::@NamedTuple{μ::Vector{T}, Σ::Matrix{T}},
-    obs::Vector{T},
-    extra,
-) where {T}
-    μ, Σ = state.μ, state.Σ
-    H, c, R = calc_params(model.obs, step, extra)
+    states::GaussianContainer,
+    obs::AbstractVector;
+    kwargs...,
+)
+    μ, Σ = GaussianDistributions.pair(states.proposed)
+    H, c, R = calc_params(model.obs, step; kwargs...)
 
     # Update state
     m = H * μ + c
     y = obs - m
     S = H * Σ * H' + R
     K = Σ * H' / S
-    μ̂ = μ + K * y
-    Σ̂ = Σ - K * H * Σ
+
+    states.filtered = Gaussian(μ + K * y, Σ - K * H * Σ)
 
     # Compute log-likelihood
     ll = logpdf(MvNormal(m, S), obs)
 
-    return (μ=μ̂, Σ=Σ̂), ll
-end
-
-function step(
-    model::LinearGaussianStateSpaceModel{T},
-    filter::KalmanFilter,
-    step::Integer,
-    state::@NamedTuple{μ::Vector{T}, Σ::Matrix{T}},
-    obs::Vector{T},
-    extra,
-) where {T}
-    state = predict(model, filter, step, state, extra)
-    state, ll = update(model, filter, step, state, obs, extra)
-    return state, ll
-end
-
-function filter(
-    model::LinearGaussianStateSpaceModel{T},
-    filter::KalmanFilter,
-    data::Vector{Vector{T}},
-    extra0,
-    extras,
-) where {T}
-    state = initialise(model, filter, extra0)
-    states = Vector{@NamedTuple{μ::Vector{T}, Σ::Matrix{T}}}(undef, length(data))
-    ll = 0.0
-    for (i, obs) in enumerate(data)
-        state, step_ll = step(model, filter, i, state, obs, extras[i])
-        states[i] = state
-        ll += step_ll
-    end
     return states, ll
 end

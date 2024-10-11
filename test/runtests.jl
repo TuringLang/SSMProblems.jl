@@ -27,7 +27,7 @@ using TestItemRunner
 
     kf = KalmanFilter()
 
-    states, _ = AnalyticalFilters.filter(model, kf, observations, nothing, [nothing])
+    states, _ = AnalyticalFilters.filter(rng, model, kf, observations)
 
     # Let Z = [X0, X1, Y1] be the joint state vector
     # Write Z = P.Z + ϵ, where ϵ ~ N(μ_ϵ, Σ_ϵ)
@@ -56,12 +56,12 @@ using TestItemRunner
     Σ_X1 = Σ_Z[I_x, I_x] - Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ Σ_Z[I_y, I_x])
 
     # TODO: test log-likelihood using marginalisation formula
-    @test only(states).μ ≈ μ_X1
-    @test only(states).Σ ≈ Σ_X1
+    @test states.filtered.μ ≈ μ_X1
+    @test states.filtered.Σ ≈ Σ_X1
 end
 
 @testitem "Forward algorithm test" begin
-    using AnalyticFilters
+    using AnalyticalFilters
     using Distributions
     using StableRNGs
     using SSMProblems
@@ -77,9 +77,14 @@ end
     end
 
     function SSMProblems.logdensity(
-        obs::MixtureModelObservation, ::Integer, state::Integer, y, extra
-    )
-        return logpdf(Normal(obs.μs[state], 1.0), y)
+        obs::MixtureModelObservation{T},
+        step::Integer,
+        state::Integer,
+        observation,
+        extra=nothing;
+        kwargs...,
+    ) where {T}
+        return logpdf(Normal(obs.μs[state], one(T)), observation)
     end
 
     μs = [0.0, 1.0, 2.0]
@@ -90,8 +95,9 @@ end
 
     observations = [rand(rng)]
 
-    states, ll = AnalyticFilters.filter(
-        model, ForwardAlgorithm(), observations, nothing, [nothing]
+    fw = ForwardAlgorithm()
+    states, ll = AnalyticalFilters.filter(
+        model, fw, observations
     )
 
     # Brute force calculations of each conditional path probability p(x_{1:T} | y_{1:T})
@@ -129,13 +135,13 @@ end
         C::Matrix{T}
         Q::Matrix{T}
     end
-    AnalyticalFilters.calc_μ0(dyn::InnerDynamics, extra) = dyn.μ0
-    AnalyticalFilters.calc_Σ0(dyn::InnerDynamics, extra) = dyn.Σ0
-    AnalyticalFilters.calc_A(dyn::InnerDynamics, ::Integer, extra) = dyn.A
-    function AnalyticalFilters.calc_b(dyn::InnerDynamics, ::Integer, extra)
-        return dyn.b + dyn.C * extra.prev_outer
+    AnalyticalFilters.calc_μ0(dyn::InnerDynamics; kwargs...) = dyn.μ0
+    AnalyticalFilters.calc_Σ0(dyn::InnerDynamics; kwargs...) = dyn.Σ0
+    AnalyticalFilters.calc_A(dyn::InnerDynamics, ::Integer; kwargs...) = dyn.A
+    function AnalyticalFilters.calc_b(dyn::InnerDynamics, ::Integer; prev_outer, kwargs...)
+        return dyn.b + dyn.C * prev_outer
     end
-    AnalyticalFilters.calc_Q(dyn::InnerDynamics, ::Integer, extra) = dyn.Q
+    AnalyticalFilters.calc_Q(dyn::InnerDynamics, ::Integer; kwargs...) = dyn.Q
 
     rng = StableRNG(1234)
     μ0 = rand(rng, 4)
@@ -175,7 +181,7 @@ end
 
     full_model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
     kf_states, kf_ll = AnalyticalFilters.filter(
-        full_model, KalmanFilter(), observations, extra0, extras
+        rng, full_model, KalmanFilter(), observations
     )
 
     # Rao-Blackwellised particle filtering
@@ -191,7 +197,7 @@ end
 
     rbpf = RBPF(KalmanFilter(), N_particles, 0.99)
     (xs, zs, log_ws), ll = AnalyticalFilters.filter(
-        rng, hier_model, rbpf, observations, extra0, extras
+        rng, hier_model, rbpf, observations
     )
 
     # Compare log-likelihoods
