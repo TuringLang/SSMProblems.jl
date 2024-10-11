@@ -130,7 +130,6 @@ function update(
 
     K = NNlib.batched_mul(ΣH_T, S_inv)
 
-    # TODO: this only seems to work for square H
     μ_filt = μs .+ NNlib.batched_vec(K, y_res)
     Σ_filt = Σs .- NNlib.batched_mul(K, NNlib.batched_mul(Hs, Σs))
 
