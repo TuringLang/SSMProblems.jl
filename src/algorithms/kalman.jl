@@ -123,9 +123,9 @@ function update(
 
     # LU decomposition to compute S^{-1}
     # TODO: Replace with custom fast Cholesky kernel
-    # TODO: Reintroduce pivotting or correct log_det formula to account for it
-    d_ipiv, _, d_S = CUDA.CUBLAS.getrf_strided_batched(S, false)
+    d_ipiv, _, d_S = CUDA.CUBLAS.getrf_strided_batched(S, true)
     S_inv = CuArray{Float32}(undef, size(S))
+    # TODO: This fails when D_obs > D_inner since S is not invertible
     CUDA.CUBLAS.getri_strided_batched!(d_S, S_inv, d_ipiv)
 
     K = NNlib.batched_mul(ΣH_T, S_inv)
@@ -140,11 +140,13 @@ function update(
         diags[i, :] .= d_S[i, i, :]
     end
     # L has ones on the diagonal so we can just multiply the diagonals of U
-    log_dets = sum(log, diags; dims=1)
+    # Since we're using pivoting, diagonal entries may be negative, so we take the absolute value
+    log_dets = sum(log ∘ abs, diags; dims=1)
     inv_term = NNlib.batched_vec(S_inv, y .- m)
     log_likes =
         -0.5f0 * NNlib.batched_vec(reshape(y .- m, 1, size(y, 1), size(S, 3)), inv_term)
-    log_likes = log_likes .- 0.5f0 * log_dets .- convert(Float32, log(2π))
+    D = size(y, 1)
+    log_likes = log_likes .- 0.5f0 * log_dets .- D / 2 * log(T(2π))
 
     # HACK: only errors seems to be from numerical stability so will just overwrite
     log_likes[isnan.(log_likes)] .= -Inf
