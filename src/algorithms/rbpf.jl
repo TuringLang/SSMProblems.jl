@@ -12,7 +12,9 @@ struct RBPF{F<:AbstractFilter} <: AbstractFilter
 end
 RBPF(inner_algo::F, n_particles::Int) where {F} = RBPF(inner_algo, n_particles, 1.0)
 
-function initialise(rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF; extra=nothing, kwargs...)
+function initialise(
+    rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF; extra=nothing, kwargs...
+)
     N = algo.n_particles
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
@@ -33,15 +35,16 @@ function initialise(rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF; extra=
     return xs, zs, log_ws
 end
 
-# ERROR: LoadError: MethodError: no method matching step(
-#   ::SSMProblems.StateSpaceModel{Float64, Main.var"##245".InnerDynamics{Float64}, AnalyticalFilters.HomogeneousLinearGaussianObservationProcess{Float64}},
-#   ::AnalyticalFilters.KalmanFilter,
-#   ::Int64,
-#   ::AnalyticalFilters.GaussianContainer{Vector{Float64}, Matrix{Float64}},
-#   ::Vector{Float64};
-#   ::@NamedTuple{prev_outer::Vector{Float64}, new_outer::Vector{Float64}}
-# )
-function step(rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, t::Integer, state, obs; extra=nothing, kwargs...)
+function step(
+    rng::AbstractRNG,
+    model::HierarchicalSSM,
+    algo::RBPF,
+    t::Integer,
+    state,
+    obs;
+    extra=nothing,
+    kwargs...,
+)
     xs, zs, log_ws = state
 
     N = algo.n_particles
@@ -65,7 +68,9 @@ function step(rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, t::Integer, 
         new_extra = (prev_outer=prev_x, new_outer=xs[i])
         inner_extra = isnothing(extra) ? new_extra : (; extra..., new_extra...)
 
-        zs[i], inner_ll = step(rng, inner_model, algo.inner_algo, t, zs[i], obs; inner_extra...)
+        zs[i], inner_ll = step(
+            rng, inner_model, algo.inner_algo, t, zs[i], obs; inner_extra...
+        )
         log_ws[i] = log_ws[i] + inner_ll
         inner_lls[i] = inner_ll
     end

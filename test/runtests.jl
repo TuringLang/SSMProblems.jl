@@ -96,9 +96,7 @@ end
     observations = [rand(rng)]
 
     fw = ForwardAlgorithm()
-    states, ll = AnalyticalFilters.filter(
-        model, fw, observations
-    )
+    states, ll = AnalyticalFilters.filter(model, fw, observations)
 
     # Brute force calculations of each conditional path probability p(x_{1:T} | y_{1:T})
     T = 1
@@ -194,9 +192,7 @@ end
     hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
 
     rbpf = RBPF(KalmanFilter(), N_particles, 0.99)
-    (xs, zs, log_ws), ll = AnalyticalFilters.filter(
-        rng, hier_model, rbpf, observations
-    )
+    (xs, zs, log_ws), ll = AnalyticalFilters.filter(rng, hier_model, rbpf, observations)
 
     # Compare log-likelihoods
     println("Kalman filter log-likelihood:", kf_ll)

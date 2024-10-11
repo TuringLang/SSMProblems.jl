@@ -21,7 +21,7 @@ function calc_params(dyn::LinearGaussianLatentDynamics, step::Integer; kwargs...
     return (
         calc_A(dyn, step; kwargs...),
         calc_b(dyn, step; kwargs...),
-        calc_Q(dyn, step; kwargs...)
+        calc_Q(dyn, step; kwargs...),
     )
 end
 
@@ -54,19 +54,13 @@ end
 #### DISTRIBUTIONS ####
 #######################
 
-function SSMProblems.distribution(
-    dyn::LinearGaussianLatentDynamics;
-    kwargs...,
-)
+function SSMProblems.distribution(dyn::LinearGaussianLatentDynamics; kwargs...)
     μ0, Σ0 = calc_initial(dyn; kwargs...)
     return MvNormal(μ0, Σ0)
 end
 
 function SSMProblems.distribution(
-    dyn::LinearGaussianLatentDynamics{T},
-    step::Integer,
-    state::AbstractVector{T};
-    kwargs...,
+    dyn::LinearGaussianLatentDynamics{T}, step::Integer, state::AbstractVector{T}; kwargs...
 ) where {T}
     A, b, Q = calc_params(dyn, step; kwargs...)
     return MvNormal(A * state + b, Q)

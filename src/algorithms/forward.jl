@@ -35,7 +35,7 @@ function update(
     # log space?
     b = map(
         x -> exp(SSMProblems.logdensity(model.obs, step, x, observation; kwargs...)),
-        eachindex(states)
+        eachindex(states),
     )
     filtered_states = b .* states
     likelihood = sum(filtered_states)

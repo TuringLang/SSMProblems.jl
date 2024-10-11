@@ -66,7 +66,7 @@ function update(
 )
     log_marginals = map(
         x -> SSMProblems.logdensity(model.obs, step, x, observation; kwargs...),
-        states.proposed
+        states.proposed,
     )
 
     prev_log_marginal = logsumexp(states.log_weights)
@@ -75,4 +75,3 @@ function update(
 
     return (states, logsumexp(states.log_weights) - prev_log_marginal)
 end
-
