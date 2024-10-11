@@ -80,12 +80,14 @@ end
 #### HOMOGENEOUS LINEAR GAUSSIAN MODEL ####
 ###########################################
 
-struct HomogeneousLinearGaussianLatentDynamics{T} <: LinearGaussianLatentDynamics{T}
+struct HomogeneousLinearGaussianLatentDynamics{
+    T<:Real,AT<:AbstractMatrix{T},QT<:AbstractMatrix{T},ΣT<:AbstractMatrix{T}
+} <: LinearGaussianLatentDynamics{T}
     μ0::Vector{T}
-    Σ0::Matrix{T}
-    A::Matrix{T}
+    Σ0::ΣT
+    A::AT
     b::Vector{T}
-    Q::Matrix{T}
+    Q::QT
 end
 calc_μ0(dyn::HomogeneousLinearGaussianLatentDynamics; kwargs...) = dyn.μ0
 calc_Σ0(dyn::HomogeneousLinearGaussianLatentDynamics; kwargs...) = dyn.Σ0
@@ -93,10 +95,12 @@ calc_A(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer; kwargs...) = dyn
 calc_b(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer; kwargs...) = dyn.b
 calc_Q(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer; kwargs...) = dyn.Q
 
-struct HomogeneousLinearGaussianObservationProcess{T} <: LinearGaussianObservationProcess{T}
-    H::Matrix{T}
+struct HomogeneousLinearGaussianObservationProcess{
+    T<:Real,HT<:AbstractMatrix{T},RT<:AbstractMatrix{T}
+} <: LinearGaussianObservationProcess{T}
+    H::HT
     c::Vector{T}
-    R::Matrix{T}
+    R::RT
 end
 calc_H(obs::HomogeneousLinearGaussianObservationProcess, ::Integer; kwargs...) = obs.H
 calc_c(obs::HomogeneousLinearGaussianObservationProcess, ::Integer; kwargs...) = obs.c

@@ -1,3 +1,5 @@
+export BootstrapFilter, BF
+
 struct BootstrapFilter{T<:Real,RS<:AbstractResampler} <: AbstractFilter
     N::Int
     threshold::T

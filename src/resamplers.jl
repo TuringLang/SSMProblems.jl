@@ -1,6 +1,8 @@
 using Random
 using Distributions
 
+export Multinomial, Systematic, Metropolis, Rejection
+
 abstract type AbstractResampler end
 
 ## CATEGORICAL RESAMPLE ####################################################################

@@ -60,6 +60,48 @@ using TestItemRunner
     @test states.filtered.Σ ≈ Σ_X1
 end
 
+@testitem "Bootstrap filter test" begin
+    using AnalyticalFilters
+    using SSMProblems
+    using StableRNGs
+    using PDMats
+    using LinearAlgebra
+    using Random: randexp
+
+    T = Float32
+    rng = StableRNG(1234)
+    σx², σy² = randexp(rng, T, 2)
+
+    # initial state distribution
+    μ0 = zeros(T, 2)
+    Σ0 = PDMat(T[1 0; 0 1])
+
+    # state transition equation
+    A = T[1 1; 0 1]
+    b = T[0; 0]
+    Q = PDiagMat([σx²; 0])
+
+    # observation equation
+    H = T[1 0]
+    c = T[0;]
+    R = [σy²;;]
+
+    # when working with PDMats, the Kalman filter doesn't play nicely without this
+    function Base.convert(::Type{PDMat{T,MT}}, mat::MT) where {MT<:AbstractMatrix,T<:Real}
+        return PDMat(Symmetric(mat))
+    end
+
+    model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
+    _, _, data = sample(rng, model, 150)
+
+    bf = BF(4096; threshold=1.0, resampler=Rejection())
+    _, llbf = AnalyticalFilters.filter(rng, model, bf, data)
+    _, llkf = AnalyticalFilters.filter(rng, model, KF(), data)
+
+    # since this is log valued, we can up the tolerance
+    @test llkf ≈ llbf atol = 2
+end
+
 @testitem "Forward algorithm test" begin
     using AnalyticalFilters
     using Distributions
