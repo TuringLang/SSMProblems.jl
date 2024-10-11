@@ -208,7 +208,7 @@ end
 
     println("ESS: ", 1 / sum(weights .^ 2))
     println("Weighted mean:", sum(xs .* weights))
-    println("Kalman filter mean:", kf_states[T].μ[1:2])
+    println("Kalman filter mean:", kf_states.filtered.μ[1:2])
 
     # Resample outer states
     # resampled_xs = sample(rng, xs, weights, N_particles)
@@ -218,8 +218,8 @@ end
     # )
     # @test pvalue(test) > 0.05
 
-    println("Weighted mean:", sum(getproperty.(zs, :μ) .* weights))
-    println("Kalman filter mean:", kf_states[T].μ[3:4])
+    println("Weighted mean:", sum(getproperty.(getproperty.(zs, :filtered), :μ) .* weights))
+    println("Kalman filter mean:", kf_states.filtered.μ[3:4])
 
     # Resample inner states and demarginalise
     # resampled_zs = sample(rng, zs, weights, N_particles)

@@ -49,6 +49,7 @@ function filter(
             rng, model, alg, t, states, observations[t]; callback, kwargs...
         )
         log_evidence += log_marginal
+        isnothing(callback) || callback(model, alg, t, states, observations; kwargs...)
     end
     
     return states, log_evidence
@@ -67,18 +68,15 @@ function step(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
     alg::AbstractFilter,
-    step::Integer,
+    t::Integer,
     state,
     observation;
-    callback,
     kwargs...,
 )
-    proposed_state = predict(rng, model, alg, step, state; kwargs...)
+    proposed_state = predict(rng, model, alg, t, state; kwargs...)
     filtered_state, ll = update(
-        model, alg, step, proposed_state, observation; kwargs...
+        model, alg, t, proposed_state, observation; kwargs...
     )
-
-    isnothing(callback) || callback(model, alg, t, states, observations; kwargs...)
 
     return filtered_state, ll
 end

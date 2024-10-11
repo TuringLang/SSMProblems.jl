@@ -47,7 +47,7 @@ const LinearGaussianStateSpaceModel{T} = SSMProblems.StateSpaceModel{
 # Can't use `eltype` because that is used by SSMProblems for forward simulation and would be
 # used by a particle filtering.
 function rb_eltype(::LinearGaussianStateSpaceModel{T}) where {T}
-    return GaussianContainer{AbstractVector{T},AbstractMatrix{T}} where {T}
+    return GaussianContainer{Vector{T},Matrix{T}} where {T}
 end
 
 #######################
@@ -55,33 +55,30 @@ end
 #######################
 
 function SSMProblems.distribution(
-    dyn::LinearGaussianLatentDynamics,
-    extra=nothing;
+    dyn::LinearGaussianLatentDynamics;
     kwargs...,
 )
-    μ0, Σ0 = calc_initial(dyn, extra)
+    μ0, Σ0 = calc_initial(dyn; kwargs...)
     return MvNormal(μ0, Σ0)
 end
 
 function SSMProblems.distribution(
     dyn::LinearGaussianLatentDynamics{T},
     step::Integer,
-    state::AbstractVector{T},
-    extra=nothing;
+    state::AbstractVector{T};
     kwargs...,
 ) where {T}
-    A, b, Q = calc_params(dyn, step, extra)
+    A, b, Q = calc_params(dyn, step; kwargs...)
     return MvNormal(A * state + b, Q)
 end
 
 function SSMProblems.distribution(
     obs::LinearGaussianObservationProcess{T},
     step::Integer,
-    state::AbstractVector{T},
-    extra=nothing;
+    state::AbstractVector{T};
     kwargs...,
 ) where {T}
-    H, c, R = calc_params(obs, step, extra)
+    H, c, R = calc_params(obs, step; kwargs...)
     return MvNormal(H * state + c, R)
 end
 
@@ -97,19 +94,19 @@ struct HomogeneousLinearGaussianLatentDynamics{T} <: LinearGaussianLatentDynamic
     Q::Matrix{T}
 end
 calc_μ0(dyn::HomogeneousLinearGaussianLatentDynamics; kwargs...) = dyn.μ0
-calc_Σ0(dyn::HomogeneousLinearGaussianLatentDynamics, kwargs...) = dyn.Σ0
-calc_A(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, kwargs...) = dyn.A
-calc_b(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, kwargs...) = dyn.b
-calc_Q(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, kwargs...) = dyn.Q
+calc_Σ0(dyn::HomogeneousLinearGaussianLatentDynamics; kwargs...) = dyn.Σ0
+calc_A(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer; kwargs...) = dyn.A
+calc_b(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer; kwargs...) = dyn.b
+calc_Q(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer; kwargs...) = dyn.Q
 
 struct HomogeneousLinearGaussianObservationProcess{T} <: LinearGaussianObservationProcess{T}
     H::Matrix{T}
     c::Vector{T}
     R::Matrix{T}
 end
-calc_H(obs::HomogeneousLinearGaussianObservationProcess, ::Integer, kwargs...) = obs.H
-calc_c(obs::HomogeneousLinearGaussianObservationProcess, ::Integer, kwargs...) = obs.c
-calc_R(obs::HomogeneousLinearGaussianObservationProcess, ::Integer, kwargs...) = obs.R
+calc_H(obs::HomogeneousLinearGaussianObservationProcess, ::Integer; kwargs...) = obs.H
+calc_c(obs::HomogeneousLinearGaussianObservationProcess, ::Integer; kwargs...) = obs.c
+calc_R(obs::HomogeneousLinearGaussianObservationProcess, ::Integer; kwargs...) = obs.R
 
 function create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
     return SSMProblems.StateSpaceModel(

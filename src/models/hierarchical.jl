@@ -1,16 +1,21 @@
 import SSMProblems: LatentDynamics, ObservationProcess, simulate
 export HierarchicalSSM
 
-struct HierarchicalSSM{OD<:LatentDynamics,M<:AbstractStateSpaceModel} <:
+struct HierarchicalSSM{T<:Real,OD<:LatentDynamics,M<:AbstractStateSpaceModel} <:
        AbstractStateSpaceModel
     outer_dyn::OD
     inner_model::M
 end
+
 function HierarchicalSSM(
-    outer_dyn::LatentDynamics, inner_dyn::LatentDynamics, obs::ObservationProcess
-)
-    return HierarchicalSSM(outer_dyn, StateSpaceModel(inner_dyn, obs))
+    outer_dyn::LatentDynamics{LDT}, inner_dyn::LatentDynamics, obs::ObservationProcess
+) where {LDT}
+    inner_model = StateSpaceModel(inner_dyn, obs)
+    T = promote_type(eltype(inner_model), eltype(LDT))
+    return HierarchicalSSM{T,typeof(outer_dyn),typeof(inner_model)}(outer_dyn, inner_model)
 end
+
+Base.eltype(::Type{<:HierarchicalSSM{T,ODT,MT}}) where {T,ODT,MT} = T
 
 function AbstractMCMC.sample(
     rng::AbstractRNG, model::HierarchicalSSM, extra0, extras::AbstractVector

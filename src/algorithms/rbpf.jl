@@ -24,16 +24,24 @@ function initialise(rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF; extra=
 
     # Initialise containers
     for i in 1:N
-        xs[i] = simulate(rng, outer_dyn, extra; kwargs...)
+        xs[i] = simulate(rng, outer_dyn; kwargs...)
         new_extra = (; new_outer=xs[i])
         inner_extra = isnothing(extra) ? new_extra : (; extra..., new_extra...)
-        zs[i] = initialise(inner_model, algo.inner_algo, inner_extra)
+        zs[i] = initialise(inner_model, algo.inner_algo; inner_extra...)
     end
 
     return xs, zs, log_ws
 end
 
-function step(rng, model::HierarchicalSSM, algo::RBPF, t::Integer, state, obs; extra=nothing, kwargs...)
+# ERROR: LoadError: MethodError: no method matching step(
+#   ::SSMProblems.StateSpaceModel{Float64, Main.var"##245".InnerDynamics{Float64}, AnalyticalFilters.HomogeneousLinearGaussianObservationProcess{Float64}},
+#   ::AnalyticalFilters.KalmanFilter,
+#   ::Int64,
+#   ::AnalyticalFilters.GaussianContainer{Vector{Float64}, Matrix{Float64}},
+#   ::Vector{Float64};
+#   ::@NamedTuple{prev_outer::Vector{Float64}, new_outer::Vector{Float64}}
+# )
+function step(rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, t::Integer, state, obs; extra=nothing, kwargs...)
     xs, zs, log_ws = state
 
     N = algo.n_particles
@@ -52,12 +60,12 @@ function step(rng, model::HierarchicalSSM, algo::RBPF, t::Integer, state, obs; e
     inner_lls = Vector{Float64}(undef, N)
     for i in 1:N
         prev_x = xs[i]
-        xs[i] = simulate(rng, outer_dyn, t, prev_x, extra)
+        xs[i] = simulate(rng, outer_dyn, t, prev_x; kwargs...)
 
         new_extra = (prev_outer=prev_x, new_outer=xs[i])
         inner_extra = isnothing(extra) ? new_extra : (; extra..., new_extra...)
 
-        zs[i], inner_ll = step(inner_model, algo.inner_algo, t, zs[i], obs, inner_extra)
+        zs[i], inner_ll = step(rng, inner_model, algo.inner_algo, t, zs[i], obs; inner_extra...)
         log_ws[i] = log_ws[i] + inner_ll
         inner_lls[i] = inner_ll
     end
