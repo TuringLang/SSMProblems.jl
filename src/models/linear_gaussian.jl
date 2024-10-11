@@ -37,7 +37,7 @@ function calc_params(obs::LinearGaussianObservationProcess, step::Integer, extra
 end
 
 const LinearGaussianStateSpaceModel{T} = SSMProblems.StateSpaceModel{
-    D,O
+    T,D,O
 } where {T,D<:LinearGaussianLatentDynamics{T},O<:LinearGaussianObservationProcess{T}}
 
 # TODO: this is hacky and should ideally be removed
