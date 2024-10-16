@@ -56,8 +56,8 @@ using TestItemRunner
     Σ_X1 = Σ_Z[I_x, I_x] - Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ Σ_Z[I_y, I_x])
 
     # TODO: test log-likelihood using marginalisation formula
-    @test states.filtered.μ ≈ μ_X1
-    @test states.filtered.Σ ≈ Σ_X1
+    @test states.μ ≈ μ_X1
+    @test states.Σ ≈ Σ_X1
 end
 
 @testitem "Bootstrap filter test" begin
@@ -122,8 +122,7 @@ end
         obs::MixtureModelObservation{T},
         step::Integer,
         state::Integer,
-        observation,
-        extra=nothing;
+        observation;
         kwargs...,
     ) where {T}
         return logpdf(Normal(obs.μs[state], one(T)), observation)
@@ -152,6 +151,7 @@ end
     end
     marginal = sum(values(path_probs))
 
+    # XXX: I think this test is broken
     filtered_paths = Base.filter(((k, v),) -> k[end] == 1, path_probs)
     @test states[end][1] ≈ sum(values(filtered_paths)) / marginal
     @test ll ≈ log(marginal)
@@ -244,7 +244,7 @@ end
 
     println("ESS: ", 1 / sum(weights .^ 2))
     println("Weighted mean:", sum(xs .* weights))
-    println("Kalman filter mean:", kf_states.filtered.μ[1:2])
+    println("Kalman filter mean:", kf_states.μ[1:2])
 
     # Resample outer states
     # resampled_xs = sample(rng, xs, weights, N_particles)
@@ -254,8 +254,8 @@ end
     # )
     # @test pvalue(test) > 0.05
 
-    println("Weighted mean:", sum(getproperty.(getproperty.(zs, :filtered), :μ) .* weights))
-    println("Kalman filter mean:", kf_states.filtered.μ[3:4])
+    println("Weighted mean:", sum(getproperty.(zs, :μ) .* weights))
+    println("Kalman filter mean:", kf_states.μ[3:4])
 
     # Resample inner states and demarginalise
     # resampled_zs = sample(rng, zs, weights, N_particles)

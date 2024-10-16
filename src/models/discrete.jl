@@ -25,13 +25,13 @@ end
 #### DISTRIBUTIONS ####
 #######################
 
-function SSMProblems.distribution(dyn::DiscreteLatentDynamics, extra=nothing; kwargs...)
+function SSMProblems.distribution(dyn::DiscreteLatentDynamics; kwargs...)
     α0 = calc_α0(dyn; kwargs...)
     return Categorical(α0)
 end
 
 function SSMProblems.distribution(
-    dyn::DiscreteLatentDynamics{T}, step::Integer, state::Integer, extra=nothing; kwargs...
+    dyn::DiscreteLatentDynamics{T}, step::Integer, state::Integer; kwargs...
 ) where {T}
     P = calc_P(dyn, step; kwargs...)
     return Categorical(P[state, :])

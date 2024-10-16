@@ -12,9 +12,7 @@ struct RBPF{F<:AbstractFilter} <: AbstractFilter
 end
 RBPF(inner_algo::F, n_particles::Int) where {F} = RBPF(inner_algo, n_particles, 1.0)
 
-function initialise(
-    rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF; extra=nothing, kwargs...
-)
+function initialise(rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF; kwargs...)
     N = algo.n_particles
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
@@ -27,8 +25,7 @@ function initialise(
     # Initialise containers
     for i in 1:N
         xs[i] = simulate(rng, outer_dyn; kwargs...)
-        new_extra = (; new_outer=xs[i])
-        inner_extra = isnothing(extra) ? new_extra : (; extra..., new_extra...)
+        inner_extra = (; new_outer=xs[i], kwargs...)
         zs[i] = initialise(inner_model, algo.inner_algo; inner_extra...)
     end
 
@@ -36,14 +33,7 @@ function initialise(
 end
 
 function step(
-    rng::AbstractRNG,
-    model::HierarchicalSSM,
-    algo::RBPF,
-    t::Integer,
-    state,
-    obs;
-    extra=nothing,
-    kwargs...,
+    rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, t::Integer, state, obs; kwargs...
 )
     xs, zs, log_ws = state
 
@@ -64,13 +54,11 @@ function step(
     for i in 1:N
         prev_x = xs[i]
         xs[i] = simulate(rng, outer_dyn, t, prev_x; kwargs...)
-
-        new_extra = (prev_outer=prev_x, new_outer=xs[i])
-        inner_extra = isnothing(extra) ? new_extra : (; extra..., new_extra...)
-
+        inner_extra = (; prev_outer=prev_x, new_outer=xs[i], kwargs...)
         zs[i], inner_ll = step(
             rng, inner_model, algo.inner_algo, t, zs[i], obs; inner_extra...
         )
+
         log_ws[i] = log_ws[i] + inner_ll
         inner_lls[i] = inner_ll
     end
