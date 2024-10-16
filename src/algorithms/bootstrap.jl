@@ -2,15 +2,13 @@ export BootstrapFilter, BF
 
 struct BootstrapFilter{T<:Real,RS<:AbstractResampler} <: AbstractFilter
     N::Int
-    threshold::T
     resampler::RS
 end
 
 function BF(N::Integer; threshold::Real=1.0, resampler::AbstractResampler=Systematic())
-    return BootstrapFilter(N, threshold, resampler)
+    conditional_resampler = ESSResampler(threshold, resampler)
+    return BootstrapFilter(N, conditional_resampler)
 end
-
-resample_threshold(filter::BootstrapFilter) = filter.threshold * filter.N
 
 function initialise(
     rng::AbstractRNG,
@@ -23,21 +21,6 @@ function initialise(
     initial_weights = zeros(eltype(model), filter.N)
 
     return update_ref!(ParticleContainer(initial_states, initial_weights), ref_state)
-end
-
-function resample(rng::AbstractRNG, states::ParticleContainer, filter::BootstrapFilter)
-    weights = StatsBase.weights(states)
-    ess = inv(sum(abs2, weights))
-    @debug "ESS: $ess"
-
-    if resample_threshold(filter) ≥ ess
-        idx = resample(rng, filter.resampler, weights)
-        reset_weights!(states)
-    else
-        idx = 1:(filter.N)
-    end
-
-    return idx
 end
 
 function predict(

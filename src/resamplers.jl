@@ -5,6 +5,32 @@ export Multinomial, Systematic, Metropolis, Rejection
 
 abstract type AbstractResampler end
 
+## CONDITIONAL RESAMPLING ##################################################################
+
+abstract type AbstractConditionalResampler end
+
+struct ESSResampler <: AbstractConditionalResampler
+    threshold::Float64
+    resampler::AbstractResampler
+    function ESSResampler(threshold::Float64=1.0, resampler::AbstractResampler=Systematic())
+        return new(threshold, resampler)
+    end
+end
+
+function resample(
+    rng::AbstractRNG, resampler::ESSResampler, weights::AbstractVector{WT}
+) where {WT<:Real}
+    n = length(weights)
+    ess = inv(sum(abs2, weights))
+    @debug "ESS: $ess"
+
+    if resampler.threshold * n ≥ ess
+        return resample(rng, resampler.resampler, weights)
+    else
+        return 1:n
+    end
+end
+
 ## CATEGORICAL RESAMPLE ####################################################################
 
 # this is adapted from AdvancedPS
