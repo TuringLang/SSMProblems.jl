@@ -94,7 +94,7 @@ end
     model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
     _, _, data = sample(rng, model, 150)
 
-    bf = BF(4096; threshold=1.0, resampler=Rejection())
+    bf = BF(4096; threshold=0.5, resampler=Rejection())
     _, llbf = AnalyticalFilters.filter(rng, model, bf, data)
     _, llkf = AnalyticalFilters.filter(rng, model, KF(), data)
 

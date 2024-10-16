@@ -18,13 +18,15 @@ struct ESSResampler <: AbstractConditionalResampler
 end
 
 function resample(
-    rng::AbstractRNG, resampler::ESSResampler, weights::AbstractVector{WT}
-) where {WT<:Real}
-    n = length(weights)
+    rng::AbstractRNG, resampler::ESSResampler, state::ParticleState{T,WT}
+) where {T,WT<:Real}
+    n = length(state)
+    weights = StatsBase.weights(state)
     ess = inv(sum(abs2, weights))
     @debug "ESS: $ess"
 
     if resampler.threshold * n ≥ ess
+        reset_weights!(state)
         return resample(rng, resampler.resampler, weights)
     else
         return 1:n

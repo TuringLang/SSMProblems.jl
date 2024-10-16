@@ -1,6 +1,4 @@
 using DataStructures: Stack
-using StatsBase
-using GaussianDistributions: pairs, Gaussian
 
 ## GAUSSIAN STATES #########################################################################
 
@@ -12,34 +10,40 @@ end
 
 ## PARTICLES ###############################################################################
 
-mutable struct ParticleContainer{T,WT<:Real}
-    filtered::Vector{T}
-    proposed::Vector{T}
-    ancestors::Vector{Int64}
+mutable struct ParticleState{PT,WT<:Real}
+    particles::Vector{PT}
     log_weights::Vector{WT}
+end
+
+StatsBase.weights(state::ParticleState) = softmax(state.log_weights)
+
+mutable struct ParticleContainer{T,WT}
+    filtered::ParticleState{T,WT}
+    proposed::ParticleState{T,WT}
+    ancestors::Vector{Integer}
 
     function ParticleContainer(
         initial_states::Vector{T}, log_weights::Vector{WT}
     ) where {T,WT<:Real}
+        init_particles = ParticleState(initial_states, log_weights)
+        prop_particles = ParticleState(similar(initial_states), zero(log_weights))
         return new{T,WT}(
-            initial_states, similar(initial_states), eachindex(log_weights), log_weights
+            init_particles, prop_particles, eachindex(log_weights)
         )
     end
 end
 
-Base.collect(pc::ParticleContainer) = pc.vals
-Base.length(pc::ParticleContainer) = length(pc.vals)
-Base.keys(pc::ParticleContainer) = LinearIndices(pc.vals)
+Base.collect(state::ParticleState) = state.particles
+Base.length(state::ParticleState) = length(state.particles)
+Base.keys(state::ParticleState) = LinearIndices(state.particles)
 
 # not sure if this is kosher, since it doesn't follow the convention of Base.getindex
-Base.@propagate_inbounds Base.getindex(pc::ParticleContainer, i::Int) = pc.vals[i]
-Base.@propagate_inbounds Base.getindex(pc::ParticleContainer, i::Vector{Int}) = pc.vals[i]
+Base.@propagate_inbounds Base.getindex(state::ParticleState, i) = state.particles[i]
+# Base.@propagate_inbounds Base.getindex(state::ParticleState, i::Vector{Int}) = state.particles[i]
 
-StatsBase.weights(pc::ParticleContainer) = softmax(pc.log_weights)
-
-function reset_weights!(pc::ParticleContainer{T,WT}) where {T,WT<:Real}
-    fill!(pc.log_weights, zero(WT))
-    return pc.log_weights
+function reset_weights!(state::ParticleState{T,WT}) where {T,WT<:Real}
+    fill!(state.log_weights, zero(WT))
+    return state.log_weights
 end
 
 function update_ref!(
@@ -52,6 +56,10 @@ function update_ref!(
         pc.ancestors[1] = 1
     end
     return pc
+end
+
+function logmarginal(states::ParticleContainer)
+    return logsumexp(states.filtered.log_weights) - logsumexp(states.proposed.log_weights)
 end
 
 ## SPARSE PARTICLE STORAGE #################################################################
@@ -156,7 +164,7 @@ function get_ancestry(tree::ParticleTree{T}) where {T}
 end
 
 # this could be improved for sure...
-function Random.rand(rng::AbstractRNG, tree::ParticleTree, weights::AbstractVector{<:Real})
+function rand(rng::AbstractRNG, tree::ParticleTree, weights::AbstractVector{<:Real})
     b = randcat(rng, weights)
     leaf = tree.leaves[b]
 
@@ -186,10 +194,10 @@ end
 function (c::AncestorCallback)(model, filter, step, states, data; kwargs...)
     if step == 1
         # this may be incorrect, but it is functional
-        @inbounds c.tree.states[1:(filter.N)] = deepcopy(states.filtered)
+        @inbounds c.tree.states[1:(filter.N)] = deepcopy(states.filtered.particles)
     end
     prune!(c.tree, get_offspring(states.ancestors))
-    insert!(c.tree, states.filtered, states.ancestors)
+    insert!(c.tree, states.filtered.particles, states.ancestors)
     return nothing
 end
 

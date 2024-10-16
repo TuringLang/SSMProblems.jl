@@ -1,7 +1,7 @@
 export BootstrapFilter, BF
 
-struct BootstrapFilter{T<:Real,RS<:AbstractResampler} <: AbstractFilter
-    N::Int
+struct BootstrapFilter{RS<:AbstractConditionalResampler} <: AbstractFilter
+    N::Integer
     resampler::RS
 end
 
@@ -32,12 +32,13 @@ function predict(
     ref_state::Union{Nothing,AbstractVector{T}}=nothing,
     kwargs...,
 ) where {T}
-    states.ancestors = resample(rng, states, filter)
-    states.proposed = map(
+    states.ancestors = resample(rng, filter.resampler, states.filtered)
+    states.proposed.particles = map(
         x -> SSMProblems.simulate(rng, model.dyn, step, x; kwargs...),
         states.filtered[states.ancestors],
     )
 
+    states.proposed.log_weights = states.filtered.log_weights
     return update_ref!(states, ref_state, step)
 end
 
@@ -51,12 +52,12 @@ function update(
 )
     log_marginals = map(
         x -> SSMProblems.logdensity(model.obs, step, x, observation; kwargs...),
-        states.proposed,
+        collect(states.proposed),
     )
 
-    prev_log_marginal = logsumexp(states.log_weights)
-    states.log_weights += log_marginals
-    states.filtered = states.proposed
+    states.filtered.log_weights += log_marginals
+    states.filtered.particles = states.proposed.particles
 
-    return (states, logsumexp(states.log_weights) - prev_log_marginal)
+    log_marginal = logmarginal(states)
+    return (states, log_marginal)
 end
