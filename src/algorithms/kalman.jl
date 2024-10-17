@@ -47,6 +47,8 @@ function update(
     states = Gaussian(μ + K * y, Σ - K * H * Σ)
 
     # Compute log-likelihood
+    # HACK: force the covariance to be positive definite
+    S = (S + S') / 2
     ll = logpdf(MvNormal(m, S), obs)
 
     return states, ll

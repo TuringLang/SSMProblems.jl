@@ -94,7 +94,7 @@ end
     model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
     _, _, data = sample(rng, model, 150)
 
-    bf = BF(4096; threshold=0.5, resampler=Rejection())
+    bf = BF(4096; threshold=0.8)
     _, llbf = AnalyticalFilters.filter(rng, model, bf, data)
     _, llkf = AnalyticalFilters.filter(rng, model, KF(), data)
 
@@ -199,7 +199,7 @@ end
     A /= 3.0
     A[diagind(A)] .= -0.5
     b = rand(rng, 4)
-    Qs = [rand(rng, 2, 2) / 10.0 for _ in 1:2]
+    Qs = [rand(rng, 2, 2) for _ in 1:2]
     Qs = [Q * Q' for Q in Qs]  # make Q positive definite
     Q = [
         Qs[1] zeros(2, 2)
@@ -233,7 +233,7 @@ end
     obs = AnalyticalFilters.HomogeneousLinearGaussianObservationProcess(H[:, 3:4], c, R)
     hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
 
-    rbpf = RBPF(KalmanFilter(), N_particles, 0.99)
+    rbpf = RBPF(KalmanFilter(), N_particles, 0.9)
     (xs, zs, log_ws), ll = AnalyticalFilters.filter(rng, hier_model, rbpf, observations)
 
     # Compare log-likelihoods
