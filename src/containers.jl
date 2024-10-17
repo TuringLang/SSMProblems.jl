@@ -27,9 +27,7 @@ mutable struct ParticleContainer{T,WT}
     ) where {T,WT<:Real}
         init_particles = ParticleState(initial_states, log_weights)
         prop_particles = ParticleState(similar(initial_states), zero(log_weights))
-        return new{T,WT}(
-            init_particles, prop_particles, eachindex(log_weights)
-        )
+        return new{T,WT}(init_particles, prop_particles, eachindex(log_weights))
     end
 end
 
@@ -42,7 +40,7 @@ Base.@propagate_inbounds Base.getindex(state::ParticleState, i) = state.particle
 # Base.@propagate_inbounds Base.getindex(state::ParticleState, i::Vector{Int}) = state.particles[i]
 
 function reset_weights!(state::ParticleState{T,WT}) where {T,WT<:Real}
-    fill!(state.log_weights, zero(WT))
+    fill!(state.log_weights, -log(WT(length(state.particles))))
     return state.log_weights
 end
 

@@ -12,13 +12,13 @@ end
 
 function initialise(
     rng::AbstractRNG,
-    model::StateSpaceModel,
+    model::StateSpaceModel{T},
     filter::BootstrapFilter;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
-)
+) where {T}
     initial_states = map(x -> SSMProblems.simulate(rng, model.dyn; kwargs...), 1:(filter.N))
-    initial_weights = zeros(eltype(model), filter.N)
+    initial_weights = fill(-log(T(filter.N)), filter.N)
 
     return update_ref!(ParticleContainer(initial_states, initial_weights), ref_state)
 end
@@ -32,32 +32,30 @@ function predict(
     ref_state::Union{Nothing,AbstractVector{T}}=nothing,
     kwargs...,
 ) where {T}
-    states.ancestors = resample(rng, filter.resampler, states.filtered)
+    states.proposed = resample(rng, filter.resampler, states.filtered)
     states.proposed.particles = map(
         x -> SSMProblems.simulate(rng, model.dyn, step, x; kwargs...),
-        states.filtered[states.ancestors],
+        states.proposed.particles,
     )
 
-    states.proposed.log_weights = states.filtered.log_weights
     return update_ref!(states, ref_state, step)
 end
 
 function update(
-    model::StateSpaceModel,
+    model::StateSpaceModel{T},
     filter::BootstrapFilter,
     step::Integer,
     states::ParticleContainer,
     observation;
     kwargs...,
-)
-    log_marginals = map(
+) where {T}
+    log_increments = map(
         x -> SSMProblems.logdensity(model.obs, step, x, observation; kwargs...),
-        collect(states.proposed),
+        collect(states.proposed.particles),
     )
 
-    states.filtered.log_weights += log_marginals
+    states.filtered.log_weights = states.proposed.log_weights + log_increments
     states.filtered.particles = states.proposed.particles
 
-    log_marginal = logmarginal(states)
-    return (states, log_marginal)
+    return (states, logsumexp(log_increments) - log(T(filter.N)))
 end

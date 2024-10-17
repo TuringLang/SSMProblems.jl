@@ -5,6 +5,17 @@ export Multinomial, Systematic, Metropolis, Rejection
 
 abstract type AbstractResampler end
 
+function resample(
+    rng::AbstractRNG, resampler::AbstractResampler, states::ParticleState{PT,WT}
+) where {PT,WT}
+    weights = StatsBase.weights(states)
+    idxs = sample_ancestors(rng, resampler, weights)
+
+    return ParticleState(
+        states.particles[idxs], fill(-log(WT(length(states))), length(states))
+    )
+end
+
 ## CONDITIONAL RESAMPLING ##################################################################
 
 abstract type AbstractConditionalResampler end
@@ -12,24 +23,23 @@ abstract type AbstractConditionalResampler end
 struct ESSResampler <: AbstractConditionalResampler
     threshold::Float64
     resampler::AbstractResampler
-    function ESSResampler(threshold::Float64=1.0, resampler::AbstractResampler=Systematic())
+    function ESSResampler(threshold, resampler::AbstractResampler=Systematic())
         return new(threshold, resampler)
     end
 end
 
 function resample(
-    rng::AbstractRNG, resampler::ESSResampler, state::ParticleState{T,WT}
+    rng::AbstractRNG, cond_resampler::ESSResampler, state::ParticleState{T,WT}
 ) where {T,WT<:Real}
     n = length(state)
     weights = StatsBase.weights(state)
     ess = inv(sum(abs2, weights))
     @debug "ESS: $ess"
 
-    if resampler.threshold * n ≥ ess
-        reset_weights!(state)
-        return resample(rng, resampler.resampler, weights)
+    if cond_resampler.threshold * n ≥ ess
+        return resample(rng, cond_resampler.resampler, state)
     else
-        return 1:n
+        return state
     end
 end
 
@@ -57,7 +67,7 @@ end
 
 struct Multinomial <: AbstractResampler end
 
-function resample(
+function sample_ancestors(
     rng::AbstractRNG, ::Multinomial, weights::AbstractVector{WT}, n::Int64=length(weights)
 ) where {WT<:Real}
     return rand(rng, Distributions.Categorical(weights), n)
@@ -65,7 +75,7 @@ end
 
 struct Systematic <: AbstractResampler end
 
-function resample(
+function sample_ancestors(
     rng::AbstractRNG, ::Systematic, weights::AbstractVector{WT}, n::Int64=length(weights)
 ) where {WT<:Real}
     # pre-calculations
@@ -98,7 +108,7 @@ struct Metropolis <: AbstractResampler
 end
 
 # TODO: this should be done in the log domain and also parallelized
-function resample(
+function sample_ancestors(
     rng::AbstractRNG,
     resampler::Metropolis,
     weights::AbstractVector{WT},
@@ -129,7 +139,7 @@ end
 struct Rejection <: AbstractResampler end
 
 # TODO: this should be done in the log domain and also parallelized
-function resample(
+function sample_ancestors(
     rng::AbstractRNG, ::Rejection, weights::AbstractVector{WT}, n::Int64=length(weights)
 ) where {WT<:Real}
     # pre-calculations
