@@ -20,13 +20,7 @@ function sample(
 
     return x0, xs, ys
 end
-# function sample(model::AbstractStateSpaceModel, extra0, extras::AbstractVector)
-#     return sample(default_rng(), model, extra0, extras)
-# end
 
-# function sample(rng::AbstractRNG, model::AbstractStateSpaceModel, T::Integer)
-#     return sample(rng, model, nothing, [nothing for _ in 1:T])
-# end
 function sample(model::AbstractStateSpaceModel, T::Integer; kwargs...)
     return sample(default_rng(), model, T; kwargs...)
 end
