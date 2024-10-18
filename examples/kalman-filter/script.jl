@@ -33,6 +33,12 @@ struct LinearGaussianLatentDynamics{T<:Real} <: LatentDynamics{Vector{T}}
     Q::Matrix{T}
 end
 
+# Note, that our specific dynamics should be subtypes of the abstract `LatentDynamics` type.
+# Importantly, consider the type parameters used. Whereas the type parameter(s) of our
+# struct can be whatever is/are most suitable, the type parameter of `LatentDynamics` should
+# reflect the type used to store a given latent state at a given time step. In this case,
+# since we are considering a multi-dimensional problem, we use `Vector{T}`.
+
 # Similarly, the observation process is defined by the following equation:
 # ```
 # y[k] = Hx[k] + v[k],          v[k] ∼ N(0, R)
@@ -44,8 +50,8 @@ struct LinearGaussianObservationProcess{T<:Real} <: ObservationProcess{Vector{T}
 end
 
 # We then define general transition and observation distributions to be used in forward
-# simulation. Since our model is homogenous (doesn't depend on control variables), we use
-# `Nothing` for the type of `extra`.
+# simulation. If our model were time-inhomogenous, we could make our distribution functions
+# depend on the `step` argument or pass in control variables via keyword arguments.
 #
 # Even if we did not require forward simulation (e.g. we were given observations), it is
 # still useful to define these methods as they allow us to run a particle filter on our
@@ -53,16 +59,16 @@ end
 # be preferred in this linear Gaussian case, it may be of interest to compare the sampling
 # performance with a general particle filter.
 
-function SSMProblems.distribution(model::LinearGaussianLatentDynamics, extra::Nothing)
+function SSMProblems.distribution(model::LinearGaussianLatentDynamics; kwargs...)
     return MvNormal(model.z, model.P)
 end
 function SSMProblems.distribution(
-    model::LinearGaussianLatentDynamics{T}, step::Int, prev_state::Vector{T}, extra::Nothing
+    model::LinearGaussianLatentDynamics{T}, step::Int, prev_state::Vector{T}; kwargs...
 ) where {T}
     return MvNormal(model.Φ * prev_state + model.b, model.Q)
 end
 function SSMProblems.distribution(
-    model::LinearGaussianObservationProcess{T}, step::Int, state::Vector{T}, extra::Nothing
+    model::LinearGaussianObservationProcess{T}, step::Int, state::Vector{T}; kwargs...
 ) where {T}
     return MvNormal(model.H * state, model.R)
 end
@@ -79,23 +85,25 @@ struct KalmanFilter end
 # be used to dispatch to the correct method.
 
 const LinearGaussianSSM{T} = StateSpaceModel{
-    <:LinearGaussianLatentDynamics{T},<:LinearGaussianObservationProcess{T}
+    T,<:LinearGaussianLatentDynamics{T},<:LinearGaussianObservationProcess{T}
 };
 
 # We then define a method for the `sample` function. This is a standardised interface which
 # requires the model we are sampling from, the sampling algorithm as well as the
-# observations and any extras.
+# observations and any keyword arguments which will be passed to the distribution functions.
+#
+# Note, that if our model were time-inhomogenous, we we need our model vectors/matrices
+# (e.g. A, b) to depend on the step variable `t` or the control variables. To make our
+# filtering algorithm generic, we should not handle this within the `sample` function.
+# Instead, we would pass this responsibility to the model by defining functions of the form
+# `calc_A(model, t; kwargs...)` etc.
 
 function AbstractMCMC.sample(
-    model::LinearGaussianSSM{U},
-    ::KalmanFilter,
-    observations::AbstractVector,
-    extra0,
-    extras::AbstractVector,
-) where {U}
+    model::LinearGaussianSSM{MT}, ::KalmanFilter, observations::AbstractVector; kwargs...
+) where {MT}
     T = length(observations)
-    x_filts = Vector{Vector{U}}(undef, T)
-    P_filts = Vector{Matrix{U}}(undef, T)
+    x_filts = Vector{Vector{MT}}(undef, T)
+    P_filts = Vector{Matrix{MT}}(undef, T)
 
     @unpack z, P, Φ, b, Q = model.dyn  ## Extract parameters
     @unpack H, R = model.obs
@@ -120,20 +128,6 @@ function AbstractMCMC.sample(
     end
 
     return x_filts, P_filts
-end
-
-# In this specific case, however, since our model is homogenous, we do not expect to have
-# any extras passed in. For convenience, we create a method without the `extra0` and
-# `extras` argument which then replaces them with `nothing` and a vector of `nothing`s,
-# respectively. This pattern is not specific to linear Gaussian models or Kalman filters so
-# we define it with general types.
-
-function AbstractMCMC.sample(
-    model::StateSpaceModel, algorithm, observations::AbstractVector
-)
-    extra0 = nothing
-    extras = fill(nothing, length(observations))
-    return sample(model, algorithm, observations, extra0, extras)
 end
 
 # ## Simulation and Filtering

@@ -62,18 +62,18 @@ using SSMProblems
 
 struct SimpleLatentDynamics <: LatentDynamics end
 
-function distribution(rng::AbstractRNG, dyn::SimpleLatentDynamics, extra::Nothing)
+function distribution(rng::AbstractRNG, dyn::SimpleLatentDynamics; kwargs...)
     return Normal(0.0, 1.0)
 end
 
-function distribution(rng::AbstractRNG, dyn::SimpleLatentDynamics, step::Int, state::Float64, extra::Nothing)
+function distribution(rng::AbstractRNG, dyn::SimpleLatentDynamics, step::Int, state::Float64; kwargs...)
     return Normal(state, 0.1)
 end
 
 struct SimpleObservationProcess <: ObservationProcess end
 
 function distribution(
-    obs::SimpleObservationPRocess, step::Int, state::Float64, observation::Float64, extra::Nothing
+    obs::SimpleObservationPRocess, step::Int, state::Float64, observation::Float64; kwargs...
 )
     return Normal(state, 0.5)
 end
@@ -87,12 +87,11 @@ model = StateSpaceModel(dyn, obs)
 There are a few things to note here:
 
 - Two methods must be defined for the `LatentDynamics`, one containing
-  `step`/`state` arguments and use for transitioning, and one without these,
+  `step`/`state` arguments and used for transitioning, and one without these,
   used for initialisation.
-  the model is time-homogeneous, these are not required in the function bodies.
-- Every function takes an `extra` argument. This is part of the "secret sauce"
-  of `SSMProblems` that allows it to flexibly represent more exotic models
-  without any performance penalty. You can read more about it [here](extras.md).
+- Every function should accept keyword arguments. This is key feature of
+  `SSMProblems` that allows it to flexibly represent more exotic models without
+  any performance penalty. You can read more about it [here](kwargs.md).
 - If your latent dynamics and observation process cannot be represented as a
   `Distribution` object, you may implement specific methods for sampling and
   log-density evaluation as documented below.
@@ -109,8 +108,8 @@ for (i, observation) in enumerate(observations)
     idx = resample(rng, log_weights)
     particles = particles[idx]
     for i in 1:N
-        particles[i] = simulate(rng, dyn, i, particles[i], nothing)
-        log_weights[i] += logdensity(obs, i, particles[i], observation, nothing)
+        particles[i] = simulate(rng, dyn, i, particles[i])
+        log_weights[i] += logdensity(obs, i, particles[i], observation)
     end
 end
 ```
