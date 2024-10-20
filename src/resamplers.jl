@@ -8,8 +8,8 @@ export Multinomial, Systematic, Metropolis, Rejection
 abstract type AbstractResampler end
 
 function resample(
-    rng::AbstractRNG, resampler::AbstractResampler, states::ParticleState{PT,WT}
-) where {PT,WT}
+    rng::AbstractRNG, resampler::AbstractResampler, states::ParticleState{PT,WT}, filter::U
+) where {PT,WT,U<:AbstractFilter}
     weights = StatsBase.weights(states)
     idxs = sample_ancestors(rng, resampler, weights)
 
@@ -34,6 +34,23 @@ function resample(
     )
 
     return new_state, idxs
+end
+
+# TODO: combine this with above definition
+function resample(
+    rng::AbstractRNG,
+    resampler::AbstractResampler,
+    states::RaoBlackwellisedParticleState{T,M,ZT},
+) where {T,M,ZT}
+    weights = StatsBase.weights(states)
+    idxs = sample_ancestors(rng, resampler, weights)
+
+    new_state = RaoBlackwellisedParticleState(
+        deepcopy(states.x_particles[:, idxs]),
+        deepcopy(states.z_particles[idxs]),
+        CUDA.zeros(T, length(states)),
+    )
+    return reset_weights!(state, idxs, filter)
 end
 
 ## CONDITIONAL RESAMPLING ##################################################################
