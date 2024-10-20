@@ -35,8 +35,7 @@ function resample(
         deepcopy(states.z_particles[idxs]),
         CUDA.zeros(T, length(states)),
     )
-
-    return new_state, idxs
+    return reset_weights!(state, idxs, filter)
 end
 
 ## CONDITIONAL RESAMPLING ##################################################################
@@ -81,7 +80,7 @@ function resample(
     @debug "ESS: $ess"
 
     if cond_resampler.threshold * n ≥ ess
-        return resample(rng, cond_resampler.resampler, state)
+        return resample(rng, cond_resampler.resampler, state, filter)
     else
         return deepcopy(state), collect(1:n)
     end

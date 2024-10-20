@@ -76,3 +76,14 @@ end
 function logmarginal(states::ParticleContainer, ::BootstrapFilter)
     return logsumexp(states.filtered.log_weights) - logsumexp(states.proposed.log_weights)
 end
+
+function reset_weights!(
+    state::ParticleState{T,WT}, idxs, filter::BootstrapFilter
+) where {T,WT<:Real}
+    fill!(state.log_weights, -log(WT(length(state.particles))))
+    return state
+end
+
+function logmarginal(states::ParticleContainer, ::BootstrapFilter)
+    return logsumexp(states.filtered.log_weights) - logsumexp(states.proposed.log_weights)
+end
