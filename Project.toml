@@ -1,7 +1,7 @@
-name = "AnalyticalFilters"
+name = "GeneralisedFilters"
 uuid = "3ef92589-7ab8-43f9-b5b9-a3a0c86ecbb7"
 authors = ["THargreaves <th542@cam.ac.uk>"]
-version = "0.1.0"
+version = "0.2.0"
 
 [deps]
 AbstractMCMC = "80f14c24-f653-4e6a-9b94-39d6b0f70001"
