@@ -5,12 +5,20 @@ import StatsBase: Weights
 
 export RBPF
 
-struct RBPF{F<:AbstractFilter} <: AbstractFilter
+struct RBPF{F<:AbstractFilter,RS<:AbstractResampler} <: AbstractFilter
     inner_algo::F
     n_particles::Int
-    resample_threshold::Float64
+    resampler::RS
 end
-RBPF(inner_algo::F, n_particles::Int) where {F} = RBPF(inner_algo, n_particles, 1.0)
+
+function RBPF(
+    inner_algo::AbstractFilter,
+    N::Integer;
+    threshold::Real=1.0,
+    resampler::AbstractResampler=Systematic(),
+)
+    return RBPF(inner_algo, N, ESSResampler(threshold, resampler))
+end
 
 function initialise(rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF; kwargs...)
     N = algo.n_particles
@@ -34,9 +42,7 @@ end
 function predict(
     rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, t::Integer, states; kwargs...
 )
-    # TODO: reintroduce resampling
-    # states.proposed = resample(rng, algo.resampler, states.filtered)
-    states.proposed = deepcopy(states.filtered)
+    states.proposed = resample(rng, algo.resampler, states.filtered)
 
     for i in 1:(algo.n_particles)
         prev_x = states.proposed.particles[i].x
@@ -58,9 +64,10 @@ function predict(
     return states
 end
 
-function update(model::HierarchicalSSM, algo::RBPF, t::Integer, states, obs; kwargs...)
-    # TODO: this type should be more general
-    inner_lls = Vector{Float64}(undef, algo.n_particles)
+function update(
+    model::HierarchicalSSM{T}, algo::RBPF, t::Integer, states, obs; kwargs...
+) where {T}
+    inner_lls = Vector{T}(undef, algo.n_particles)
     for i in 1:(algo.n_particles)
         states.filtered.particles[i].z, inner_ll = update(
             model.inner_model,

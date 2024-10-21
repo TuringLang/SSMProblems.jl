@@ -233,7 +233,7 @@ end
     obs = AnalyticalFilters.HomogeneousLinearGaussianObservationProcess(H[:, 3:4], c, R)
     hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
 
-    rbpf = RBPF(KalmanFilter(), N_particles, 0.9)
+    rbpf = RBPF(KalmanFilter(), N_particles; threshold=0.8)
     states, ll = AnalyticalFilters.filter(rng, hier_model, rbpf, observations)
 
     # Extract final filtered states

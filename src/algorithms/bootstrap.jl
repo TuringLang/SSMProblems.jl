@@ -1,6 +1,6 @@
 export BootstrapFilter, BF
 
-struct BootstrapFilter{RS<:AbstractConditionalResampler} <: AbstractFilter
+struct BootstrapFilter{RS<:AbstractResampler} <: AbstractFilter
     N::Integer
     resampler::RS
 end

@@ -18,7 +18,7 @@ end
 
 ## CONDITIONAL RESAMPLING ##################################################################
 
-abstract type AbstractConditionalResampler end
+abstract type AbstractConditionalResampler <: AbstractResampler end
 
 struct ESSResampler <: AbstractConditionalResampler
     threshold::Float64
