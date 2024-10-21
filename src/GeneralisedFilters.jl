@@ -1,4 +1,4 @@
-module AnalyticalFilters
+module GeneralisedFilters
 
 using AbstractMCMC: AbstractMCMC, AbstractSampler
 import Distributions: MvNormal

@@ -4,7 +4,7 @@ using TestItemRunner
 @run_package_tests
 
 @testitem "Kalman filter test" begin
-    using AnalyticalFilters
+    using GeneralisedFilters
     using LinearAlgebra
     using StableRNGs
 
@@ -27,7 +27,7 @@ using TestItemRunner
 
     kf = KalmanFilter()
 
-    states, _ = AnalyticalFilters.filter(rng, model, kf, observations)
+    states, _ = GeneralisedFilters.filter(rng, model, kf, observations)
 
     # Let Z = [X0, X1, Y1] be the joint state vector
     # Write Z = P.Z + ϵ, where ϵ ~ N(μ_ϵ, Σ_ϵ)
@@ -61,7 +61,7 @@ using TestItemRunner
 end
 
 @testitem "Bootstrap filter test" begin
-    using AnalyticalFilters
+    using GeneralisedFilters
     using SSMProblems
     using StableRNGs
     using PDMats
@@ -95,15 +95,15 @@ end
     _, _, data = sample(rng, model, 150)
 
     bf = BF(4096; threshold=0.8)
-    _, llbf = AnalyticalFilters.filter(rng, model, bf, data)
-    _, llkf = AnalyticalFilters.filter(rng, model, KF(), data)
+    _, llbf = GeneralisedFilters.filter(rng, model, bf, data)
+    _, llkf = GeneralisedFilters.filter(rng, model, KF(), data)
 
     # since this is log valued, we can up the tolerance
     @test llkf ≈ llbf atol = 2
 end
 
 @testitem "Forward algorithm test" begin
-    using AnalyticalFilters
+    using GeneralisedFilters
     using Distributions
     using StableRNGs
     using SSMProblems
@@ -137,7 +137,7 @@ end
     observations = [rand(rng)]
 
     fw = ForwardAlgorithm()
-    states, ll = AnalyticalFilters.filter(model, fw, observations)
+    states, ll = GeneralisedFilters.filter(model, fw, observations)
 
     # Brute force calculations of each conditional path probability p(x_{1:T} | y_{1:T})
     T = 1
@@ -158,7 +158,7 @@ end
 end
 
 @testitem "Kalman-RBPF test" begin
-    using AnalyticalFilters
+    using GeneralisedFilters
     using Distributions
     using HypothesisTests
     using LinearAlgebra
@@ -175,13 +175,13 @@ end
         C::Matrix{T}
         Q::Matrix{T}
     end
-    AnalyticalFilters.calc_μ0(dyn::InnerDynamics; kwargs...) = dyn.μ0
-    AnalyticalFilters.calc_Σ0(dyn::InnerDynamics; kwargs...) = dyn.Σ0
-    AnalyticalFilters.calc_A(dyn::InnerDynamics, ::Integer; kwargs...) = dyn.A
-    function AnalyticalFilters.calc_b(dyn::InnerDynamics, ::Integer; prev_outer, kwargs...)
+    GeneralisedFilters.calc_μ0(dyn::InnerDynamics; kwargs...) = dyn.μ0
+    GeneralisedFilters.calc_Σ0(dyn::InnerDynamics; kwargs...) = dyn.Σ0
+    GeneralisedFilters.calc_A(dyn::InnerDynamics, ::Integer; kwargs...) = dyn.A
+    function GeneralisedFilters.calc_b(dyn::InnerDynamics, ::Integer; prev_outer, kwargs...)
         return dyn.b + dyn.C * prev_outer
     end
-    AnalyticalFilters.calc_Q(dyn::InnerDynamics, ::Integer; kwargs...) = dyn.Q
+    GeneralisedFilters.calc_Q(dyn::InnerDynamics, ::Integer; kwargs...) = dyn.Q
 
     rng = StableRNG(1234)
     μ0 = rand(rng, 4)
@@ -218,23 +218,23 @@ end
     # Kalman filtering
 
     full_model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
-    kf_states, kf_ll = AnalyticalFilters.filter(
+    kf_states, kf_ll = GeneralisedFilters.filter(
         rng, full_model, KalmanFilter(), observations
     )
 
     # Rao-Blackwellised particle filtering
 
-    outer_dyn = AnalyticalFilters.HomogeneousLinearGaussianLatentDynamics(
+    outer_dyn = GeneralisedFilters.HomogeneousLinearGaussianLatentDynamics(
         μ0[1:2], Σ0[1:2, 1:2], A[1:2, 1:2], b[1:2], Qs[1]
     )
     inner_dyn = InnerDynamics(
         μ0[3:4], Σ0[3:4, 3:4], A[3:4, 3:4], b[3:4], A[3:4, 1:2], Qs[2]
     )
-    obs = AnalyticalFilters.HomogeneousLinearGaussianObservationProcess(H[:, 3:4], c, R)
+    obs = GeneralisedFilters.HomogeneousLinearGaussianObservationProcess(H[:, 3:4], c, R)
     hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
 
     rbpf = RBPF(KalmanFilter(), N_particles; threshold=0.8)
-    states, ll = AnalyticalFilters.filter(rng, hier_model, rbpf, observations)
+    states, ll = GeneralisedFilters.filter(rng, hier_model, rbpf, observations)
 
     # Extract final filtered states
     xs = map(p -> getproperty(p, :x), states.filtered.particles)
@@ -273,7 +273,7 @@ end
 end
 
 @testitem "RBPF ancestory test" begin
-    using AnalyticalFilters
+    using GeneralisedFilters
     using Distributions
     using HypothesisTests
     using LinearAlgebra
@@ -290,13 +290,13 @@ end
         C::Matrix{T}
         Q::Matrix{T}
     end
-    AnalyticalFilters.calc_μ0(dyn::InnerDynamics; kwargs...) = dyn.μ0
-    AnalyticalFilters.calc_Σ0(dyn::InnerDynamics; kwargs...) = dyn.Σ0
-    AnalyticalFilters.calc_A(dyn::InnerDynamics, ::Integer; kwargs...) = dyn.A
-    function AnalyticalFilters.calc_b(dyn::InnerDynamics, ::Integer; prev_outer, kwargs...)
+    GeneralisedFilters.calc_μ0(dyn::InnerDynamics; kwargs...) = dyn.μ0
+    GeneralisedFilters.calc_Σ0(dyn::InnerDynamics; kwargs...) = dyn.Σ0
+    GeneralisedFilters.calc_A(dyn::InnerDynamics, ::Integer; kwargs...) = dyn.A
+    function GeneralisedFilters.calc_b(dyn::InnerDynamics, ::Integer; prev_outer, kwargs...)
         return dyn.b + dyn.C * prev_outer
     end
-    AnalyticalFilters.calc_Q(dyn::InnerDynamics, ::Integer; kwargs...) = dyn.Q
+    GeneralisedFilters.calc_Q(dyn::InnerDynamics, ::Integer; kwargs...) = dyn.Q
 
     rng = StableRNG(1234)
     μ0 = rand(rng, 4)
@@ -332,24 +332,24 @@ end
 
     # Rao-Blackwellised particle filtering
 
-    outer_dyn = AnalyticalFilters.HomogeneousLinearGaussianLatentDynamics(
+    outer_dyn = GeneralisedFilters.HomogeneousLinearGaussianLatentDynamics(
         μ0[1:2], Σ0[1:2, 1:2], A[1:2, 1:2], b[1:2], Qs[1]
     )
     inner_dyn = InnerDynamics(
         μ0[3:4], Σ0[3:4, 3:4], A[3:4, 3:4], b[3:4], A[3:4, 1:2], Qs[2]
     )
-    obs = AnalyticalFilters.HomogeneousLinearGaussianObservationProcess(H[:, 3:4], c, R)
+    obs = GeneralisedFilters.HomogeneousLinearGaussianObservationProcess(H[:, 3:4], c, R)
     hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
 
     rbpf = RBPF(KalmanFilter(), N_particles; threshold=0.8)
-    particle_type = AnalyticalFilters.RaoBlackwellisedContainer{
-        eltype(outer_dyn),AnalyticalFilters.rb_eltype(hier_model.inner_model)
+    particle_type = GeneralisedFilters.RaoBlackwellisedContainer{
+        eltype(outer_dyn),GeneralisedFilters.rb_eltype(hier_model.inner_model)
     }
-    cb = AnalyticalFilters.AncestorCallback(particle_type, N_particles, 1.0)
-    states, ll = AnalyticalFilters.filter(rng, hier_model, rbpf, observations; callback=cb)
+    cb = GeneralisedFilters.AncestorCallback(particle_type, N_particles, 1.0)
+    states, ll = GeneralisedFilters.filter(rng, hier_model, rbpf, observations; callback=cb)
 
     tree = cb.tree
-    paths = AnalyticalFilters.get_ancestry(tree)
+    paths = GeneralisedFilters.get_ancestry(tree)
 
     # TODO: add proper test comparing to dense storage
 end
