@@ -7,7 +7,7 @@ export RBPF
 
 struct RBPF{F<:AbstractFilter,RS<:AbstractResampler} <: AbstractFilter
     inner_algo::F
-    n_particles::Int
+    N::Int
     resampler::RS
 end
 
@@ -21,7 +21,7 @@ function RBPF(
 end
 
 function initialise(rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF; kwargs...)
-    N = algo.n_particles
+    N = algo.N
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
     # Create containers
@@ -42,9 +42,9 @@ end
 function predict(
     rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, t::Integer, states; kwargs...
 )
-    states.proposed = resample(rng, algo.resampler, states.filtered)
+    states.proposed, states.ancestors = resample(rng, algo.resampler, states.filtered)
 
-    for i in 1:(algo.n_particles)
+    for i in 1:(algo.N)
         prev_x = states.proposed.particles[i].x
         states.proposed[i].x = simulate(rng, model.outer_dyn, t, prev_x; kwargs...)
 
@@ -67,8 +67,8 @@ end
 function update(
     model::HierarchicalSSM{T}, algo::RBPF, t::Integer, states, obs; kwargs...
 ) where {T}
-    inner_lls = Vector{T}(undef, algo.n_particles)
-    for i in 1:(algo.n_particles)
+    inner_lls = Vector{T}(undef, algo.N)
+    for i in 1:(algo.N)
         states.filtered.particles[i].z, inner_ll = update(
             model.inner_model,
             algo.inner_algo,
@@ -85,5 +85,5 @@ function update(
 
     states.filtered.log_weights = states.proposed.log_weights .+ inner_lls
 
-    return states, logsumexp(inner_lls) - log(algo.n_particles)
+    return states, logsumexp(inner_lls) - log(algo.N)
 end

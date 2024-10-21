@@ -271,3 +271,85 @@ end
 
     # @test pvalue(test) > 0.05
 end
+
+@testitem "RBPF ancestory test" begin
+    using AnalyticalFilters
+    using Distributions
+    using HypothesisTests
+    using LinearAlgebra
+    using LogExpFunctions: softmax
+    using StableRNGs
+    using StatsBase
+
+    # Define inner dynamics
+    struct InnerDynamics{T} <: LinearGaussianLatentDynamics{T}
+        μ0::Vector{T}
+        Σ0::Matrix{T}
+        A::Matrix{T}
+        b::Vector{T}
+        C::Matrix{T}
+        Q::Matrix{T}
+    end
+    AnalyticalFilters.calc_μ0(dyn::InnerDynamics; kwargs...) = dyn.μ0
+    AnalyticalFilters.calc_Σ0(dyn::InnerDynamics; kwargs...) = dyn.Σ0
+    AnalyticalFilters.calc_A(dyn::InnerDynamics, ::Integer; kwargs...) = dyn.A
+    function AnalyticalFilters.calc_b(dyn::InnerDynamics, ::Integer; prev_outer, kwargs...)
+        return dyn.b + dyn.C * prev_outer
+    end
+    AnalyticalFilters.calc_Q(dyn::InnerDynamics, ::Integer; kwargs...) = dyn.Q
+
+    rng = StableRNG(1234)
+    μ0 = rand(rng, 4)
+    Σ0s = [rand(rng, 2, 2) for _ in 1:2]
+    Σ0s = [Σ * Σ' for Σ in Σ0s]  # make Σ0 positive definite
+    Σ0 = [
+        Σ0s[1] zeros(2, 2)
+        zeros(2, 2) Σ0s[2]
+    ]
+    A = [
+        rand(rng, 2, 2) zeros(2, 2)
+        rand(rng, 2, 4)
+    ]
+    # Make mean-reverting
+    A /= 3.0
+    A[diagind(A)] .= -0.5
+    b = rand(rng, 4)
+    Qs = [rand(rng, 2, 2) for _ in 1:2]
+    Qs = [Q * Q' for Q in Qs]  # make Q positive definite
+    Q = [
+        Qs[1] zeros(2, 2)
+        zeros(2, 2) Qs[2]
+    ]
+    H = [zeros(2, 2) rand(rng, 2, 2)]
+    c = rand(rng, 2)
+    R = rand(rng, 2, 2)
+    R = R * R' / 3.0  # make R positive definite
+
+    N_particles = 100
+    T = 20
+
+    observations = [rand(rng, 2) for _ in 1:T]
+
+    # Rao-Blackwellised particle filtering
+
+    outer_dyn = AnalyticalFilters.HomogeneousLinearGaussianLatentDynamics(
+        μ0[1:2], Σ0[1:2, 1:2], A[1:2, 1:2], b[1:2], Qs[1]
+    )
+    inner_dyn = InnerDynamics(
+        μ0[3:4], Σ0[3:4, 3:4], A[3:4, 3:4], b[3:4], A[3:4, 1:2], Qs[2]
+    )
+    obs = AnalyticalFilters.HomogeneousLinearGaussianObservationProcess(H[:, 3:4], c, R)
+    hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
+
+    rbpf = RBPF(KalmanFilter(), N_particles; threshold=0.8)
+    particle_type = AnalyticalFilters.RaoBlackwellisedContainer{
+        eltype(outer_dyn),AnalyticalFilters.rb_eltype(hier_model.inner_model)
+    }
+    cb = AnalyticalFilters.AncestorCallback(particle_type, N_particles, 1.0)
+    states, ll = AnalyticalFilters.filter(rng, hier_model, rbpf, observations; callback=cb)
+
+    tree = cb.tree
+    paths = AnalyticalFilters.get_ancestry(tree)
+
+    # TODO: add proper test comparing to dense storage
+end

@@ -11,9 +11,11 @@ function resample(
     weights = StatsBase.weights(states)
     idxs = sample_ancestors(rng, resampler, weights)
 
-    return ParticleState(
+    new_state = ParticleState(
         states.particles[idxs], fill(-log(WT(length(states))), length(states))
     )
+
+    return new_state, idxs
 end
 
 ## CONDITIONAL RESAMPLING ##################################################################
@@ -39,7 +41,7 @@ function resample(
     if cond_resampler.threshold * n ≥ ess
         return resample(rng, cond_resampler.resampler, state)
     else
-        return state
+        return state, collect(1:n)
     end
 end
 

@@ -33,7 +33,7 @@ StatsBase.weights(state::ParticleState) = softmax(state.log_weights)
 mutable struct ParticleContainer{T,WT}
     filtered::ParticleState{T,WT}
     proposed::ParticleState{T,WT}
-    ancestors::Vector{Integer}
+    ancestors::Vector{Int}
 
     function ParticleContainer(
         initial_states::Vector{T}, log_weights::Vector{WT}
@@ -192,13 +192,13 @@ end
 
 ## ANCESTOR STORAGE CALLBACK ###############################################################
 
-mutable struct AncestorCallback
-    tree::ParticleTree
+struct AncestorCallback{T}
+    tree::ParticleTree{T}
 
     function AncestorCallback(::Type{T}, N::Integer, C::Real=1.0) where {T}
         M = floor(Int64, C * N * log(N))
         nodes = Vector{T}(undef, N)
-        return new(ParticleTree(nodes, M))
+        return new{T}(ParticleTree(nodes, M))
     end
 end
 
@@ -207,6 +207,8 @@ function (c::AncestorCallback)(model, filter, step, states, data; kwargs...)
         # this may be incorrect, but it is functional
         @inbounds c.tree.states[1:(filter.N)] = deepcopy(states.filtered.particles)
     end
+    # TODO: when using non-stack version, may be more efficient to wait until storage full
+    # to prune
     prune!(c.tree, get_offspring(states.ancestors))
     insert!(c.tree, states.filtered.particles, states.ancestors)
     return nothing

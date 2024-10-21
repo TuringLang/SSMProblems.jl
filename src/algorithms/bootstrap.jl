@@ -32,7 +32,7 @@ function predict(
     ref_state::Union{Nothing,AbstractVector{T}}=nothing,
     kwargs...,
 ) where {T}
-    states.proposed = resample(rng, filter.resampler, states.filtered)
+    states.proposed, states.ancestors = resample(rng, filter.resampler, states.filtered)
     states.proposed.particles = map(
         x -> SSMProblems.simulate(rng, model.dyn, step, x; kwargs...),
         states.proposed.particles,
