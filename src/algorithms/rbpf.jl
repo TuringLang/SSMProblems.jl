@@ -75,7 +75,7 @@ function update(
             t,
             states.proposed.particles[i].z,
             obs;
-            states.proposed.particles[i].x,
+            new_outer=states.proposed.particles[i].x,
             kwargs...,
         )
         inner_lls[i] = inner_ll
