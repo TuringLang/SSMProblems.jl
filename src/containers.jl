@@ -1,4 +1,5 @@
 using DataStructures: Stack
+using Random: rand
 
 ## GAUSSIAN STATES #########################################################################
 
@@ -23,6 +24,12 @@ end
 
 ## PARTICLES ###############################################################################
 
+"""
+    ParticleState
+
+A container for particle filters which composes the weighted sample into a distibution-like
+object, with the states (or particles) distributed accoring to their log-weights.
+"""
 mutable struct ParticleState{PT,WT<:Real}
     particles::Vector{PT}
     log_weights::Vector{WT}
@@ -30,6 +37,12 @@ end
 
 StatsBase.weights(state::ParticleState) = softmax(state.log_weights)
 
+"""
+    ParticleContainer
+
+A container for information passed through each iteration of an abstract particle filter,
+composed of both proposed and filtered states, as well as the ancestor indices.
+"""
 mutable struct ParticleContainer{T,WT}
     filtered::ParticleState{T,WT}
     proposed::ParticleState{T,WT}
@@ -77,6 +90,16 @@ end
 
 Base.append!(s::Stack, a::AbstractVector) = map(x -> push!(s, x), a)
 
+"""
+    ParticleTree
+
+A sparse container for particle ancestry, which tracks the lineage of the filtered draws.
+
+# Reference
+
+Jacob, P., Murray L., & Rubenthaler S. (2015). Path storage in the particle 
+filter [doi:10.1007/s11222-013-9445-x](https://dx.doi.org/10.1007/s11222-013-9445-x)
+"""
 mutable struct ParticleTree{T}
     states::Vector{T}
     parents::Vector{Int64}
@@ -174,7 +197,6 @@ function get_ancestry(tree::ParticleTree{T}) where {T}
     return paths
 end
 
-# this could be improved for sure...
 function rand(rng::AbstractRNG, tree::ParticleTree, weights::AbstractVector{<:Real})
     b = randcat(rng, weights)
     leaf = tree.leaves[b]
@@ -192,6 +214,12 @@ end
 
 ## ANCESTOR STORAGE CALLBACK ###############################################################
 
+"""
+    AncestorCallback
+
+A callback for sparse ancestry storage, which preallocates and returns a populated 
+`ParticleTree` object.
+"""
 struct AncestorCallback{T}
     tree::ParticleTree{T}
 
@@ -214,7 +242,13 @@ function (c::AncestorCallback)(model, filter, step, states, data; kwargs...)
     return nothing
 end
 
-mutable struct ResamplerCallback
+"""
+    ResamplerCallback
+
+A callback which follows the resampling indices over the filtering algorithm. This is more
+of a debug tool and visualizer for various resapmling algorithms.
+"""
+struct ResamplerCallback
     tree::ParticleTree
 
     function ResamplerCallback(N::Integer, C::Real=1.0)
