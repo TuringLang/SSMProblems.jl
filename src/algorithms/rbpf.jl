@@ -18,51 +18,65 @@ function initialise(rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF; kwargs
 
     # Create containers
     outer_type, inner_type = eltype(outer_dyn), rb_eltype(inner_model)
-    xs = Vector{outer_type}(undef, N)
-    zs = Vector{inner_type}(undef, N)
+    particles = Vector{RaoBlackwellisedContainer{outer_type,inner_type}}(undef, N)
     log_ws = fill(-log(N), N)
 
     # Initialise containers
     for i in 1:N
-        xs[i] = simulate(rng, outer_dyn; kwargs...)
-        inner_extra = (; new_outer=xs[i], kwargs...)
-        zs[i] = initialise(inner_model, algo.inner_algo; inner_extra...)
+        x = simulate(rng, outer_dyn; kwargs...)
+        z = initialise(inner_model, algo.inner_algo; new_outer=x, kwargs...)
+        particles[i] = RaoBlackwellisedContainer(x, z)
     end
 
-    return xs, zs, log_ws
+    return ParticleContainer(particles, log_ws)
 end
 
-function step(
-    rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, t::Integer, state, obs; kwargs...
+function predict(
+    rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, t::Integer, states; kwargs...
 )
-    xs, zs, log_ws = state
+    # TODO: reintroduce resampling
+    # states.proposed = resample(rng, algo.resampler, states.filtered)
+    states.proposed = deepcopy(states.filtered)
 
-    N = algo.n_particles
-    outer_dyn, inner_model = model.outer_dyn, model.inner_model
+    for i in 1:(algo.n_particles)
+        prev_x = states.proposed.particles[i].x
+        states.proposed[i].x = simulate(rng, model.outer_dyn, t, prev_x; kwargs...)
 
-    # Optional resampling
-    weights = Weights(softmax(log_ws))
-    ess = 1 / sum(weights .^ 2)
-    if ess < algo.resample_threshold * N
-        idxs = sample(rng, 1:N, weights, N)
-        xs .= xs[idxs]
-        zs .= zs[idxs]
-        log_ws .= fill(-log(N), N)
-    end
-
-    inner_lls = Vector{Float64}(undef, N)
-    for i in 1:N
-        prev_x = xs[i]
-        xs[i] = simulate(rng, outer_dyn, t, prev_x; kwargs...)
-        inner_extra = (; prev_outer=prev_x, new_outer=xs[i], kwargs...)
-        zs[i], inner_ll = step(
-            rng, inner_model, algo.inner_algo, t, zs[i], obs; inner_extra...
+        prev_z = states.proposed.particles[i].z
+        states.proposed.particles[i].z = predict(
+            rng,
+            model.inner_model,
+            algo.inner_algo,
+            t,
+            prev_z;
+            prev_outer=prev_x,
+            new_outer=states.proposed.particles[i].x,
+            kwargs...,
         )
-
-        log_ws[i] = log_ws[i] + inner_ll
-        inner_lls[i] = inner_ll
     end
 
-    ll = logsumexp(inner_lls) - log(N)
-    return (xs, zs, log_ws), ll
+    return states
+end
+
+function update(model::HierarchicalSSM, algo::RBPF, t::Integer, states, obs; kwargs...)
+    # TODO: this type should be more general
+    inner_lls = Vector{Float64}(undef, algo.n_particles)
+    for i in 1:(algo.n_particles)
+        states.filtered.particles[i].z, inner_ll = update(
+            model.inner_model,
+            algo.inner_algo,
+            t,
+            states.proposed.particles[i].z,
+            obs;
+            states.proposed.particles[i].x,
+            kwargs...,
+        )
+        inner_lls[i] = inner_ll
+
+        states.filtered.particles[i].x = states.proposed.particles[i].x
+    end
+
+    states.filtered.log_weights = states.proposed.log_weights .+ inner_lls
+
+    return states, logsumexp(inner_lls) - log(algo.n_particles)
 end

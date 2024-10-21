@@ -8,6 +8,19 @@ mutable struct GaussianContainer{XT,ΣT}
     filtered::Gaussian{XT,ΣT}
 end
 
+## RAO-BLACKWELLISED STATES ################################################################
+
+"""
+    RaoBlackwellisedContainer
+
+A container for Rao-Blackwellised states, composed of a marginalised state `z` (e.g. a
+Gaussian or Categorical distribution) and a singular state `x`.
+"""
+mutable struct RaoBlackwellisedContainer{XT,ZT}
+    x::XT
+    z::ZT
+end
+
 ## PARTICLES ###############################################################################
 
 mutable struct ParticleState{PT,WT<:Real}

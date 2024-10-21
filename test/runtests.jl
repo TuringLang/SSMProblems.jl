@@ -234,7 +234,12 @@ end
     hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
 
     rbpf = RBPF(KalmanFilter(), N_particles, 0.9)
-    (xs, zs, log_ws), ll = AnalyticalFilters.filter(rng, hier_model, rbpf, observations)
+    states, ll = AnalyticalFilters.filter(rng, hier_model, rbpf, observations)
+
+    # Extract final filtered states
+    xs = map(p -> getproperty(p, :x), states.filtered.particles)
+    zs = map(p -> getproperty(p, :z), states.filtered.particles)
+    log_ws = states.filtered.log_weights
 
     # Compare log-likelihoods
     println("Kalman filter log-likelihood:", kf_ll)

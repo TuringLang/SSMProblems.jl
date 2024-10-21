@@ -47,7 +47,7 @@ const LinearGaussianStateSpaceModel{T} = SSMProblems.StateSpaceModel{
 # Can't use `eltype` because that is used by SSMProblems for forward simulation and would be
 # used by a particle filtering.
 function rb_eltype(::LinearGaussianStateSpaceModel{T}) where {T}
-    return Gaussian{Vector{T},Matrix{T}} where {T}
+    return Gaussian{Vector{T},Matrix{T}}
 end
 
 #######################
