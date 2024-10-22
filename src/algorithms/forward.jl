@@ -1,6 +1,7 @@
 export ForwardAlgorithm, FW
 
 struct ForwardAlgorithm <: AbstractFilter end
+const FW = ForwardAlgorithm
 
 function initialise(
     rng::AbstractRNG, model::DiscreteStateSpaceModel, ::ForwardAlgorithm; kwargs...
