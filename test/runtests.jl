@@ -137,7 +137,7 @@ end
     observations = [rand(rng)]
 
     fw = ForwardAlgorithm()
-    states, ll = GeneralisedFilters.filter(model, fw, observations)
+    state, ll = GeneralisedFilters.filter(model, fw, observations)
 
     # Brute force calculations of each conditional path probability p(x_{1:T} | y_{1:T})
     T = 1
@@ -151,9 +151,8 @@ end
     end
     marginal = sum(values(path_probs))
 
-    # XXX: I think this test is broken
     filtered_paths = Base.filter(((k, v),) -> k[end] == 1, path_probs)
-    @test states[end][1] ≈ sum(values(filtered_paths)) / marginal
+    @test state[1] ≈ sum(values(filtered_paths)) / marginal
     @test ll ≈ log(marginal)
 end
 
