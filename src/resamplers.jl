@@ -81,20 +81,19 @@ function sample_ancestors(
     rng::AbstractRNG, ::Systematic, weights::AbstractVector{WT}, n::Int64=length(weights)
 ) where {WT<:Real}
     # pre-calculations
-    @inbounds v = n * weights[1]
-    u = rand(rng, WT)
+    vs = n * cumsum(weights)
+    u0 = rand(rng, WT)
 
     # initialize sampling algorithm
     a = Vector{Int64}(undef, n)
     idx = 1
 
     @inbounds for i in 1:n
-        while v < u
+        u = u0 + (i - 1)
+        while vs[idx] <= u
             idx += 1
-            v += n * weights[idx]
         end
         a[i] = idx
-        u += one(u)
     end
 
     return a

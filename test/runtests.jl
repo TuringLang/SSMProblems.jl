@@ -92,9 +92,9 @@ end
     end
 
     model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
-    _, _, data = sample(rng, model, 150)
+    _, _, data = sample(rng, model, 20)
 
-    bf = BF(4096; threshold=0.8)
+    bf = BF(2^10; threshold=0.8)
     _, llbf = GeneralisedFilters.filter(rng, model, bf, data)
     _, llkf = GeneralisedFilters.filter(rng, model, KF(), data)
 
