@@ -5,86 +5,85 @@ import StatsBase: Weights
 
 export RBPF
 
-struct RBPF{F<:FilteringAlgorithm} <: FilteringAlgorithm
+struct RBPF{F<:AbstractFilter,RS<:AbstractResampler} <: AbstractFilter
     inner_algo::F
-    n_particles::Int
-    resample_threshold::Float64
+    N::Int
+    resampler::RS
 end
-RBPF(inner_algo::F, n_particles::Int) where {F} = RBPF(inner_algo, n_particles, 1.0)
 
-function initialise(rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, extra)
-    N = algo.n_particles
+function RBPF(
+    inner_algo::AbstractFilter,
+    N::Integer;
+    threshold::Real=1.0,
+    resampler::AbstractResampler=Systematic(),
+)
+    return RBPF(inner_algo, N, ESSResampler(threshold, resampler))
+end
+
+function initialise(rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF; kwargs...)
+    N = algo.N
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
     # Create containers
     outer_type, inner_type = eltype(outer_dyn), rb_eltype(inner_model)
-    xs = Vector{outer_type}(undef, N)
-    zs = Vector{inner_type}(undef, N)
+    particles = Vector{RaoBlackwellisedContainer{outer_type,inner_type}}(undef, N)
     log_ws = fill(-log(N), N)
 
     # Initialise containers
     for i in 1:N
-        xs[i] = simulate(rng, outer_dyn, extra)
-        new_extra = (; new_outer=xs[i])
-        inner_extra = isnothing(extra) ? new_extra : (; extra..., new_extra...)
-        zs[i] = initialise(inner_model, algo.inner_algo, inner_extra)
+        x = simulate(rng, outer_dyn; kwargs...)
+        z = initialise(inner_model, algo.inner_algo; new_outer=x, kwargs...)
+        particles[i] = RaoBlackwellisedContainer(x, z)
     end
 
-    return xs, zs, log_ws
+    return ParticleContainer(particles, log_ws)
 end
 
-function step(rng, model::HierarchicalSSM, algo::RBPF, t::Integer, state, obs, extra)
-    xs, zs, log_ws = state
+function predict(
+    rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, t::Integer, states; kwargs...
+)
+    states.proposed, states.ancestors = resample(rng, algo.resampler, states.filtered)
 
-    N = algo.n_particles
-    outer_dyn, inner_model = model.outer_dyn, model.inner_model
+    for i in 1:(algo.N)
+        prev_x = states.proposed.particles[i].x
+        states.proposed[i].x = simulate(rng, model.outer_dyn, t, prev_x; kwargs...)
 
-    # Optional resampling
-    weights = Weights(softmax(log_ws))
-    ess = 1 / sum(weights .^ 2)
-    if ess < algo.resample_threshold * N
-        idxs = sample(rng, 1:N, weights, N)
-        xs .= xs[idxs]
-        zs .= zs[idxs]
-        log_ws .= fill(-log(N), N)
+        prev_z = states.proposed.particles[i].z
+        states.proposed.particles[i].z = predict(
+            rng,
+            model.inner_model,
+            algo.inner_algo,
+            t,
+            prev_z;
+            prev_outer=prev_x,
+            new_outer=states.proposed.particles[i].x,
+            kwargs...,
+        )
     end
 
-    inner_lls = Vector{Float64}(undef, N)
-    for i in 1:N
-        prev_x = xs[i]
-        xs[i] = simulate(rng, outer_dyn, t, prev_x, extra)
+    return states
+end
 
-        new_extra = (prev_outer=prev_x, new_outer=xs[i])
-        inner_extra = isnothing(extra) ? new_extra : (; extra..., new_extra...)
-
-        zs[i], inner_ll = step(inner_model, algo.inner_algo, t, zs[i], obs, inner_extra)
-        log_ws[i] = log_ws[i] + inner_ll
+function update(
+    model::HierarchicalSSM{T}, algo::RBPF, t::Integer, states, obs; kwargs...
+) where {T}
+    inner_lls = Vector{T}(undef, algo.N)
+    for i in 1:(algo.N)
+        states.filtered.particles[i].z, inner_ll = update(
+            model.inner_model,
+            algo.inner_algo,
+            t,
+            states.proposed.particles[i].z,
+            obs;
+            new_outer=states.proposed.particles[i].x,
+            kwargs...,
+        )
         inner_lls[i] = inner_ll
+
+        states.filtered.particles[i].x = states.proposed.particles[i].x
     end
 
-    ll = logsumexp(inner_lls) - log(N)
-    return (xs, zs, log_ws), ll
-end
+    states.filtered.log_weights = states.proposed.log_weights .+ inner_lls
 
-function filter(
-    rng::AbstractRNG,
-    model::HierarchicalSSM,
-    algo::RBPF,
-    observations::AbstractVector,
-    extra0,
-    extras::AbstractVector,
-)
-    state = initialise(rng, model, algo, extra0)
-    ll = 0.0
-    for (i, obs) in enumerate(observations)
-        state, step_ll = step(rng, model, algo, i, state, obs, extras[i])
-        ll += step_ll
-    end
-    return state, ll
-end
-
-function filter(
-    model::HierarchicalSSM, algo::RBPF, observations::AbstractVector, extras::AbstractVector
-)
-    return filter(default_rng(), model, algo, observations, extras)
+    return states, logsumexp(inner_lls) - log(algo.N)
 end
