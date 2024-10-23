@@ -35,7 +35,8 @@ function resample(
         deepcopy(states.z_particles[idxs]),
         CUDA.zeros(T, length(states)),
     )
-    return reset_weights!(state, idxs, filter)
+    reset_weights!(new_state, idxs, filter)
+    return new_state, idxs
 end
 
 ## CONDITIONAL RESAMPLING ##################################################################
