@@ -5,6 +5,13 @@ struct BootstrapFilter{RS<:AbstractResampler} <: AbstractFilter
     resampler::RS
 end
 
+function BootstrapFilter(
+    N::Integer; threshold::Real=1.0, resampler::AbstractResampler=Systematic()
+)
+    conditional_resampler = ESSResampler(threshold, resampler)
+    return BootstrapFilter(N, conditional_resampler)
+end
+
 """Shorthand for `BootstrapFilter`"""
 const BF = BootstrapFilter
 
