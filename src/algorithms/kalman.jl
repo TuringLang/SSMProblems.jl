@@ -85,7 +85,7 @@ function predict(
 end
 
 function invert_innovation(S)
-    if size(S, 1) == 2
+    if false & size(S, 1) == 2
         return _invert_innovation_analytic(S)
     else
         return _invert_innovation(S)

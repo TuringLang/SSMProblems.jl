@@ -18,6 +18,24 @@ function resample(
     return new_state, idxs
 end
 
+# TODO: combine this with above definition
+function resample(
+    rng::AbstractRNG,
+    resampler::AbstractResampler,
+    states::RaoBlackwellisedParticleState{T,M,ZT},
+) where {T,M,ZT}
+    weights = StatsBase.weights(states)
+    idxs = sample_ancestors(rng, resampler, weights)
+
+    new_state = RaoBlackwellisedParticleState(
+        states.x_particles[:, idxs],
+        states.z_particles[idxs],
+        CUDA.fill(-log(T(length(states))), length(states)),
+    )
+
+    return new_state, idxs
+end
+
 ## CONDITIONAL RESAMPLING ##################################################################
 
 abstract type AbstractConditionalResampler <: AbstractResampler end
@@ -31,12 +49,34 @@ struct ESSResampler <: AbstractConditionalResampler
 end
 
 function resample(
-    rng::AbstractRNG, cond_resampler::ESSResampler, state::ParticleState{T,WT}
-) where {T,WT<:Real}
+    rng::AbstractRNG, cond_resampler::ESSResampler, state::ParticleState{PT,WT}
+) where {PT,WT}
     n = length(state)
+    # TODO: computing weights twice. Should create a wrapper to avoid this
     weights = StatsBase.weights(state)
     ess = inv(sum(abs2, weights))
     @debug "ESS: $ess"
+
+    if cond_resampler.threshold * n ≥ ess
+        return resample(rng, cond_resampler.resampler, state)
+    else
+        return state, collect(1:n)
+    end
+end
+
+# HACK: Likewise this should be removed. Even more so as it's identical, but needed to avoid
+# method ambiguity
+function resample(
+    rng::AbstractRNG,
+    cond_resampler::ESSResampler,
+    state::RaoBlackwellisedParticleState{T,M,ZT},
+) where {T,M,ZT}
+    n = length(state)
+    # TODO: computing weights twice. Should create a wrapper to avoid this
+    weights = StatsBase.weights(state)
+    ess = inv(sum(abs2, weights))
+    @debug "ESS: $ess"
+    println(ess)
 
     if cond_resampler.threshold * n ≥ ess
         return resample(rng, cond_resampler.resampler, state)
@@ -97,6 +137,18 @@ function sample_ancestors(
     end
 
     return a
+end
+
+# Following Code 8 of Murray et. al (2015)
+function sample_ancestors(
+    rng::AbstractRNG, ::Systematic, weights::CuVector{WT}, n::Int=length(weights)
+) where {WT}
+    u = rand(rng, WT)
+    W = cumsum(weights)
+    # TODO: assume weights sum to unity and document
+    W_tot = CUDA.@allowscalar W[end]
+    r = n * W
+    return O = min.(n - 1, trunc.(Int32, r .+ u)) .+ 1
 end
 
 ## SINGLE PRECISION STABLE ALGORITHMS ######################################################

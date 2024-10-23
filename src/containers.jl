@@ -13,6 +13,9 @@ mutable struct BatchGaussianDistribution{T,M<:CUDA.AbstractMemory}
     μs::CuArray{T,2,M}
     Σs::CuArray{T,3,M}
 end
+function Base.getindex(d::BatchGaussianDistribution, i)
+    return BatchGaussianDistribution(d.μs[:, i], d.Σs[:, :, i])
+end
 
 ## RAO-BLACKWELLISED STATES ################################################################
 
@@ -27,12 +30,19 @@ mutable struct RaoBlackwellisedContainer{XT,ZT}
     z::ZT
 end
 
+# TODO: this needs to be generalised to account for the flatten Levy SSM state
 mutable struct RaoBlackwellisedParticleState{T,M<:CUDA.AbstractMemory,ZT}
     x_particles::CuArray{T,2,M}
     z_particles::ZT
     log_weights::CuArray{T,1,M}
 end
 
+StatsBase.weights(state::RaoBlackwellisedParticleState) = softmax(state.log_weights)
+Base.length(state::RaoBlackwellisedParticleState) = size(state.x_particles, 2)
+
+"""
+    RaoBlackwellisedParticleContainer
+"""
 mutable struct RaoBlackwellisedParticleContainer{T,M<:CUDA.AbstractMemory,ZT}
     filtered::RaoBlackwellisedParticleState{T,M,ZT}
     proposed::RaoBlackwellisedParticleState{T,M,ZT}

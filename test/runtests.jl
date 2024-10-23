@@ -240,7 +240,7 @@ end
     obs = GeneralisedFilters.HomogeneousLinearGaussianObservationProcess(H[:, 3:4], c, R)
     hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
 
-    rbpf = RBPF(KalmanFilter(), N_particles; threshold=0.8)
+    rbpf = RBPF(KalmanFilter(), N_particles; threshold=1.0)
     states, ll = GeneralisedFilters.filter(rng, hier_model, rbpf, observations)
 
     # Extract final filtered states
@@ -392,7 +392,7 @@ end
     )
     hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
 
-    rbpf = BatchRBPF(BatchKalmanFilter(N_particles), N_particles, 0.8)
+    rbpf = BatchRBPF(BatchKalmanFilter(N_particles), N_particles; threshold=0.8)
     states, ll = GeneralisedFilters.filter(hier_model, rbpf, observations)
 
     # Extract final filtered states

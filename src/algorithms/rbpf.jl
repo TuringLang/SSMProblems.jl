@@ -118,13 +118,15 @@ end
 #### GPU-ACCELERATED VERSION ####
 #################################
 
-struct BatchRBPF{F<:AbstractFilter} <: AbstractFilter
+struct BatchRBPF{F<:AbstractFilter,RS<:AbstractResampler} <: AbstractFilter
     inner_algo::F
     n_particles::Int
-    resample_threshold::Float64
+    resampler::RS
 end
-function BatchRBPF(inner_algo::F, n_particles::Int) where {F}
-    return BatchRBPF(inner_algo, n_particles, 1.0)
+function BatchRBPF(
+    inner_algo, n_particles; threshold::Real=1.0, resampler::AbstractResampler=Systematic()
+)
+    return BatchRBPF(inner_algo, n_particles, ESSResampler(threshold, resampler))
 end
 
 function searchsorted!(ws_cdf, us, idxs)
@@ -209,12 +211,10 @@ function predict(
     N = filter.n_particles
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
-    # Skip resampling for now
-    states.proposed = deepcopy(states.filtered)
-    states.ancestors = CuArray(1:N)
+    states.proposed, states.ancestors = resample(rng, filter.resampler, states.filtered)
 
     new_x = batch_simulate(outer_dyn, step, states.proposed.x_particles, N; kwargs...)
-    states.filtered.z_particles = predict(
+    states.proposed.z_particles = predict(
         inner_model,
         filter.inner_algo,
         step,
@@ -223,7 +223,7 @@ function predict(
         new_outer=new_x,
         kwargs...,
     )
-    states.filtered.x_particles = new_x
+    states.proposed.x_particles = new_x
 
     return states
 end
