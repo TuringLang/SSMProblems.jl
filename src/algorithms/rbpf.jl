@@ -114,24 +114,6 @@ function update(
     return states, logmarginal(states)
 end
 
-function resample2(
-    rng::AbstractRNG, resampler::ESSResampler, state::ParticleState{T,WT}
-) where {T,WT<:Real}
-    n = length(state)
-    weights = StatsBase.weights(state)
-    ess = inv(sum(abs2, weights))
-    print("ESS: $ess")
-
-    if resampler.threshold * n ≥ ess
-        println(" (resampling)")
-        reset_weights!(state)
-        return sample_ancestors(rng, resampler.resampler, weights)
-    else
-        println(" (not resampling)")
-        return 1:n
-    end
-end
-
 # function filter(
 #     rng::AbstractRNG,
 #     model::HierarchicalSSM,
