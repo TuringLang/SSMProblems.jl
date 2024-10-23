@@ -1,5 +1,5 @@
 using DataStructures: Stack
-import Random: rand
+using Random: rand
 
 ## GAUSSIAN STATES #########################################################################
 
