@@ -1,7 +1,7 @@
 using TestEnv
 TestEnv.activate()
 
-using AnalyticalFilters
+using GeneralisedFilters
 using BenchmarkTools
 using Distributions
 using HypothesisTests
@@ -33,13 +33,13 @@ struct InnerDynamics{T} <: LinearGaussianLatentDynamics{T}
     C::Matrix{T}
     Q::Matrix{T}
 end
-AnalyticalFilters.calc_μ0(dyn::InnerDynamics, extra) = dyn.μ0
-AnalyticalFilters.calc_Σ0(dyn::InnerDynamics, extra) = dyn.Σ0
-AnalyticalFilters.calc_A(dyn::InnerDynamics, ::Integer, extra) = dyn.A
-function AnalyticalFilters.calc_b(dyn::InnerDynamics, ::Integer, extra)
+GeneralisedFilters.calc_μ0(dyn::InnerDynamics, extra) = dyn.μ0
+GeneralisedFilters.calc_Σ0(dyn::InnerDynamics, extra) = dyn.Σ0
+GeneralisedFilters.calc_A(dyn::InnerDynamics, ::Integer, extra) = dyn.A
+function GeneralisedFilters.calc_b(dyn::InnerDynamics, ::Integer, extra)
     return dyn.b + dyn.C * extra.prev_outer
 end
-AnalyticalFilters.calc_Q(dyn::InnerDynamics, ::Integer, extra) = dyn.Q
+GeneralisedFilters.calc_Q(dyn::InnerDynamics, ::Integer, extra) = dyn.Q
 
 rng = StableRNG(1236)
 μ0 = rand(rng, 4)
@@ -74,16 +74,16 @@ T = 1
 observations = [rand(rng, 2) for _ in 1:T]
 extras = [nothing for _ in 1:T]
 
-outer_dyn = AnalyticalFilters.HomogeneousLinearGaussianLatentDynamics(
+outer_dyn = GeneralisedFilters.HomogeneousLinearGaussianLatentDynamics(
     μ0[1:2], Σ0[1:2, 1:2], A[1:2, 1:2], b[1:2], Qs[1]
 )
 inner_dyn = InnerDynamics(μ0[3:4], Σ0[3:4, 3:4], A[3:4, 3:4], b[3:4], A[3:4, 1:2], Qs[2])
-obs = AnalyticalFilters.HomogeneousLinearGaussianObservationProcess(H[:, 3:4], c, R)
+obs = GeneralisedFilters.HomogeneousLinearGaussianObservationProcess(H[:, 3:4], c, R)
 hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
 
 rbpf = RBPF(KalmanFilter(), N_particles, 0.0)
-# (xs, zs, log_ws), ll = AnalyticalFilters.filter(rng, hier_model, rbpf, observations, extras)
-(xs, zs, log_ws), ll = AnalyticalFilters.filter(
+# (xs, zs, log_ws), ll = GeneralisedFilters.filter(rng, hier_model, rbpf, observations, extras)
+(xs, zs, log_ws), ll = GeneralisedFilters.filter(
     hier_model, rbpf, observations, nothing, extras
 )
 
@@ -112,9 +112,9 @@ end
 Σ0s = batch_calc_Σ0s(inner_dyn, N_particles)
 
 function batch_simulate(
-    dyn::AnalyticalFilters.HomogeneousLinearGaussianLatentDynamics, N::Integer
+    dyn::GeneralisedFilters.HomogeneousLinearGaussianLatentDynamics, N::Integer
 )
-    μ0, Σ0 = AnalyticalFilters.calc_initial(dyn, nothing)
+    μ0, Σ0 = GeneralisedFilters.calc_initial(dyn, nothing)
     D = length(μ0)
     L = cholesky(Σ0).L
     # Ls = repeat(cu(reshape(Σ0, (size(Σ0)..., 1))), 1, 1, N)
@@ -131,13 +131,13 @@ logws = CUDA.fill(convert(Float32, -log(N_particles)), N_particles);
 ## Prediction
 
 function batch_simulate(
-    dyn::AnalyticalFilters.HomogeneousLinearGaussianLatentDynamics,
+    dyn::GeneralisedFilters.HomogeneousLinearGaussianLatentDynamics,
     step::Integer,
     prev_state,
     extra,
     N::Integer,
 )
-    A, b, Q = AnalyticalFilters.calc_params(dyn, step, extra)
+    A, b, Q = GeneralisedFilters.calc_params(dyn, step, extra)
     D = length(b)
     L = cholesky(Q).L
     Ls = CuArray{Float32}(undef, size(Q)..., N)
@@ -527,7 +527,7 @@ end
 
 io = IOContext(stdout)
 
-res_cpu = @benchmark AnalyticalFilters.filter(
+res_cpu = @benchmark GeneralisedFilters.filter(
     hier_model, rbpf, observations, nothing, extras
 )
 show(io, MIME("text/plain"), res_cpu)

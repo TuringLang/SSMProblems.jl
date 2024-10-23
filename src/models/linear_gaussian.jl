@@ -11,15 +11,19 @@ abstract type LinearGaussianLatentDynamics{T} <: SSMProblems.LatentDynamics{Vect
 
 function calc_μ0 end
 function calc_Σ0 end
-function calc_initial(dyn::LinearGaussianLatentDynamics, extra)
-    return calc_μ0(dyn, extra), calc_Σ0(dyn, extra)
+function calc_initial(dyn::LinearGaussianLatentDynamics; kwargs...)
+    return calc_μ0(dyn; kwargs...), calc_Σ0(dyn; kwargs...)
 end
 
 function calc_A end
 function calc_b end
 function calc_Q end
-function calc_params(dyn::LinearGaussianLatentDynamics, step::Integer, extra)
-    return (calc_A(dyn, step, extra), calc_b(dyn, step, extra), calc_Q(dyn, step, extra))
+function calc_params(dyn::LinearGaussianLatentDynamics, step::Integer; kwargs...)
+    return (
+        calc_A(dyn, step; kwargs...),
+        calc_b(dyn, step; kwargs...),
+        calc_Q(dyn, step; kwargs...),
+    )
 end
 
 abstract type LinearGaussianObservationProcess{T} <:
@@ -28,11 +32,11 @@ abstract type LinearGaussianObservationProcess{T} <:
 function calc_H end
 function calc_c end
 function calc_R end
-function calc_params(obs::LinearGaussianObservationProcess, step::Integer, extra)
+function calc_params(obs::LinearGaussianObservationProcess, step::Integer; kwargs...)
     return (
-        AnalyticalFilters.calc_H(obs, step, extra),
-        calc_c(obs, step, extra),
-        calc_R(obs, step, extra),
+        GeneralisedFilters.calc_H(obs, step; kwargs...),
+        calc_c(obs, step; kwargs...),
+        calc_R(obs, step; kwargs...),
     )
 end
 
@@ -44,29 +48,32 @@ const LinearGaussianStateSpaceModel{T} = SSMProblems.StateSpaceModel{
 # Can't use `eltype` because that is used by SSMProblems for forward simulation and would be
 # used by a particle filtering.
 function rb_eltype(::LinearGaussianStateSpaceModel{T}) where {T}
-    return @NamedTuple{μ::Vector{T}, Σ::Matrix{T}} where {T}
+    return Gaussian{Vector{T},Matrix{T}}
 end
 
 #######################
 #### DISTRIBUTIONS ####
 #######################
 
-function SSMProblems.distribution(dyn::LinearGaussianLatentDynamics, extra)
-    μ0, Σ0 = calc_initial(dyn, extra)
+function SSMProblems.distribution(dyn::LinearGaussianLatentDynamics; kwargs...)
+    μ0, Σ0 = calc_initial(dyn; kwargs...)
     return MvNormal(μ0, Σ0)
 end
 
 function SSMProblems.distribution(
-    dyn::LinearGaussianLatentDynamics{T}, step::Integer, state::AbstractVector{T}, extra
+    dyn::LinearGaussianLatentDynamics{T}, step::Integer, state::AbstractVector{T}; kwargs...
 ) where {T}
-    A, b, Q = calc_params(dyn, step, extra)
+    A, b, Q = calc_params(dyn, step; kwargs...)
     return MvNormal(A * state + b, Q)
 end
 
 function SSMProblems.distribution(
-    obs::LinearGaussianObservationProcess{T}, step::Integer, state::AbstractVector{T}, extra
+    obs::LinearGaussianObservationProcess{T},
+    step::Integer,
+    state::AbstractVector{T};
+    kwargs...,
 ) where {T}
-    H, c, R = calc_params(obs, step, extra)
+    H, c, R = calc_params(obs, step; kwargs...)
     return MvNormal(H * state + c, R)
 end
 
@@ -74,27 +81,31 @@ end
 #### HOMOGENEOUS LINEAR GAUSSIAN MODEL ####
 ###########################################
 
-struct HomogeneousLinearGaussianLatentDynamics{T} <: LinearGaussianLatentDynamics{T}
+struct HomogeneousLinearGaussianLatentDynamics{
+    T<:Real,AT<:AbstractMatrix{T},QT<:AbstractMatrix{T},ΣT<:AbstractMatrix{T}
+} <: LinearGaussianLatentDynamics{T}
     μ0::Vector{T}
-    Σ0::Matrix{T}
-    A::Matrix{T}
+    Σ0::ΣT
+    A::AT
     b::Vector{T}
-    Q::Matrix{T}
+    Q::QT
 end
-calc_μ0(dyn::HomogeneousLinearGaussianLatentDynamics, extra) = dyn.μ0
-calc_Σ0(dyn::HomogeneousLinearGaussianLatentDynamics, extra) = dyn.Σ0
-calc_A(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, extra) = dyn.A
-calc_b(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, extra) = dyn.b
-calc_Q(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, extra) = dyn.Q
+calc_μ0(dyn::HomogeneousLinearGaussianLatentDynamics; kwargs...) = dyn.μ0
+calc_Σ0(dyn::HomogeneousLinearGaussianLatentDynamics; kwargs...) = dyn.Σ0
+calc_A(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer; kwargs...) = dyn.A
+calc_b(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer; kwargs...) = dyn.b
+calc_Q(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer; kwargs...) = dyn.Q
 
-struct HomogeneousLinearGaussianObservationProcess{T} <: LinearGaussianObservationProcess{T}
-    H::Matrix{T}
+struct HomogeneousLinearGaussianObservationProcess{
+    T<:Real,HT<:AbstractMatrix{T},RT<:AbstractMatrix{T}
+} <: LinearGaussianObservationProcess{T}
+    H::HT
     c::Vector{T}
-    R::Matrix{T}
+    R::RT
 end
-calc_H(obs::HomogeneousLinearGaussianObservationProcess, ::Integer, extra) = obs.H
-calc_c(obs::HomogeneousLinearGaussianObservationProcess, ::Integer, extra) = obs.c
-calc_R(obs::HomogeneousLinearGaussianObservationProcess, ::Integer, extra) = obs.R
+calc_H(obs::HomogeneousLinearGaussianObservationProcess, ::Integer; kwargs...) = obs.H
+calc_c(obs::HomogeneousLinearGaussianObservationProcess, ::Integer; kwargs...) = obs.c
+calc_R(obs::HomogeneousLinearGaussianObservationProcess, ::Integer; kwargs...) = obs.R
 
 function create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
     return SSMProblems.StateSpaceModel(
@@ -117,32 +128,32 @@ function batch_calc_cs end
 function batch_calc_Rs end
 
 # TODO: can we remove batch size argument?
-function batch_calc_initial(dyn::LinearGaussianLatentDynamics, extra, N::Integer)
-    return batch_calc_μ0s(dyn, extra, N), batch_calc_Σ0s(dyn, extra, N)
+function batch_calc_initial(dyn::LinearGaussianLatentDynamics, N::Integer; kwargs...)
+    return batch_calc_μ0s(dyn, N; kwargs...), batch_calc_Σ0s(dyn, N; kwargs...)
 end
 
 function batch_calc_params(
-    dyn::LinearGaussianLatentDynamics, step::Integer, extra, N::Integer
+    dyn::LinearGaussianLatentDynamics, step::Integer, N::Integer; kwargs...
 )
     return (
-        batch_calc_As(dyn, step, extra, N),
-        batch_calc_bs(dyn, step, extra, N),
-        batch_calc_Qs(dyn, step, extra, N),
+        batch_calc_As(dyn, step, N; kwargs...),
+        batch_calc_bs(dyn, step, N; kwargs...),
+        batch_calc_Qs(dyn, step, N; kwargs...),
     )
 end
 
 function batch_calc_params(
-    obs::LinearGaussianObservationProcess, step::Integer, extra, N::Integer
+    obs::LinearGaussianObservationProcess, step::Integer, N::Integer; kwargs...
 )
     return (
-        batch_calc_Hs(obs, step, extra, N),
-        batch_calc_cs(obs, step, extra, N),
-        batch_calc_Rs(obs, step, extra, N),
+        batch_calc_Hs(obs, step, N; kwargs...),
+        batch_calc_cs(obs, step, N; kwargs...),
+        batch_calc_Rs(obs, step, N; kwargs...),
     )
 end
 
-function batch_simulate(dyn::HomogeneousLinearGaussianLatentDynamics, extra, N::Integer)
-    μ0, Σ0 = AnalyticalFilters.calc_initial(dyn, extra)
+function batch_simulate(dyn::HomogeneousLinearGaussianLatentDynamics, N::Integer; kwargs...)
+    μ0, Σ0 = GeneralisedFilters.calc_initial(dyn; kwargs...)
     D = length(μ0)
     L = cholesky(Σ0).L
     # Ls = repeat(cu(reshape(Σ0, (size(Σ0)..., 1))), 1, 1, N)
@@ -152,13 +163,13 @@ function batch_simulate(dyn::HomogeneousLinearGaussianLatentDynamics, extra, N::
 end
 
 function batch_simulate(
-    dyn::AnalyticalFilters.HomogeneousLinearGaussianLatentDynamics,
+    dyn::GeneralisedFilters.HomogeneousLinearGaussianLatentDynamics,
     step::Integer,
     prev_state,
-    extra,
-    N::Integer,
+    N::Integer;
+    kwargs...,
 )
-    A, b, Q = AnalyticalFilters.calc_params(dyn, step, extra)
+    A, b, Q = GeneralisedFilters.calc_params(dyn, step; kwargs...)
     D = length(b)
     L = cholesky(Q).L
     Ls = CuArray{Float32}(undef, size(Q)..., N)
@@ -169,21 +180,52 @@ function batch_simulate(
            NNlib.batched_vec(Ls, CUDA.randn(D, N))
 end
 
+function batch_calc_μ0s(
+    dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, N::Integer; kwargs...
+)
+    μ0 = CuArray{Float32}(undef, length(dyn.μ0), N)
+    return μ0[:, :] .= cu(dyn.μ0)
+end
+function batch_calc_Σ0s(
+    dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, N::Integer; kwargs...
+)
+    Σ0 = CuArray{Float32}(undef, size(dyn.Σ0)..., N)
+    return Σ0[:, :, :] .= cu(dyn.Σ0)
+end
+function batch_calc_As(
+    dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, N::Integer; kwargs...
+)
+    A = CuArray{Float32}(undef, size(dyn.A)..., N)
+    return A[:, :, :] .= cu(dyn.A)
+end
+function batch_calc_bs(
+    dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, N::Integer; kwargs...
+)
+    b = CuArray{Float32}(undef, size(dyn.b)..., N)
+    return b[:, :] .= cu(dyn.b)
+end
+function batch_calc_Qs(
+    dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, N::Integer; kwargs...
+)
+    Q = CuArray{Float32}(undef, size(dyn.Q)..., N)
+    return Q[:, :, :] .= cu(dyn.Q)
+end
+
 function batch_calc_Hs(
-    obs::HomogeneousLinearGaussianObservationProcess, ::Integer, extra, N::Integer
+    obs::HomogeneousLinearGaussianObservationProcess, ::Integer, N::Integer; kwargs...
 )
     H = CuArray{Float32}(undef, size(obs.H)..., N)
     return H[:, :, :] .= cu(obs.H)
 end
 function batch_calc_cs(
-    obs::HomogeneousLinearGaussianObservationProcess, ::Integer, extra, N::Integer
+    obs::HomogeneousLinearGaussianObservationProcess, ::Integer, N::Integer; kwargs...
 )
     c = CuArray{Float32}(undef, size(obs.c)..., N)
     return c[:, :] .= cu(obs.c)
 end
 
 function batch_calc_Rs(
-    obs::HomogeneousLinearGaussianObservationProcess, ::Integer, extra, N::Integer
+    obs::HomogeneousLinearGaussianObservationProcess, ::Integer, N::Integer; kwargs...
 )
     R = CuArray{Float32}(undef, size(obs.R)..., N)
     return R[:, :, :] .= cu(obs.R)

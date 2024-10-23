@@ -1,107 +1,87 @@
 export KalmanFilter, filter, BatchKalmanFilter
+using GaussianDistributions
 
-struct KalmanFilter <: FilteringAlgorithm end
+export KalmanFilter, KF
+
+struct KalmanFilter <: AbstractFilter end
+
+KF() = KalmanFilter()
 
 function initialise(
-    model::LinearGaussianStateSpaceModel{T}, filter::KalmanFilter, extra
-) where {T}
-    μ0, Σ0 = calc_initial(model.dyn, extra)
-    return (μ=μ0, Σ=Σ0)
+    rng::AbstractRNG, model::LinearGaussianStateSpaceModel, filter::KalmanFilter; kwargs...
+)
+    μ0, Σ0 = calc_initial(model.dyn; kwargs...)
+    return Gaussian(μ0, Σ0)
 end
 
 function predict(
-    model::LinearGaussianStateSpaceModel{T},
+    rng::AbstractRNG,
+    model::LinearGaussianStateSpaceModel,
     filter::KalmanFilter,
     step::Integer,
-    state::@NamedTuple{μ::Vector{T}, Σ::Matrix{T}},
-    extra,
-) where {T}
-    μ, Σ = state.μ, state.Σ
-    A, b, Q = calc_params(model.dyn, step, extra)
-    μ̂ = A * μ + b
-    Σ̂ = A * Σ * A' + Q
-    return (μ=μ̂, Σ=Σ̂)
+    states::Gaussian;
+    kwargs...,
+)
+    μ, Σ = GaussianDistributions.pair(states)
+    A, b, Q = calc_params(model.dyn, step; kwargs...)
+    states = Gaussian(A * μ + b, A * Σ * A' + Q)
+    return states
 end
 
 function update(
-    model::LinearGaussianStateSpaceModel{T},
+    model::LinearGaussianStateSpaceModel,
     filter::KalmanFilter,
     step::Integer,
-    state::@NamedTuple{μ::Vector{T}, Σ::Matrix{T}},
-    obs::Vector{T},
-    extra,
-) where {T}
-    μ, Σ = state.μ, state.Σ
-    H, c, R = calc_params(model.obs, step, extra)
+    states::Gaussian,
+    obs::AbstractVector;
+    kwargs...,
+)
+    μ, Σ = GaussianDistributions.pair(states)
+    H, c, R = calc_params(model.obs, step; kwargs...)
 
     # Update state
     m = H * μ + c
     y = obs - m
     S = H * Σ * H' + R
     K = Σ * H' / S
-    μ̂ = μ + K * y
-    Σ̂ = Σ - K * H * Σ
+
+    states = Gaussian(μ + K * y, Σ - K * H * Σ)
 
     # Compute log-likelihood
+    # HACK: force the covariance to be positive definite
+    S = (S + S') / 2
     ll = logpdf(MvNormal(m, S), obs)
 
-    return (μ=μ̂, Σ=Σ̂), ll
-end
-
-function step(
-    model::LinearGaussianStateSpaceModel{T},
-    filter::KalmanFilter,
-    step::Integer,
-    state::@NamedTuple{μ::Vector{T}, Σ::Matrix{T}},
-    obs::Vector{T},
-    extra,
-) where {T}
-    state = predict(model, filter, step, state, extra)
-    state, ll = update(model, filter, step, state, obs, extra)
-    return state, ll
-end
-
-function filter(
-    model::LinearGaussianStateSpaceModel{T},
-    filter::KalmanFilter,
-    data::Vector{Vector{T}},
-    extra0,
-    extras,
-) where {T}
-    state = initialise(model, filter, extra0)
-    states = Vector{@NamedTuple{μ::Vector{T}, Σ::Matrix{T}}}(undef, length(data))
-    ll = 0.0
-    for (i, obs) in enumerate(data)
-        state, step_ll = step(model, filter, i, state, obs, extras[i])
-        states[i] = state
-        ll += step_ll
-    end
     return states, ll
 end
 
-struct BatchKalmanFilter <: FilteringAlgorithm
+struct BatchKalmanFilter <: AbstractFilter
     batch_size::Int
 end
 
 function initialise(
-    model::LinearGaussianStateSpaceModel{T}, algo::BatchKalmanFilter, extra
+    rng::AbstractRNG,
+    model::LinearGaussianStateSpaceModel{T},
+    algo::BatchKalmanFilter;
+    kwargs...,
 ) where {T}
-    μ0s, Σ0s = batch_calc_initial(model.dyn, extra, algo.batch_size)
-    return (μs=μ0s, Σs=Σ0s)
+    μ0s, Σ0s = batch_calc_initial(model.dyn, algo.batch_size; kwargs...)
+    return BatchGaussianDistribution(μ0s, Σ0s)
 end
 
 function predict(
+    rng::AbstractRNG,
     model::LinearGaussianStateSpaceModel{T},
     algo::BatchKalmanFilter,
     step::Integer,
-    state::@NamedTuple{μs::A1, Σs::A2},
-    extra,
-) where {T,A1<:CuArray,A2<:CuArray}
+    state::BatchGaussianDistribution;
+    kwargs...,
+) where {T}
     μs, Σs = state.μs, state.Σs
-    As, bs, Qs = batch_calc_params(model.dyn, step, extra, algo.batch_size)
+    As, bs, Qs = batch_calc_params(model.dyn, step, algo.batch_size; kwargs...)
     μ̂s = NNlib.batched_vec(As, μs) .+ bs
     Σ̂s = NNlib.batched_mul(NNlib.batched_mul(As, Σs), NNlib.batched_transpose(As)) .+ Qs
-    return (μs=μ̂s, Σs=Σ̂s)
+    return BatchGaussianDistribution(μ̂s, Σ̂s)
 end
 
 function invert_innovation(S)
@@ -160,12 +140,12 @@ function update(
     model::LinearGaussianStateSpaceModel{T},
     algo::BatchKalmanFilter,
     step::Integer,
-    state::@NamedTuple{μs::A1, Σs::A2},
-    obs::Vector{T},
-    extra,
-) where {T,A1<:CuArray,A2<:CuArray}
+    state::BatchGaussianDistribution,
+    obs::Vector{T};
+    kwargs...,
+) where {T}
     μs, Σs = state.μs, state.Σs
-    Hs, cs, Rs = batch_calc_params(model.obs, step, extra, algo.batch_size)
+    Hs, cs, Rs = batch_calc_params(model.obs, step, algo.batch_size; kwargs...)
 
     m = NNlib.batched_vec(Hs, μs) .+ cs
     y_res = cu(obs) .- m
@@ -191,18 +171,18 @@ function update(
     # HACK: only errors seems to be from numerical stability so will just overwrite
     log_likes[isnan.(log_likes)] .= -Inf
 
-    return (μs=μ_filt, Σs=Σ_filt), dropdims(log_likes; dims=1)
+    return BatchGaussianDistribution(μ_filt, Σ_filt), dropdims(log_likes; dims=1)
 end
 
-function step(
-    model::LinearGaussianStateSpaceModel{T},
-    filter::BatchKalmanFilter,
-    step::Integer,
-    state::@NamedTuple{μs::A1, Σs::A2},
-    obs::Vector{T},
-    extra,
-) where {T,A1<:CuArray,A2<:CuArray}
-    state = predict(model, filter, step, state, extra)
-    state, lls = update(model, filter, step, state, obs, extra)
-    return state, lls
-end
+# function step(
+#     model::LinearGaussianStateSpaceModel{T},
+#     filter::BatchKalmanFilter,
+#     step::Integer,
+#     state::BatchGaussianDistribution,
+#     obs::Vector{T};
+#     kwargs...,
+# ) where {T}
+#     state = predict(model, filter, step, state, extra)
+#     state, lls = update(model, filter, step, state, obs; kwargs...)
+#     return state, lls
+# end
