@@ -40,7 +40,7 @@ function predict(
     states.proposed, states.ancestors = resample(rng, filter.resampler, states.filtered)
     states.proposed.particles = map(
         x -> SSMProblems.simulate(rng, model.dyn, step, x; kwargs...),
-        states.proposed.particles,
+        collect(states.proposed)
     )
 
     return update_ref!(states, ref_state, step)
@@ -56,15 +56,11 @@ function update(
 ) where {T}
     log_increments = map(
         x -> SSMProblems.logdensity(model.obs, step, x, observation; kwargs...),
-        collect(states.proposed.particles),
+        collect(states.proposed),
     )
 
     states.filtered.log_weights = states.proposed.log_weights + log_increments
     states.filtered.particles = states.proposed.particles
 
-    step_ll = (
-        logsumexp(states.filtered.log_weights) - logsumexp(states.proposed.log_weights)
-    )
-
-    return states, step_ll
+    return states, logmarginal(states)
 end

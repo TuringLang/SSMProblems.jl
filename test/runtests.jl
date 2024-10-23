@@ -255,8 +255,8 @@ end
     log_ws = states.filtered.log_weights
 
     # Compare log-likelihoods
-    println("Kalman filter log-likelihood:", kf_ll)
-    println("RBPF log-likelihood:", ll)
+    println("KF log-likelihood:\t", kf_ll)
+    println("RBPF log-likelihood:\t", ll)
 
     weights = Weights(softmax(log_ws))
 

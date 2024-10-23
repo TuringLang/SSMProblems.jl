@@ -41,6 +41,28 @@ function initialise(
     return ParticleContainer(particles, log_ws)
 end
 
+function marginal_predict(
+    rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, t::Integer, state; kwargs...
+)
+    proposed_x = simulate(rng, model.outer_dyn, t, state.x; kwargs...)
+    proposed_z = predict(
+        rng, model.inner_model, algo.inner_algo, t, state.z;
+        prev_outer=state.x, new_outer=proposed_x, kwargs...
+    )
+
+    return RaoBlackwellisedContainer(proposed_x, proposed_z)
+end
+
+function marginal_update(
+    model::HierarchicalSSM, algo::RBPF, t::Integer, state, obs; kwargs...
+)
+    filtered_z, log_increment = update(
+        model.inner_model, algo.inner_algo, t, state.z, obs; new_outer=state.x, kwargs...
+    )
+
+    return RaoBlackwellisedContainer(state.x, filtered_z), log_increment
+end
+
 function predict(
     rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, t::Integer, states; kwargs...
 )
@@ -55,21 +77,10 @@ function predict(
     println("Mean before: $mean_before")
     println("Mean after: $mean_after")
 
-    for i in 1:(algo.N)
-        prev_x = states.proposed.particles[i].x
-        states.proposed[i].x = simulate(rng, model.outer_dyn, t, prev_x; kwargs...)
-
-        states.proposed.particles[i].z = predict(
-            rng,
-            model.inner_model,
-            algo.inner_algo,
-            t,
-            states.proposed.particles[i].z;
-            prev_outer=prev_x,
-            new_outer=states.proposed.particles[i].x,
-            kwargs...,
-        )
-    end
+    states.proposed.particles = map(
+        x -> marginal_predict(rng, model, algo, t, x; kwargs...),
+        states.filtered[states.ancestors]
+    )
 
     return states
 end
@@ -77,8 +88,9 @@ end
 function update(
     model::HierarchicalSSM{T}, algo::RBPF, t::Integer, states, obs; kwargs...
 ) where {T}
+    log_increments = similar(states.filtered.log_weights)
     for i in 1:(algo.N)
-        states.filtered.particles[i].z, inner_ll = update(
+        states.filtered.particles[i].z, log_increments[i] = update(
             model.inner_model,
             algo.inner_algo,
             t,
@@ -88,15 +100,36 @@ function update(
             kwargs...,
         )
 
-        states.filtered.log_weights[i] = states.proposed.log_weights[i] + inner_ll
         states.filtered.particles[i].x = states.proposed.particles[i].x
     end
 
-    step_ll = (
-        logsumexp(states.filtered.log_weights) - logsumexp(states.proposed.log_weights)
-    )
+    ## TODO: make this also work...
+    # result = map(
+    #     x -> marginal_update(model, algo, t, x, obs; kwargs...),
+    #     collect(states.proposed)
+    # )
 
-    return states, step_ll
+    states.filtered.log_weights = states.proposed.log_weights + log_increments
+
+    return states, logmarginal(states)
+end
+
+function resample2(
+    rng::AbstractRNG, resampler::ESSResampler, state::ParticleState{T,WT}
+) where {T,WT<:Real}
+    n = length(state)
+    weights = StatsBase.weights(state)
+    ess = inv(sum(abs2, weights))
+    print("ESS: $ess")
+
+    if resampler.threshold * n ≥ ess
+        println(" (resampling)")
+        reset_weights!(state)
+        return sample_ancestors(rng, resampler.resampler, weights)
+    else
+        println(" (not resampling)")
+        return 1:n
+    end
 end
 
 # function filter(
