@@ -75,6 +75,7 @@ function filter(
     callback=nothing,
     kwargs...,
 )
+    println("1")
     states = initialise(rng, model, alg; kwargs...)
     log_evidence = zero(eltype(model))
 
@@ -95,6 +96,7 @@ function filter(
     observations::AbstractVector;
     kwargs...,
 )
+    println("2")
     return filter(default_rng(), model, alg, observations; kwargs...)
 end
 
