@@ -20,14 +20,16 @@ function RBPF(
     return RBPF(inner_algo, N, ESSResampler(threshold, resampler))
 end
 
-function initialise(rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF; kwargs...)
+function initialise(
+    rng::AbstractRNG, model::HierarchicalSSM{T}, algo::RBPF; kwargs...
+) where {T}
     N = algo.N
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
     # Create containers
     outer_type, inner_type = eltype(outer_dyn), rb_eltype(inner_model)
     particles = Vector{RaoBlackwellisedContainer{outer_type,inner_type}}(undef, N)
-    log_ws = fill(-log(N), N)
+    log_ws = zeros(T, N)
 
     # Initialise containers
     for i in 1:N
@@ -42,19 +44,27 @@ end
 function predict(
     rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, t::Integer, states; kwargs...
 )
+    print("Step $t ")
+    mean_before = sum(
+        getproperty.(states.filtered.particles, :x) .* softmax(states.filtered.log_weights)
+    )
     states.proposed, states.ancestors = resample(rng, algo.resampler, states.filtered)
+    mean_after = sum(
+        getproperty.(states.proposed.particles, :x) .* softmax(states.proposed.log_weights)
+    )
+    println("Mean before: $mean_before")
+    println("Mean after: $mean_after")
 
     for i in 1:(algo.N)
         prev_x = states.proposed.particles[i].x
         states.proposed[i].x = simulate(rng, model.outer_dyn, t, prev_x; kwargs...)
 
-        prev_z = states.proposed.particles[i].z
         states.proposed.particles[i].z = predict(
             rng,
             model.inner_model,
             algo.inner_algo,
             t,
-            prev_z;
+            states.proposed.particles[i].z;
             prev_outer=prev_x,
             new_outer=states.proposed.particles[i].x,
             kwargs...,
@@ -67,7 +77,6 @@ end
 function update(
     model::HierarchicalSSM{T}, algo::RBPF, t::Integer, states, obs; kwargs...
 ) where {T}
-    inner_lls = Vector{T}(undef, algo.N)
     for i in 1:(algo.N)
         states.filtered.particles[i].z, inner_ll = update(
             model.inner_model,
@@ -78,13 +87,16 @@ function update(
             new_outer=states.proposed.particles[i].x,
             kwargs...,
         )
-        inner_lls[i] = inner_ll
 
+        states.filtered.log_weights[i] = states.proposed.log_weights[i] + inner_ll
         states.filtered.particles[i].x = states.proposed.particles[i].x
     end
 
-    states.filtered.log_weights = states.proposed.log_weights .+ inner_lls
-    return states, logsumexp(inner_lls) - log(algo.N)
+    step_ll = (
+        logsumexp(states.filtered.log_weights) - logsumexp(states.proposed.log_weights)
+    )
+
+    return states, step_ll
 end
 
 # function filter(
@@ -148,13 +160,15 @@ function searchsorted!(ws_cdf, us, idxs)
     end
 end
 
-function initialise(rng::AbstractRNG, model::HierarchicalSSM, algo::BatchRBPF; kwargs...)
+function initialise(
+    rng::AbstractRNG, model::HierarchicalSSM{T}, algo::BatchRBPF; kwargs...
+) where {T}
     N = algo.n_particles
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
     xs = batch_simulate(outer_dyn, N, kwargs...)
     zs = initialise(inner_model, algo.inner_algo; new_outer=xs, kwargs...)
-    log_ws = CUDA.fill(convert(Float32, -log(N)), N)
+    log_ws = CUDA.zeros(T, N)
 
     return RaoBlackwellisedParticleContainer(xs, zs, log_ws)
 end
@@ -249,5 +263,8 @@ function update(
     states.filtered.x_particles = states.proposed.x_particles
     states.filtered.log_weights = states.proposed.log_weights .+ inner_lls
 
-    return states, logsumexp(inner_lls) - log(N)
+    step_ll = (
+        logsumexp(states.filtered.log_weights) - logsumexp(states.proposed.log_weights)
+    )
+    return states, step_ll
 end

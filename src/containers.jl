@@ -55,7 +55,7 @@ mutable struct RaoBlackwellisedParticleContainer{T,M<:CUDA.AbstractMemory,ZT}
             x_particles, z_particles, log_weights
         )
         prop_particles = RaoBlackwellisedParticleState(
-            similar(x_particles), z_particles, zero(log_weights)
+            similar(x_particles), z_particles, CUDA.zeros(T, size(x_particles, 2))
         )
         ancestors = CuArray(1:size(x_particles, 2))
         return new{T,M,ZT}(init_particles, prop_particles, ancestors)
@@ -106,7 +106,7 @@ Base.@propagate_inbounds Base.getindex(state::ParticleState, i) = state.particle
 # Base.@propagate_inbounds Base.getindex(state::ParticleState, i::Vector{Int}) = state.particles[i]
 
 function reset_weights!(state::ParticleState{T,WT}) where {T,WT<:Real}
-    fill!(state.log_weights, -log(WT(length(state.particles))))
+    fill!(state.log_weights, zero(WT))
     return state.log_weights
 end
 

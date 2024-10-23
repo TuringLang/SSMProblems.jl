@@ -102,12 +102,13 @@ end
     model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
     _, _, data = sample(rng, model, 20)
 
-    bf = BF(2^10; threshold=0.8)
+    bf = BF(2^12; threshold=0.8)
     _, llbf = GeneralisedFilters.filter(rng, model, bf, data)
     _, llkf = GeneralisedFilters.filter(rng, model, KF(), data)
 
     # since this is log valued, we can up the tolerance
-    @test llkf ≈ llbf atol = 2
+    println(llkf - llbf)
+    @test llkf ≈ llbf atol = 0.1
 end
 
 @testitem "Forward algorithm test" begin
@@ -215,7 +216,7 @@ end
     H = [zeros(2, 2) rand(rng, 2, 2)]
     c = rand(rng, 2)
     R = rand(rng, 2, 2)
-    R = R * R' / 3.0  # make R positive definite
+    R = R * R' / 10.0  # make R positive definite
 
     N_particles = 1000
     T = 20
@@ -240,7 +241,12 @@ end
     obs = GeneralisedFilters.HomogeneousLinearGaussianObservationProcess(H[:, 3:4], c, R)
     hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
 
-    rbpf = RBPF(KalmanFilter(), N_particles; threshold=1.0)
+    rbpf = RBPF(
+        KalmanFilter(),
+        N_particles;
+        threshold=1.0,
+        resampler=GeneralisedFilters.Multinomial(),
+    )
     states, ll = GeneralisedFilters.filter(rng, hier_model, rbpf, observations)
 
     # Extract final filtered states
@@ -360,7 +366,7 @@ end
     R = rand(rng, D_obs, D_obs)
     R = R * R' / 3.0  # make R positive definite
 
-    N_particles = 1000
+    N_particles = 100000
     T = 10
 
     observations = [rand(rng, D_obs) for _ in 1:T]

@@ -23,7 +23,7 @@ function initialise(
     kwargs...,
 ) where {T}
     initial_states = map(x -> SSMProblems.simulate(rng, model.dyn; kwargs...), 1:(filter.N))
-    initial_weights = fill(-log(T(filter.N)), filter.N)
+    initial_weights = zeros(T, filter.N)
 
     return update_ref!(ParticleContainer(initial_states, initial_weights), ref_state)
 end
@@ -62,5 +62,9 @@ function update(
     states.filtered.log_weights = states.proposed.log_weights + log_increments
     states.filtered.particles = states.proposed.particles
 
-    return (states, logsumexp(log_increments) - log(T(filter.N)))
+    step_ll = (
+        logsumexp(states.filtered.log_weights) - logsumexp(states.proposed.log_weights)
+    )
+
+    return states, step_ll
 end
