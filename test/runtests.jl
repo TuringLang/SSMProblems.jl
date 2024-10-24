@@ -56,8 +56,6 @@ using TestItemRunner
     μ_X1 = μ_Z[I_x] + Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ (y - μ_Z[I_y]))
     Σ_X1 = Σ_Z[I_x, I_x] - Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ Σ_Z[I_y, I_x])
 
-    println(states)
-
     @test states.μ ≈ μ_X1
     @test states.Σ ≈ Σ_X1
 
@@ -74,6 +72,7 @@ end
     using StableRNGs
     using PDMats
     using LinearAlgebra
+    using LogExpFunctions: softmax
     using Random: randexp
 
     T = Float32
@@ -103,11 +102,16 @@ end
     _, _, data = sample(rng, model, 20)
 
     bf = BF(2^12; threshold=0.8)
-    _, llbf = GeneralisedFilters.filter(rng, model, bf, data)
-    _, llkf = GeneralisedFilters.filter(rng, model, KF(), data)
+    bf_state, llbf = GeneralisedFilters.filter(rng, model, bf, data)
+    kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), data)
+
+    xs = bf_state.filtered.particles
+    ws = softmax(bf_state.filtered.log_weights)
+
+    # Compare filtered states
+    @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
 
     # since this is log valued, we can up the tolerance
-    println(llkf - llbf)
     @test llkf ≈ llbf atol = 0.1
 end
 
@@ -255,14 +259,19 @@ end
     log_ws = states.filtered.log_weights
 
     # Compare log-likelihoods
-    println("KF log-likelihood:\t", kf_ll)
-    println("RBPF log-likelihood:\t", ll)
+    # println("KF log-likelihood:\t", kf_ll)
+    # println("RBPF log-likelihood:\t", ll)
+
+    @test kf_ll ≈ ll rtol = 1e-2
 
     weights = Weights(softmax(log_ws))
 
-    println("ESS: ", 1 / sum(weights .^ 2))
-    println("Weighted mean:", sum(xs .* weights))
-    println("Kalman filter mean:", kf_states.μ[1:2])
+    # println("ESS: ", 1 / sum(weights .^ 2))
+    # println("Weighted mean:", sum(xs .* weights))
+    # println("Kalman filter mean:", kf_states.μ[1:2])
+
+    # Higher tolerance for outer state since variance is higher
+    @test first(kf_states.μ) ≈ sum(first.(xs) .* weights) rtol = 1e-1
 
     # Resample outer states
     # resampled_xs = sample(rng, xs, weights, N_particles)
@@ -272,8 +281,10 @@ end
     # )
     # @test pvalue(test) > 0.05
 
-    println("Weighted mean:", sum(getproperty.(zs, :μ) .* weights))
-    println("Kalman filter mean:", kf_states.μ[3:4])
+    # println("Weighted mean:", sum(getproperty.(zs, :μ) .* weights))
+    # println("Kalman filter mean:", kf_states.μ[3:4])
+
+    @test last(kf_states.μ) ≈ sum(last.(getproperty.(zs, :μ)) .* weights) rtol = 1e-2
 
     # Resample inner states and demarginalise
     # resampled_zs = sample(rng, zs, weights, N_particles)

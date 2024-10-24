@@ -46,8 +46,14 @@ function marginal_predict(
 )
     proposed_x = simulate(rng, model.outer_dyn, t, state.x; kwargs...)
     proposed_z = predict(
-        rng, model.inner_model, algo.inner_algo, t, state.z;
-        prev_outer=state.x, new_outer=proposed_x, kwargs...
+        rng,
+        model.inner_model,
+        algo.inner_algo,
+        t,
+        state.z;
+        prev_outer=state.x,
+        new_outer=proposed_x,
+        kwargs...,
     )
 
     return RaoBlackwellisedContainer(proposed_x, proposed_z)
@@ -66,20 +72,11 @@ end
 function predict(
     rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, t::Integer, states; kwargs...
 )
-    print("Step $t ")
-    mean_before = sum(
-        getproperty.(states.filtered.particles, :x) .* softmax(states.filtered.log_weights)
-    )
     states.proposed, states.ancestors = resample(rng, algo.resampler, states.filtered)
-    mean_after = sum(
-        getproperty.(states.proposed.particles, :x) .* softmax(states.proposed.log_weights)
-    )
-    println("Mean before: $mean_before")
-    println("Mean after: $mean_after")
 
     states.proposed.particles = map(
         x -> marginal_predict(rng, model, algo, t, x; kwargs...),
-        states.filtered[states.ancestors]
+        states.filtered[states.ancestors],
     )
 
     return states
@@ -113,33 +110,6 @@ function update(
 
     return states, logmarginal(states)
 end
-
-# function filter(
-#     rng::AbstractRNG,
-#     model::HierarchicalSSM,
-#     algo::RBPF,
-#     observations::AbstractVector,
-#     extra0,
-#     extras::AbstractVector,
-# )
-#     state = initialise(rng, model, algo, extra0)
-#     ll = 0.0
-#     for (i, obs) in enumerate(observations)
-#         state, step_ll = step(rng, model, algo, i, state, obs, extras[i])
-#         ll += step_ll
-#     end
-#     return state, ll
-# end
-
-# function filter(
-#     model::HierarchicalSSM,
-#     algo::RBPF,
-#     observations::AbstractVector,
-#     extra,
-#     extras::AbstractVector,
-# )
-#     return filter(default_rng(), model, algo, observations, extra, extras)
-# end
 
 #################################
 #### GPU-ACCELERATED VERSION ####
@@ -188,47 +158,8 @@ function initialise(
     return RaoBlackwellisedParticleContainer(xs, zs, log_ws)
 end
 
-resample(states::AbstractMatrix, idxs) = states[:, idxs]
-# TODO: write a proper `resample` function (should probably be in Lévy SSM package)
-# Note for now though that since Lévy SSM is independent, resampling isn't needed
-resample(states, idxs) = states
-
-# function step(model::HierarchicalSSM, algo::BatchRBPF, t::Integer, state, obs; kwargs...)
-#     xs, zs, log_ws = state
-#     N = algo.n_particles
-#     outer_dyn, inner_model = model.outer_dyn, model.inner_model
-
-#     # Optional resampling
-#     weights = softmax(log_ws)
-#     ess = 1 / sum(weights .^ 2)
-#     if ess < algo.resample_threshold * N
-#         cdf = cumsum(weights)
-#         us = CUDA.rand(N)
-#         idxs = CuArray{Int32}(undef, N)
-#         @cuda threads = 256 blocks = 4096 searchsorted!(cdf, us, idxs)
-#         # TODO: generalise this for non-`Vector` containers
-#         xs = resample(xs, idxs)
-#         # TODO: generalise this for other inner types
-#         μs = zs.μs[:, idxs]
-#         Σs = zs.Σs[:, :, idxs]
-#         zs = (μs=μs, Σs=Σs)
-#         log_ws .= convert(Float32, -log(N))
-#     end
-
-#     new_xs = batch_simulate(outer_dyn, t, xs, N, kwargs...)
-#     new_extras = (prev_outer=xs, new_outer=new_xs)
-#     inner_extra = isnothing(extra) ? new_extras : (; extra..., new_extras...)
-
-#     zs, inner_lls = step(inner_model, algo.inner_algo, t, zs, obs, inner_extra)
-
-#     log_ws += inner_lls
-
-#     ll = logsumexp(inner_lls) - log(N)
-#     return (new_xs, zs, log_ws), ll
-# end
-
-# Rewrite using `predict`/`update` and following RBPF format
-# TODO: add RNG and ref_state
+# TODO: use RNG
+# TODO: include ref_state
 function predict(
     rng::AbstractRNG,
     model::HierarchicalSSM,

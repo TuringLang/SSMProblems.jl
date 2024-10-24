@@ -54,10 +54,8 @@ function resample(
     @debug "ESS: $ess"
 
     if cond_resampler.threshold * n ≥ ess
-        println("Resampling")
         return resample(rng, cond_resampler.resampler, state)
     else
-        println("Not resampling")
         return deepcopy(state), collect(1:n)
     end
 end

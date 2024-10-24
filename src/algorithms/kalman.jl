@@ -173,16 +173,3 @@ function update(
 
     return BatchGaussianDistribution(μ_filt, Σ_filt), dropdims(log_likes; dims=1)
 end
-
-# function step(
-#     model::LinearGaussianStateSpaceModel{T},
-#     filter::BatchKalmanFilter,
-#     step::Integer,
-#     state::BatchGaussianDistribution,
-#     obs::Vector{T};
-#     kwargs...,
-# ) where {T}
-#     state = predict(model, filter, step, state, extra)
-#     state, lls = update(model, filter, step, state, obs; kwargs...)
-#     return state, lls
-# end
