@@ -152,81 +152,83 @@ function batch_calc_params(
     )
 end
 
-function batch_simulate(dyn::HomogeneousLinearGaussianLatentDynamics, N::Integer; kwargs...)
+function batch_simulate(
+    dyn::HomogeneousLinearGaussianLatentDynamics{T}, N::Integer; kwargs...
+) where {T}
     μ0, Σ0 = GeneralisedFilters.calc_initial(dyn; kwargs...)
     D = length(μ0)
     L = cholesky(Σ0).L
     # Ls = repeat(cu(reshape(Σ0, (size(Σ0)..., 1))), 1, 1, N)
-    Ls = CuArray{Float32}(undef, size(Σ0)..., N)
+    Ls = CuArray{T}(undef, size(Σ0)..., N)
     Ls[:, :, :] .= cu(Σ0)
     return cu(μ0) .+ NNlib.batched_vec(Ls, CUDA.randn(D, N))
 end
 
 function batch_simulate(
-    dyn::GeneralisedFilters.HomogeneousLinearGaussianLatentDynamics,
+    dyn::GeneralisedFilters.HomogeneousLinearGaussianLatentDynamics{T},
     step::Integer,
     prev_state,
     N::Integer;
     kwargs...,
-)
+) where {T}
     A, b, Q = GeneralisedFilters.calc_params(dyn, step; kwargs...)
     D = length(b)
     L = cholesky(Q).L
-    Ls = CuArray{Float32}(undef, size(Q)..., N)
+    Ls = CuArray{T}(undef, size(Q)..., N)
     Ls[:, :, :] .= cu(Q)
-    As = CuArray{Float32}(undef, size(A)..., N)
+    As = CuArray{T}(undef, size(A)..., N)
     As[:, :, :] .= cu(A)
     return (NNlib.batched_vec(As, prev_state) .+ cu(b)) +
-           NNlib.batched_vec(Ls, CUDA.randn(D, N))
+           NNlib.batched_vec(Ls, CUDA.randn(T, D, N))
 end
 
 function batch_calc_μ0s(
-    dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, N::Integer; kwargs...
-)
-    μ0 = CuArray{Float32}(undef, length(dyn.μ0), N)
+    dyn::HomogeneousLinearGaussianLatentDynamics{T}, ::Integer, N::Integer; kwargs...
+) where {T}
+    μ0 = CuArray{T}(undef, length(dyn.μ0), N)
     return μ0[:, :] .= cu(dyn.μ0)
 end
 function batch_calc_Σ0s(
-    dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, N::Integer; kwargs...
-)
-    Σ0 = CuArray{Float32}(undef, size(dyn.Σ0)..., N)
+    dyn::HomogeneousLinearGaussianLatentDynamics{T}, ::Integer, N::Integer; kwargs...
+) where {T}
+    Σ0 = CuArray{T}(undef, size(dyn.Σ0)..., N)
     return Σ0[:, :, :] .= cu(dyn.Σ0)
 end
 function batch_calc_As(
-    dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, N::Integer; kwargs...
-)
-    A = CuArray{Float32}(undef, size(dyn.A)..., N)
+    dyn::HomogeneousLinearGaussianLatentDynamics{T}, ::Integer, N::Integer; kwargs...
+) where {T}
+    A = CuArray{T}(undef, size(dyn.A)..., N)
     return A[:, :, :] .= cu(dyn.A)
 end
 function batch_calc_bs(
-    dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, N::Integer; kwargs...
-)
-    b = CuArray{Float32}(undef, size(dyn.b)..., N)
+    dyn::HomogeneousLinearGaussianLatentDynamics{T}, ::Integer, N::Integer; kwargs...
+) where {T}
+    b = CuArray{T}(undef, size(dyn.b)..., N)
     return b[:, :] .= cu(dyn.b)
 end
 function batch_calc_Qs(
-    dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer, N::Integer; kwargs...
-)
-    Q = CuArray{Float32}(undef, size(dyn.Q)..., N)
+    dyn::HomogeneousLinearGaussianLatentDynamics{T}, ::Integer, N::Integer; kwargs...
+) where {T}
+    Q = CuArray{T}(undef, size(dyn.Q)..., N)
     return Q[:, :, :] .= cu(dyn.Q)
 end
 
 function batch_calc_Hs(
-    obs::HomogeneousLinearGaussianObservationProcess, ::Integer, N::Integer; kwargs...
-)
-    H = CuArray{Float32}(undef, size(obs.H)..., N)
+    obs::HomogeneousLinearGaussianObservationProcess{T}, ::Integer, N::Integer; kwargs...
+) where {T}
+    H = CuArray{T}(undef, size(obs.H)..., N)
     return H[:, :, :] .= cu(obs.H)
 end
 function batch_calc_cs(
-    obs::HomogeneousLinearGaussianObservationProcess, ::Integer, N::Integer; kwargs...
-)
-    c = CuArray{Float32}(undef, size(obs.c)..., N)
+    obs::HomogeneousLinearGaussianObservationProcess{T}, ::Integer, N::Integer; kwargs...
+) where {T}
+    c = CuArray{T}(undef, size(obs.c)..., N)
     return c[:, :] .= cu(obs.c)
 end
 
 function batch_calc_Rs(
-    obs::HomogeneousLinearGaussianObservationProcess, ::Integer, N::Integer; kwargs...
-)
-    R = CuArray{Float32}(undef, size(obs.R)..., N)
+    obs::HomogeneousLinearGaussianObservationProcess{T}, ::Integer, N::Integer; kwargs...
+) where {T}
+    R = CuArray{T}(undef, size(obs.R)..., N)
     return R[:, :, :] .= cu(obs.R)
 end

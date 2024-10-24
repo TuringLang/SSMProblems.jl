@@ -121,11 +121,11 @@ function _invert_innovation(S)
     # LU decomposition to compute S^{-1}
     # TODO: Replace with custom fast Cholesky kernel
     d_ipiv, _, d_S = CUDA.CUBLAS.getrf_strided_batched(S, true)
-    S_inv = CuArray{Float32}(undef, size(S))
+    S_inv = CUDA.similar(S)
     # TODO: This fails when D_obs > D_inner since S is not invertible
     CUDA.CUBLAS.getri_strided_batched!(d_S, S_inv, d_ipiv)
 
-    diags = CuArray{Float32}(undef, size(S, 1), size(S, 3))
+    diags = CuArray{eltype(S)}(undef, size(S, 1), size(S, 3))
     for i in 1:size(S, 1)
         diags[i, :] .= d_S[i, i, :]
     end

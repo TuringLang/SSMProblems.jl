@@ -72,7 +72,6 @@ function resample(
     weights = StatsBase.weights(state)
     ess = inv(sum(abs2, weights))
     @debug "ESS: $ess"
-    println(ess)
 
     if cond_resampler.threshold * n ≥ ess
         return resample(rng, cond_resampler.resampler, state)

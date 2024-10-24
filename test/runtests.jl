@@ -319,37 +319,37 @@ end
     function GeneralisedFilters.batch_calc_μ0s(
         dyn::InnerDynamics{T}, N; kwargs...
     ) where {T}
-        μ0s = CuArray{Float32}(undef, length(dyn.μ0), N)
+        μ0s = CuArray{T}(undef, length(dyn.μ0), N)
         return μ0s[:, :] .= cu(dyn.μ0)
     end
 
     function GeneralisedFilters.batch_calc_Σ0s(
         dyn::InnerDynamics{T}, N::Integer; kwargs...
     ) where {T}
-        Σ0s = CuArray{Float32}(undef, size(dyn.Σ0)..., N)
+        Σ0s = CuArray{T}(undef, size(dyn.Σ0)..., N)
         return Σ0s[:, :, :] .= cu(dyn.Σ0)
     end
 
     function GeneralisedFilters.batch_calc_As(
-        dyn::InnerDynamics, ::Integer, N::Integer; kwargs...
-    )
-        As = CuArray{Float32}(undef, size(dyn.A)..., N)
+        dyn::InnerDynamics{T}, ::Integer, N::Integer; kwargs...
+    ) where {T}
+        As = CuArray{T}(undef, size(dyn.A)..., N)
         As[:, :, :] .= cu(dyn.A)
         return As
     end
 
     function GeneralisedFilters.batch_calc_bs(
-        dyn::InnerDynamics, ::Integer, N::Integer; prev_outer, kwargs...
-    )
-        Cs = CuArray{Float32}(undef, size(dyn.C)..., N)
+        dyn::InnerDynamics{T}, ::Integer, N::Integer; prev_outer, kwargs...
+    ) where {T}
+        Cs = CuArray{T}(undef, size(dyn.C)..., N)
         Cs[:, :, :] .= cu(dyn.C)
         return NNlib.batched_vec(Cs, prev_outer) .+ cu(dyn.b)
     end
 
     function GeneralisedFilters.batch_calc_Qs(
-        dyn::InnerDynamics, ::Integer, N::Integer; kwargs...
-    )
-        Q = CuArray{Float32}(undef, size(dyn.Q)..., N)
+        dyn::InnerDynamics{T}, ::Integer, N::Integer; kwargs...
+    ) where {T}
+        Q = CuArray{T}(undef, size(dyn.Q)..., N)
         return Q[:, :, :] .= cu(dyn.Q)
     end
 
