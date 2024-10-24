@@ -161,7 +161,7 @@ function batch_simulate(
     # Ls = repeat(cu(reshape(Σ0, (size(Σ0)..., 1))), 1, 1, N)
     Ls = CuArray{T}(undef, size(Σ0)..., N)
     Ls[:, :, :] .= cu(Σ0)
-    return cu(μ0) .+ NNlib.batched_vec(Ls, CUDA.randn(D, N))
+    return cu(μ0) .+ NNlib.batched_vec(Ls, CUDA.randn(T, D, N))
 end
 
 function batch_simulate(

@@ -141,7 +141,7 @@ function update(
     algo::BatchKalmanFilter,
     step::Integer,
     state::BatchGaussianDistribution,
-    obs::Vector{T};
+    obs;
     kwargs...,
 ) where {T}
     μs, Σs = state.μs, state.Σs

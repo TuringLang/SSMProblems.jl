@@ -196,7 +196,6 @@ function update(
     obs;
     kwargs...,
 )
-    N = filter.n_particles
     states.filtered.z_particles, inner_lls = update(
         model.inner_model,
         filter.inner_algo,
@@ -206,7 +205,7 @@ function update(
         new_outer=states.proposed.x_particles,
         kwargs...,
     )
-    states.filtered.x_particles = states.proposed.x_particles
+    states.filtered.x_particles = deepcopy(states.proposed.x_particles)
     states.filtered.log_weights = states.proposed.log_weights .+ inner_lls
 
     step_ll = (

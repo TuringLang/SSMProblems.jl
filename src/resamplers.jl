@@ -11,7 +11,7 @@ function resample(
     weights = StatsBase.weights(states)
     idxs = sample_ancestors(rng, resampler, weights)
 
-    new_state = ParticleState(states.particles[idxs], zeros(WT, length(states)))
+    new_state = ParticleState(deepcopy(states.particles[idxs]), zeros(WT, length(states)))
 
     return new_state, idxs
 end
@@ -26,7 +26,9 @@ function resample(
     idxs = sample_ancestors(rng, resampler, weights)
 
     new_state = RaoBlackwellisedParticleState(
-        states.x_particles[:, idxs], states.z_particles[idxs], CUDA.zeros(T, length(states))
+        deepcopy(states.x_particles[:, idxs]),
+        deepcopy(states.z_particles[idxs]),
+        CUDA.zeros(T, length(states)),
     )
 
     return new_state, idxs
@@ -74,8 +76,10 @@ function resample(
     @debug "ESS: $ess"
 
     if cond_resampler.threshold * n ≥ ess
+        println("resampling")
         return resample(rng, cond_resampler.resampler, state)
     else
+        println("not resampling")
         return deepcopy(state), collect(1:n)
     end
 end

@@ -55,7 +55,7 @@ mutable struct RaoBlackwellisedParticleContainer{T,M<:CUDA.AbstractMemory,ZT}
             x_particles, z_particles, log_weights
         )
         prop_particles = RaoBlackwellisedParticleState(
-            similar(x_particles), z_particles, CUDA.zeros(T, size(x_particles, 2))
+            similar(x_particles), deepcopy(z_particles), CUDA.zeros(T, size(x_particles, 2))
         )
         ancestors = CuArray(1:size(x_particles, 2))
         return new{T,M,ZT}(init_particles, prop_particles, ancestors)
