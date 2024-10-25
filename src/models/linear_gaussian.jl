@@ -5,6 +5,7 @@ export create_homogeneous_linear_gaussian_model
 
 import SSMProblems: distribution
 import Distributions: MvNormal
+import LinearAlgebra: cholesky
 
 abstract type LinearGaussianLatentDynamics{T} <: SSMProblems.LatentDynamics{Vector{T}} end
 
@@ -111,4 +112,123 @@ function create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
         HomogeneousLinearGaussianLatentDynamics(μ0, Σ0, A, b, Q),
         HomogeneousLinearGaussianObservationProcess(H, c, R),
     )
+end
+
+#######################
+#### BATCH METHODS ####
+#######################
+
+function batch_calc_μ0s end
+function batch_calc_Σ0s end
+function batch_calc_As end
+function batch_calc_bs end
+function batch_calc_Qs end
+function batch_calc_Hs end
+function batch_calc_cs end
+function batch_calc_Rs end
+
+# TODO: can we remove batch size argument?
+function batch_calc_initial(dyn::LinearGaussianLatentDynamics, N::Integer; kwargs...)
+    return batch_calc_μ0s(dyn, N; kwargs...), batch_calc_Σ0s(dyn, N; kwargs...)
+end
+
+function batch_calc_params(
+    dyn::LinearGaussianLatentDynamics, step::Integer, N::Integer; kwargs...
+)
+    return (
+        batch_calc_As(dyn, step, N; kwargs...),
+        batch_calc_bs(dyn, step, N; kwargs...),
+        batch_calc_Qs(dyn, step, N; kwargs...),
+    )
+end
+
+function batch_calc_params(
+    obs::LinearGaussianObservationProcess, step::Integer, N::Integer; kwargs...
+)
+    return (
+        batch_calc_Hs(obs, step, N; kwargs...),
+        batch_calc_cs(obs, step, N; kwargs...),
+        batch_calc_Rs(obs, step, N; kwargs...),
+    )
+end
+
+function batch_simulate(
+    dyn::HomogeneousLinearGaussianLatentDynamics{T}, N::Integer; kwargs...
+) where {T}
+    μ0, Σ0 = GeneralisedFilters.calc_initial(dyn; kwargs...)
+    D = length(μ0)
+    L = cholesky(Σ0).L
+    # Ls = repeat(cu(reshape(Σ0, (size(Σ0)..., 1))), 1, 1, N)
+    Ls = CuArray{T}(undef, size(Σ0)..., N)
+    Ls[:, :, :] .= cu(L)
+    return cu(μ0) .+ NNlib.batched_vec(Ls, CUDA.randn(T, D, N))
+end
+
+function batch_simulate(
+    dyn::GeneralisedFilters.HomogeneousLinearGaussianLatentDynamics{T},
+    step::Integer,
+    prev_state,
+    N::Integer;
+    kwargs...,
+) where {T}
+    A, b, Q = GeneralisedFilters.calc_params(dyn, step; kwargs...)
+    D = length(b)
+    L = cholesky(Q).L
+    Ls = CuArray{T}(undef, size(Q)..., N)
+    Ls[:, :, :] .= cu(L)
+    As = CuArray{T}(undef, size(A)..., N)
+    As[:, :, :] .= cu(A)
+    return (NNlib.batched_vec(As, prev_state) .+ cu(b)) +
+           NNlib.batched_vec(Ls, CUDA.randn(T, D, N))
+end
+
+function batch_calc_μ0s(
+    dyn::HomogeneousLinearGaussianLatentDynamics{T}, ::Integer, N::Integer; kwargs...
+) where {T}
+    μ0 = CuArray{T}(undef, length(dyn.μ0), N)
+    return μ0[:, :] .= cu(dyn.μ0)
+end
+function batch_calc_Σ0s(
+    dyn::HomogeneousLinearGaussianLatentDynamics{T}, ::Integer, N::Integer; kwargs...
+) where {T}
+    Σ0 = CuArray{T}(undef, size(dyn.Σ0)..., N)
+    return Σ0[:, :, :] .= cu(dyn.Σ0)
+end
+function batch_calc_As(
+    dyn::HomogeneousLinearGaussianLatentDynamics{T}, ::Integer, N::Integer; kwargs...
+) where {T}
+    A = CuArray{T}(undef, size(dyn.A)..., N)
+    return A[:, :, :] .= cu(dyn.A)
+end
+function batch_calc_bs(
+    dyn::HomogeneousLinearGaussianLatentDynamics{T}, ::Integer, N::Integer; kwargs...
+) where {T}
+    b = CuArray{T}(undef, size(dyn.b)..., N)
+    return b[:, :] .= cu(dyn.b)
+end
+function batch_calc_Qs(
+    dyn::HomogeneousLinearGaussianLatentDynamics{T}, ::Integer, N::Integer; kwargs...
+) where {T}
+    Q = CuArray{T}(undef, size(dyn.Q)..., N)
+    return Q[:, :, :] .= cu(dyn.Q)
+end
+
+function batch_calc_Hs(
+    obs::HomogeneousLinearGaussianObservationProcess{T}, ::Integer, N::Integer; kwargs...
+) where {T}
+    H = CuArray{T}(undef, size(obs.H)..., N)
+    return H[:, :, :] .= cu(obs.H)
+end
+function batch_calc_cs(
+    obs::HomogeneousLinearGaussianObservationProcess{T}, ::Integer, N::Integer; kwargs...
+) where {T}
+    c = CuArray{T}(undef, size(obs.c)..., N)
+    return c[:, :] .= cu(obs.c)
+end
+
+function batch_calc_Rs(
+    obs::HomogeneousLinearGaussianObservationProcess{T}, ::Integer, N::Integer; kwargs...
+) where {T}
+    R = CuArray{T}(undef, size(obs.R)..., N)
+    return R[:, :, :] .= cu(obs.R)
 end

@@ -1,6 +1,8 @@
 using Random
 using Distributions
 
+using AcceleratedKernels: searchsortedfirst
+
 export Multinomial, Systematic, Metropolis, Rejection
 
 abstract type AbstractResampler end
@@ -11,8 +13,24 @@ function resample(
     weights = StatsBase.weights(states)
     idxs = sample_ancestors(rng, resampler, weights)
 
-    new_state = ParticleState(
-        states.particles[idxs], fill(-log(WT(length(states))), length(states))
+    new_state = ParticleState(deepcopy(states.particles[idxs]), zeros(WT, length(states)))
+
+    return new_state, idxs
+end
+
+# TODO: combine this with above definition
+function resample(
+    rng::AbstractRNG,
+    resampler::AbstractResampler,
+    states::RaoBlackwellisedParticleState{T,M,ZT},
+) where {T,M,ZT}
+    weights = StatsBase.weights(states)
+    idxs = sample_ancestors(rng, resampler, weights)
+
+    new_state = RaoBlackwellisedParticleState(
+        deepcopy(states.x_particles[:, idxs]),
+        deepcopy(states.z_particles[idxs]),
+        CUDA.zeros(T, length(states)),
     )
 
     return new_state, idxs
@@ -31,9 +49,10 @@ struct ESSResampler <: AbstractConditionalResampler
 end
 
 function resample(
-    rng::AbstractRNG, cond_resampler::ESSResampler, state::ParticleState{T,WT}
-) where {T,WT<:Real}
+    rng::AbstractRNG, cond_resampler::ESSResampler, state::ParticleState{PT,WT}
+) where {PT,WT}
     n = length(state)
+    # TODO: computing weights twice. Should create a wrapper to avoid this
     weights = StatsBase.weights(state)
     ess = inv(sum(abs2, weights))
     @debug "ESS: $ess"
@@ -41,7 +60,27 @@ function resample(
     if cond_resampler.threshold * n ≥ ess
         return resample(rng, cond_resampler.resampler, state)
     else
-        return state, collect(1:n)
+        return deepcopy(state), collect(1:n)
+    end
+end
+
+# HACK: Likewise this should be removed. Even more so as it's identical, but needed to avoid
+# method ambiguity
+function resample(
+    rng::AbstractRNG,
+    cond_resampler::ESSResampler,
+    state::RaoBlackwellisedParticleState{T,M,ZT},
+) where {T,M,ZT}
+    n = length(state)
+    # TODO: computing weights twice. Should create a wrapper to avoid this
+    weights = StatsBase.weights(state)
+    ess = inv(sum(abs2, weights))
+    @debug "ESS: $ess"
+
+    if cond_resampler.threshold * n ≥ ess
+        return resample(rng, cond_resampler.resampler, state)
+    else
+        return deepcopy(state), collect(1:n)
     end
 end
 
@@ -97,6 +136,17 @@ function sample_ancestors(
     end
 
     return a
+end
+
+# Following Code 5 of Murray et. al (2015)
+function sample_ancestors(
+    rng::AbstractRNG, ::Multinomial, weights::CuVector{WT}, n::Int=length(weights)
+) where {WT}
+    W = cumsum(weights)
+    Wn = CUDA.@allowscalar W[n]
+    us = CUDA.rand(n) * Wn
+    as = searchsortedfirst(W, us)
+    return as
 end
 
 ## SINGLE PRECISION STABLE ALGORITHMS ######################################################

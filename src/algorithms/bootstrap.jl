@@ -15,6 +15,13 @@ end
 """Shorthand for `BootstrapFilter`"""
 const BF = BootstrapFilter
 
+function BootstrapFilter(
+    N::Integer; threshold::Real=1.0, resampler::AbstractResampler=Systematic()
+)
+    conditional_resampler = ESSResampler(threshold, resampler)
+    return BootstrapFilter(N, conditional_resampler)
+end
+
 function initialise(
     rng::AbstractRNG,
     model::StateSpaceModel{T},
@@ -23,7 +30,7 @@ function initialise(
     kwargs...,
 ) where {T}
     initial_states = map(x -> SSMProblems.simulate(rng, model.dyn; kwargs...), 1:(filter.N))
-    initial_weights = fill(-log(T(filter.N)), filter.N)
+    initial_weights = zeros(T, filter.N)
 
     return update_ref!(ParticleContainer(initial_states, initial_weights), ref_state)
 end
@@ -40,7 +47,7 @@ function predict(
     states.proposed, states.ancestors = resample(rng, filter.resampler, states.filtered)
     states.proposed.particles = map(
         x -> SSMProblems.simulate(rng, model.dyn, step, x; kwargs...),
-        states.proposed.particles,
+        collect(states.proposed),
     )
 
     return update_ref!(states, ref_state, step)
@@ -56,11 +63,11 @@ function update(
 ) where {T}
     log_increments = map(
         x -> SSMProblems.logdensity(model.obs, step, x, observation; kwargs...),
-        collect(states.proposed.particles),
+        collect(states.proposed),
     )
 
     states.filtered.log_weights = states.proposed.log_weights + log_increments
     states.filtered.particles = states.proposed.particles
 
-    return (states, logsumexp(log_increments) - log(T(filter.N)))
+    return states, logmarginal(states)
 end

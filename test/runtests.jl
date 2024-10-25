@@ -3,61 +3,74 @@ using TestItemRunner
 
 @run_package_tests
 
+include("batch_kalman_test.jl")
+
 @testitem "Kalman filter test" begin
     using GeneralisedFilters
+    using Distributions
     using LinearAlgebra
     using StableRNGs
 
-    rng = StableRNG(1234)
-    μ0 = rand(rng, 2)
-    Σ0 = rand(rng, 2, 2)
-    Σ0 = Σ0 * Σ0'  # make Σ0 positive definite
-    A = rand(rng, 2, 2)
-    b = rand(rng, 2)
-    Q = rand(rng, 2, 2)
-    Q = Q * Q'  # make Q positive definite
-    H = rand(rng, 2, 2)
-    c = rand(rng, 2)
-    R = rand(rng, 2, 2)
-    R = R * R'  # make R positive definite
+    for Dy in [2, 3, 4]
+        Dx = 3
 
-    model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
+        rng = StableRNG(1234)
+        μ0 = rand(rng, Dx)
+        Σ0 = rand(rng, Dx, Dx)
+        Σ0 = Σ0 * Σ0'  # make Σ0 positive definite
+        A = rand(rng, Dx, Dx)
+        b = rand(rng, Dx)
+        Q = rand(rng, Dx, Dx)
+        Q = Q * Q'  # make Q positive definite
+        H = rand(rng, Dy, Dx)
+        c = rand(rng, Dy)
+        R = rand(rng, Dy, Dy)
+        R = R * R'  # make R positive definite
 
-    observations = [rand(rng, 2)]
+        model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
 
-    kf = KalmanFilter()
+        observations = [rand(rng, Dy)]
 
-    states, _ = GeneralisedFilters.filter(rng, model, kf, observations)
+        kf = KalmanFilter()
 
-    # Let Z = [X0, X1, Y1] be the joint state vector
-    # Write Z = P.Z + ϵ, where ϵ ~ N(μ_ϵ, Σ_ϵ)
-    P = [
-        zeros(2, 6)
-        A zeros(2, 4)
-        zeros(2, 2) H zeros(2, 2)
-    ]
-    μ_ϵ = [μ0; b; c]
-    Σ_ϵ = [
-        Σ0 zeros(2, 4)
-        zeros(2, 2) Q zeros(2, 2)
-        zeros(2, 4) R
-    ]
+        states, ll = GeneralisedFilters.filter(rng, model, kf, observations)
 
-    # Note (I - P)Z = ϵ and solve for Z ~ N(μ_Z, Σ_Z)
-    μ_Z = (I - P) \ μ_ϵ
-    Σ_Z = ((I - P) \ Σ_ϵ) / (I - P)'
+        # Let Z = [X0, X1, Y1] be the joint state vector
+        # Write Z = P.Z + ϵ, where ϵ ~ N(μ_ϵ, Σ_ϵ)
+        P = [
+            zeros(Dx, 2Dx + Dy)
+            A zeros(Dx, Dx + Dy)
+            zeros(Dy, Dx) H zeros(Dy, Dy)
+        ]
+        μ_ϵ = [μ0; b; c]
+        Σ_ϵ = [
+            Σ0 zeros(Dx, Dx + Dy)
+            zeros(Dx, Dx) Q zeros(Dx, Dy)
+            zeros(Dy, 2Dx) R
+        ]
 
-    # Condition on observations using formula for MVN conditional distribution. See: 
-    # https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Conditional_distributions
-    y = only(observations)
-    I_x = 3:4
-    I_y = 5:6
-    μ_X1 = μ_Z[I_x] + Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ (y - μ_Z[I_y]))
-    Σ_X1 = Σ_Z[I_x, I_x] - Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ Σ_Z[I_y, I_x])
+        # Note (I - P)Z = ϵ and solve for Z ~ N(μ_Z, Σ_Z)
+        μ_Z = (I - P) \ μ_ϵ
+        Σ_Z = ((I - P) \ Σ_ϵ) / (I - P)'
 
-    # TODO: test log-likelihood using marginalisation formula
-    @test states.μ ≈ μ_X1
-    @test states.Σ ≈ Σ_X1
+        # Condition on observations using formula for MVN conditional distribution. See: 
+        # https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Conditional_distributions
+        y = only(observations)
+        I_x = (Dx + 1):(2Dx)
+        I_y = (2Dx + 1):(2Dx + Dy)
+        μ_X1 = μ_Z[I_x] + Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ (y - μ_Z[I_y]))
+        Σ_X1 = Σ_Z[I_x, I_x] - Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ Σ_Z[I_y, I_x])
+
+        @test states.μ ≈ μ_X1
+        @test states.Σ ≈ Σ_X1
+
+        # Exact marginal distribution to test log-likelihood
+        μ_Y1 = μ_Z[I_y]
+        Σ_Y1 = Σ_Z[I_y, I_y]
+        LinearAlgebra.hermitianpart!(Σ_Y1)
+        true_ll = logpdf(MvNormal(μ_Y1, Σ_Y1), y)
+        @test ll ≈ true_ll
+    end
 end
 
 @testitem "Bootstrap filter test" begin
@@ -66,6 +79,7 @@ end
     using StableRNGs
     using PDMats
     using LinearAlgebra
+    using LogExpFunctions: softmax
     using Random: randexp
 
     T = Float32
@@ -94,12 +108,18 @@ end
     model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
     _, _, data = sample(rng, model, 20)
 
-    bf = BF(2^10; threshold=0.8)
-    _, llbf = GeneralisedFilters.filter(rng, model, bf, data)
-    _, llkf = GeneralisedFilters.filter(rng, model, KF(), data)
+    bf = BF(2^12; threshold=0.8)
+    bf_state, llbf = GeneralisedFilters.filter(rng, model, bf, data)
+    kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), data)
+
+    xs = bf_state.filtered.particles
+    ws = softmax(bf_state.filtered.log_weights)
+
+    # Compare filtered states
+    @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
 
     # since this is log valued, we can up the tolerance
-    @test llkf ≈ llbf atol = 2
+    @test llkf ≈ llbf atol = 0.1
 end
 
 @testitem "Forward algorithm test" begin
@@ -165,6 +185,10 @@ end
     using StableRNGs
     using StatsBase
 
+    D_outer = 2
+    D_inner = 3
+    D_obs = 2
+
     # Define inner dynamics
     struct InnerDynamics{T} <: LinearGaussianLatentDynamics{T}
         μ0::Vector{T}
@@ -183,36 +207,36 @@ end
     GeneralisedFilters.calc_Q(dyn::InnerDynamics, ::Integer; kwargs...) = dyn.Q
 
     rng = StableRNG(1234)
-    μ0 = rand(rng, 4)
-    Σ0s = [rand(rng, 2, 2) for _ in 1:2]
+    μ0 = rand(rng, D_outer + D_inner)
+    Σ0s = [rand(rng, D_outer, D_outer), rand(rng, D_inner, D_inner)]
     Σ0s = [Σ * Σ' for Σ in Σ0s]  # make Σ0 positive definite
     Σ0 = [
-        Σ0s[1] zeros(2, 2)
-        zeros(2, 2) Σ0s[2]
+        Σ0s[1] zeros(D_outer, D_inner)
+        zeros(D_inner, D_outer) Σ0s[2]
     ]
     A = [
-        rand(rng, 2, 2) zeros(2, 2)
-        rand(rng, 2, 4)
+        rand(rng, D_outer, D_outer) zeros(D_outer, D_inner)
+        rand(rng, D_inner, D_outer + D_inner)
     ]
     # Make mean-reverting
     A /= 3.0
     A[diagind(A)] .= -0.5
-    b = rand(rng, 4)
-    Qs = [rand(rng, 2, 2) for _ in 1:2]
+    b = rand(rng, D_outer + D_inner)
+    Qs = [rand(rng, D_outer, D_outer), rand(rng, D_inner, D_inner)] ./ 10.0
     Qs = [Q * Q' for Q in Qs]  # make Q positive definite
     Q = [
-        Qs[1] zeros(2, 2)
-        zeros(2, 2) Qs[2]
+        Qs[1] zeros(D_outer, D_inner)
+        zeros(D_inner, D_outer) Qs[2]
     ]
-    H = [zeros(2, 2) rand(rng, 2, 2)]
-    c = rand(rng, 2)
-    R = rand(rng, 2, 2)
+    H = [zeros(D_obs, D_outer) rand(rng, D_obs, D_inner)]
+    c = rand(rng, D_obs)
+    R = rand(rng, D_obs, D_obs)
     R = R * R' / 3.0  # make R positive definite
 
     N_particles = 1000
     T = 20
 
-    observations = [rand(rng, 2) for _ in 1:T]
+    observations = [rand(rng, D_obs) for _ in 1:T]
 
     # Kalman filtering
 
@@ -224,15 +248,31 @@ end
     # Rao-Blackwellised particle filtering
 
     outer_dyn = GeneralisedFilters.HomogeneousLinearGaussianLatentDynamics(
-        μ0[1:2], Σ0[1:2, 1:2], A[1:2, 1:2], b[1:2], Qs[1]
+        μ0[1:D_outer],
+        Σ0[1:D_outer, 1:D_outer],
+        A[1:D_outer, 1:D_outer],
+        b[1:D_outer],
+        Qs[1],
     )
     inner_dyn = InnerDynamics(
-        μ0[3:4], Σ0[3:4, 3:4], A[3:4, 3:4], b[3:4], A[3:4, 1:2], Qs[2]
+        μ0[(D_outer + 1):end],
+        Σ0[(D_outer + 1):end, (D_outer + 1):end],
+        A[(D_outer + 1):end, (D_outer + 1):end],
+        b[(D_outer + 1):end],
+        A[(D_outer + 1):end, 1:D_outer],
+        Qs[2],
     )
-    obs = GeneralisedFilters.HomogeneousLinearGaussianObservationProcess(H[:, 3:4], c, R)
+    obs = GeneralisedFilters.HomogeneousLinearGaussianObservationProcess(
+        H[:, (D_outer + 1):end], c, R
+    )
     hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
 
-    rbpf = RBPF(KalmanFilter(), N_particles; threshold=0.8)
+    rbpf = RBPF(
+        KalmanFilter(),
+        N_particles;
+        threshold=1.0,
+        resampler=GeneralisedFilters.Multinomial(),
+    )
     states, ll = GeneralisedFilters.filter(rng, hier_model, rbpf, observations)
 
     # Extract final filtered states
@@ -241,14 +281,19 @@ end
     log_ws = states.filtered.log_weights
 
     # Compare log-likelihoods
-    println("Kalman filter log-likelihood:", kf_ll)
-    println("RBPF log-likelihood:", ll)
+    # println("KF log-likelihood:\t", kf_ll)
+    # println("RBPF log-likelihood:\t", ll)
+
+    @test kf_ll ≈ ll rtol = 1e-2
 
     weights = Weights(softmax(log_ws))
 
-    println("ESS: ", 1 / sum(weights .^ 2))
-    println("Weighted mean:", sum(xs .* weights))
-    println("Kalman filter mean:", kf_states.μ[1:2])
+    # println("ESS: ", 1 / sum(weights .^ 2))
+    # println("Weighted mean:", sum(xs .* weights))
+    # println("Kalman filter mean:", kf_states.μ[1:2])
+
+    # Higher tolerance for outer state since variance is higher
+    @test first(kf_states.μ) ≈ sum(first.(xs) .* weights) rtol = 1e-1
 
     # Resample outer states
     # resampled_xs = sample(rng, xs, weights, N_particles)
@@ -258,8 +303,10 @@ end
     # )
     # @test pvalue(test) > 0.05
 
-    println("Weighted mean:", sum(getproperty.(zs, :μ) .* weights))
-    println("Kalman filter mean:", kf_states.μ[3:4])
+    # println("Weighted mean:", sum(getproperty.(zs, :μ) .* weights))
+    # println("Kalman filter mean:", kf_states.μ[3:4])
+
+    @test last(kf_states.μ) ≈ sum(last.(getproperty.(zs, :μ)) .* weights) rtol = 1e-2
 
     # Resample inner states and demarginalise
     # resampled_zs = sample(rng, zs, weights, N_particles)
@@ -269,6 +316,150 @@ end
     # )
 
     # @test pvalue(test) > 0.05
+end
+
+@testitem "GPU Kalman-RBPF test" begin
+    using GeneralisedFilters
+    using CUDA
+    using NNlib
+    using LinearAlgebra
+    using StableRNGs
+
+    # TODO: seems to pass when D_inner = D_obs but fails otherwise
+    D_outer = 2
+    D_inner = 3
+    D_obs = 2
+
+    # Define inner dynamics
+    struct InnerDynamics{T} <: LinearGaussianLatentDynamics{T}
+        μ0::Vector{T}
+        Σ0::Matrix{T}
+        A::Matrix{T}
+        b::Vector{T}
+        C::Matrix{T}
+        Q::Matrix{T}
+    end
+    function GeneralisedFilters.batch_calc_μ0s(
+        dyn::InnerDynamics{T}, N; kwargs...
+    ) where {T}
+        μ0s = CuArray{T}(undef, length(dyn.μ0), N)
+        return μ0s[:, :] .= cu(dyn.μ0)
+    end
+
+    function GeneralisedFilters.batch_calc_Σ0s(
+        dyn::InnerDynamics{T}, N::Integer; kwargs...
+    ) where {T}
+        Σ0s = CuArray{T}(undef, size(dyn.Σ0)..., N)
+        return Σ0s[:, :, :] .= cu(dyn.Σ0)
+    end
+
+    function GeneralisedFilters.batch_calc_As(
+        dyn::InnerDynamics{T}, ::Integer, N::Integer; kwargs...
+    ) where {T}
+        As = CuArray{T}(undef, size(dyn.A)..., N)
+        As[:, :, :] .= cu(dyn.A)
+        return As
+    end
+
+    function GeneralisedFilters.batch_calc_bs(
+        dyn::InnerDynamics{T}, ::Integer, N::Integer; prev_outer, kwargs...
+    ) where {T}
+        Cs = CuArray{T}(undef, size(dyn.C)..., N)
+        Cs[:, :, :] .= cu(dyn.C)
+        return NNlib.batched_vec(Cs, prev_outer) .+ cu(dyn.b)
+    end
+
+    function GeneralisedFilters.batch_calc_Qs(
+        dyn::InnerDynamics{T}, ::Integer, N::Integer; kwargs...
+    ) where {T}
+        Q = CuArray{T}(undef, size(dyn.Q)..., N)
+        return Q[:, :, :] .= cu(dyn.Q)
+    end
+
+    rng = StableRNG(1234)
+    μ0 = rand(rng, D_outer + D_inner)
+    Σ0s = [rand(rng, D_outer, D_outer), rand(rng, D_inner, D_inner)]
+    Σ0s = [Σ * Σ' for Σ in Σ0s]  # make Σ0 positive definite
+    Σ0 = [
+        Σ0s[1] zeros(D_outer, D_inner)
+        zeros(D_inner, D_outer) Σ0s[2]
+    ]
+    A = [
+        rand(rng, D_outer, D_outer) zeros(D_outer, D_inner)
+        rand(rng, D_inner, D_outer + D_inner)
+    ]
+    # Make mean-reverting
+    A /= 3.0
+    A[diagind(A)] .= -0.5
+    b = rand(rng, D_outer + D_inner)
+    Qs = [rand(rng, D_outer, D_outer), rand(rng, D_inner, D_inner)] ./ 10.0
+    Qs = [Q * Q' for Q in Qs]  # make Q positive definite
+    Q = [
+        Qs[1] zeros(D_outer, D_inner)
+        zeros(D_inner, D_outer) Qs[2]
+    ]
+    H = [zeros(D_obs, D_outer) rand(rng, D_obs, D_inner)]
+    c = rand(rng, D_obs)
+    R = rand(rng, D_obs, D_obs)
+    R = R * R' / 3.0  # make R positive definite
+
+    N_particles = 2000
+    T = 20
+
+    observations = [rand(rng, D_obs) for _ in 1:T]
+
+    # Kalman filtering
+
+    full_model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
+    kf_state, kf_ll = GeneralisedFilters.filter(full_model, KalmanFilter(), observations)
+
+    # Rao-Blackwellised particle filtering
+
+    outer_dyn = GeneralisedFilters.HomogeneousLinearGaussianLatentDynamics(
+        μ0[1:D_outer],
+        Σ0[1:D_outer, 1:D_outer],
+        A[1:D_outer, 1:D_outer],
+        b[1:D_outer],
+        Qs[1],
+    )
+    inner_dyn = InnerDynamics(
+        μ0[(D_outer + 1):end],
+        Σ0[(D_outer + 1):end, (D_outer + 1):end],
+        A[(D_outer + 1):end, (D_outer + 1):end],
+        b[(D_outer + 1):end],
+        A[(D_outer + 1):end, 1:D_outer],
+        Qs[2],
+    )
+    obs = GeneralisedFilters.HomogeneousLinearGaussianObservationProcess(
+        H[:, (D_outer + 1):end], c, R
+    )
+    hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
+
+    rbpf = BatchRBPF(
+        BatchKalmanFilter(N_particles), N_particles; threshold=0.8, resampler=Multinomial()
+    )
+    states, ll = GeneralisedFilters.filter(hier_model, rbpf, observations)
+
+    # Extract final filtered states
+    xs = states.filtered.x_particles
+    zs = states.filtered.z_particles
+    log_ws = states.filtered.log_weights
+
+    weights = softmax(log_ws)
+    reshaped_weights = reshape(weights, (1, length(weights)))
+
+    # println("Weighted mean: ", sum(xs[1:D_outer, :] .* reshaped_weights; dims=2))
+    # println("Kalman filter mean:", kf_state.μ[1:D_outer])
+
+    # println("Weighted mean: ", sum(zs.μs .* reshaped_weights; dims=2))
+    # println("Kalman filter mean:", kf_state.μ[(D_outer + 1):end])
+
+    # println("Kalman log-likelihood: ", kf_ll)
+    # println("RBPF log-likelihood: ", ll)
+
+    @test kf_ll ≈ ll rtol = 1e-2
+    @test first(kf_state.μ) ≈ sum(xs[1, :] .* weights) rtol = 1e-1
+    @test last(kf_state.μ) ≈ sum(zs.μs[end, :] .* weights) rtol = 1e-2
 end
 
 @testitem "RBPF ancestory test" begin
@@ -289,6 +480,7 @@ end
         C::Matrix{T}
         Q::Matrix{T}
     end
+
     GeneralisedFilters.calc_μ0(dyn::InnerDynamics; kwargs...) = dyn.μ0
     GeneralisedFilters.calc_Σ0(dyn::InnerDynamics; kwargs...) = dyn.Σ0
     GeneralisedFilters.calc_A(dyn::InnerDynamics, ::Integer; kwargs...) = dyn.A
@@ -312,6 +504,7 @@ end
     # Make mean-reverting
     A /= 3.0
     A[diagind(A)] .= -0.5
+
     b = rand(rng, 4)
     Qs = [rand(rng, 2, 2) for _ in 1:2]
     Qs = [Q * Q' for Q in Qs]  # make Q positive definite

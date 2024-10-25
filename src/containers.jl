@@ -9,6 +9,14 @@ mutable struct GaussianContainer{XT,ΣT}
     filtered::Gaussian{XT,ΣT}
 end
 
+mutable struct BatchGaussianDistribution{T,M<:CUDA.AbstractMemory}
+    μs::CuArray{T,2,M}
+    Σs::CuArray{T,3,M}
+end
+function Base.getindex(d::BatchGaussianDistribution, i)
+    return BatchGaussianDistribution(d.μs[:, i], d.Σs[:, :, i])
+end
+
 ## RAO-BLACKWELLISED STATES ################################################################
 
 """
@@ -20,6 +28,38 @@ Gaussian or Categorical distribution) and a singular state `x`.
 mutable struct RaoBlackwellisedContainer{XT,ZT}
     x::XT
     z::ZT
+end
+
+# TODO: this needs to be generalised to account for the flatten Levy SSM state
+mutable struct RaoBlackwellisedParticleState{T,M<:CUDA.AbstractMemory,ZT}
+    x_particles::CuArray{T,2,M}
+    z_particles::ZT
+    log_weights::CuArray{T,1,M}
+end
+
+StatsBase.weights(state::RaoBlackwellisedParticleState) = softmax(state.log_weights)
+Base.length(state::RaoBlackwellisedParticleState) = size(state.x_particles, 2)
+
+"""
+    RaoBlackwellisedParticleContainer
+"""
+mutable struct RaoBlackwellisedParticleContainer{T,M<:CUDA.AbstractMemory,ZT}
+    filtered::RaoBlackwellisedParticleState{T,M,ZT}
+    proposed::RaoBlackwellisedParticleState{T,M,ZT}
+    ancestors::CuArray{Int,1,M}
+
+    function RaoBlackwellisedParticleContainer(
+        x_particles::CuArray{T,2,M}, z_particles::ZT, log_weights::CuArray{T,1,M}
+    ) where {T,M<:CUDA.AbstractMemory,ZT}
+        init_particles = RaoBlackwellisedParticleState(
+            x_particles, z_particles, log_weights
+        )
+        prop_particles = RaoBlackwellisedParticleState(
+            similar(x_particles), deepcopy(z_particles), CUDA.zeros(T, size(x_particles, 2))
+        )
+        ancestors = CuArray(1:size(x_particles, 2))
+        return new{T,M,ZT}(init_particles, prop_particles, ancestors)
+    end
 end
 
 ## PARTICLES ###############################################################################
@@ -66,7 +106,7 @@ Base.@propagate_inbounds Base.getindex(state::ParticleState, i) = state.particle
 # Base.@propagate_inbounds Base.getindex(state::ParticleState, i::Vector{Int}) = state.particles[i]
 
 function reset_weights!(state::ParticleState{T,WT}) where {T,WT<:Real}
-    fill!(state.log_weights, -log(WT(length(state.particles))))
+    fill!(state.log_weights, zero(WT))
     return state.log_weights
 end
 

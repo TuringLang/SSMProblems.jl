@@ -7,6 +7,10 @@ using GaussianDistributions: pairs, Gaussian
 using SSMProblems
 using StatsBase
 
+# TODO: heavy modules—move to extension
+using CUDA
+using NNlib
+
 abstract type AbstractFilter <: AbstractSampler end
 
 """
