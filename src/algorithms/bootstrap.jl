@@ -40,7 +40,7 @@ function predict(
     states.proposed, states.ancestors = resample(rng, filter.resampler, states.filtered)
     states.proposed.particles = map(
         x -> SSMProblems.simulate(rng, model.dyn, step, x; kwargs...),
-        collect(states.proposed)
+        collect(states.proposed),
     )
 
     return update_ref!(states, ref_state, step)

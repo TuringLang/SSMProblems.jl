@@ -403,8 +403,8 @@ end
     R = rand(rng, D_obs, D_obs)
     R = R * R' / 3.0  # make R positive definite
 
-    N_particles = 1000
-    T = 10
+    N_particles = 2000
+    T = 20
 
     observations = [rand(rng, D_obs) for _ in 1:T]
 
@@ -435,7 +435,9 @@ end
     )
     hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
 
-    rbpf = BatchRBPF(BatchKalmanFilter(N_particles), N_particles; threshold=0.8)
+    rbpf = BatchRBPF(
+        BatchKalmanFilter(N_particles), N_particles; threshold=0.8, resampler=Multinomial()
+    )
     states, ll = GeneralisedFilters.filter(hier_model, rbpf, observations)
 
     # Extract final filtered states
@@ -446,14 +448,18 @@ end
     weights = softmax(log_ws)
     reshaped_weights = reshape(weights, (1, length(weights)))
 
-    println("Weighted mean: ", sum(xs[1:D_outer, :] .* reshaped_weights; dims=2))
-    println("Kalman filter mean:", kf_state.μ[1:D_outer])
+    # println("Weighted mean: ", sum(xs[1:D_outer, :] .* reshaped_weights; dims=2))
+    # println("Kalman filter mean:", kf_state.μ[1:D_outer])
 
-    println("Weighted mean: ", sum(zs.μs .* reshaped_weights; dims=2))
-    println("Kalman filter mean:", kf_state.μ[(D_outer + 1):end])
+    # println("Weighted mean: ", sum(zs.μs .* reshaped_weights; dims=2))
+    # println("Kalman filter mean:", kf_state.μ[(D_outer + 1):end])
 
-    println("Kalman log-likelihood: ", kf_ll)
-    println("RBPF log-likelihood: ", ll)
+    # println("Kalman log-likelihood: ", kf_ll)
+    # println("RBPF log-likelihood: ", ll)
+
+    @test kf_ll ≈ ll rtol = 1e-2
+    @test first(kf_state.μ) ≈ sum(xs[1, :] .* weights) rtol = 1e-1
+    @test last(kf_state.μ) ≈ sum(zs.μs[end, :] .* weights) rtol = 1e-2
 end
 
 @testitem "RBPF ancestory test" begin

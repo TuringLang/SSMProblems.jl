@@ -1,6 +1,8 @@
 using Random
 using Distributions
 
+using AcceleratedKernels: searchsortedfirst
+
 export Multinomial, Systematic, Metropolis, Rejection
 
 abstract type AbstractResampler end
@@ -136,16 +138,15 @@ function sample_ancestors(
     return a
 end
 
-# Following Code 8 of Murray et. al (2015)
+# Following Code 5 of Murray et. al (2015)
 function sample_ancestors(
-    rng::AbstractRNG, ::Systematic, weights::CuVector{WT}, n::Int=length(weights)
+    rng::AbstractRNG, ::Multinomial, weights::CuVector{WT}, n::Int=length(weights)
 ) where {WT}
-    u = rand(rng, WT)
     W = cumsum(weights)
-    # TODO: assume weights sum to unity and document
-    W_tot = CUDA.@allowscalar W[end]
-    r = n * W
-    return O = min.(n - 1, trunc.(Int32, r .+ u)) .+ 1
+    Wn = CUDA.@allowscalar W[n]
+    us = CUDA.rand(n) * Wn
+    as = searchsortedfirst(W, us)
+    return as
 end
 
 ## SINGLE PRECISION STABLE ALGORITHMS ######################################################
