@@ -270,7 +270,7 @@ end
     rbpf = RBPF(
         KalmanFilter(),
         N_particles;
-        threshold=1.0,
+        threshold=0.8,
         resampler=GeneralisedFilters.Multinomial(),
     )
     states, ll = GeneralisedFilters.filter(rng, hier_model, rbpf, observations)
