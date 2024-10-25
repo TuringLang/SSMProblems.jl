@@ -185,6 +185,10 @@ end
     using StableRNGs
     using StatsBase
 
+    D_outer = 2
+    D_inner = 3
+    D_obs = 2
+
     # Define inner dynamics
     struct InnerDynamics{T} <: LinearGaussianLatentDynamics{T}
         μ0::Vector{T}
@@ -203,36 +207,36 @@ end
     GeneralisedFilters.calc_Q(dyn::InnerDynamics, ::Integer; kwargs...) = dyn.Q
 
     rng = StableRNG(1234)
-    μ0 = rand(rng, 4)
-    Σ0s = [rand(rng, 2, 2) for _ in 1:2]
+    μ0 = rand(rng, D_outer + D_inner)
+    Σ0s = [rand(rng, D_outer, D_outer), rand(rng, D_inner, D_inner)]
     Σ0s = [Σ * Σ' for Σ in Σ0s]  # make Σ0 positive definite
     Σ0 = [
-        Σ0s[1] zeros(2, 2)
-        zeros(2, 2) Σ0s[2]
+        Σ0s[1] zeros(D_outer, D_inner)
+        zeros(D_inner, D_outer) Σ0s[2]
     ]
     A = [
-        rand(rng, 2, 2) zeros(2, 2)
-        rand(rng, 2, 4)
+        rand(rng, D_outer, D_outer) zeros(D_outer, D_inner)
+        rand(rng, D_inner, D_outer + D_inner)
     ]
     # Make mean-reverting
     A /= 3.0
     A[diagind(A)] .= -0.5
-    b = rand(rng, 4)
-    Qs = [rand(rng, 2, 2) for _ in 1:2]
+    b = rand(rng, D_outer + D_inner)
+    Qs = [rand(rng, D_outer, D_outer), rand(rng, D_inner, D_inner)] ./ 10.0
     Qs = [Q * Q' for Q in Qs]  # make Q positive definite
     Q = [
-        Qs[1] zeros(2, 2)
-        zeros(2, 2) Qs[2]
+        Qs[1] zeros(D_outer, D_inner)
+        zeros(D_inner, D_outer) Qs[2]
     ]
-    H = [zeros(2, 2) rand(rng, 2, 2)]
-    c = rand(rng, 2)
-    R = rand(rng, 2, 2)
-    R = R * R' / 10.0  # make R positive definite
+    H = [zeros(D_obs, D_outer) rand(rng, D_obs, D_inner)]
+    c = rand(rng, D_obs)
+    R = rand(rng, D_obs, D_obs)
+    R = R * R' / 3.0  # make R positive definite
 
     N_particles = 1000
     T = 20
 
-    observations = [rand(rng, 2) for _ in 1:T]
+    observations = [rand(rng, D_obs) for _ in 1:T]
 
     # Kalman filtering
 
@@ -244,12 +248,23 @@ end
     # Rao-Blackwellised particle filtering
 
     outer_dyn = GeneralisedFilters.HomogeneousLinearGaussianLatentDynamics(
-        μ0[1:2], Σ0[1:2, 1:2], A[1:2, 1:2], b[1:2], Qs[1]
+        μ0[1:D_outer],
+        Σ0[1:D_outer, 1:D_outer],
+        A[1:D_outer, 1:D_outer],
+        b[1:D_outer],
+        Qs[1],
     )
     inner_dyn = InnerDynamics(
-        μ0[3:4], Σ0[3:4, 3:4], A[3:4, 3:4], b[3:4], A[3:4, 1:2], Qs[2]
+        μ0[(D_outer + 1):end],
+        Σ0[(D_outer + 1):end, (D_outer + 1):end],
+        A[(D_outer + 1):end, (D_outer + 1):end],
+        b[(D_outer + 1):end],
+        A[(D_outer + 1):end, 1:D_outer],
+        Qs[2],
     )
-    obs = GeneralisedFilters.HomogeneousLinearGaussianObservationProcess(H[:, 3:4], c, R)
+    obs = GeneralisedFilters.HomogeneousLinearGaussianObservationProcess(
+        H[:, (D_outer + 1):end], c, R
+    )
     hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
 
     rbpf = RBPF(
@@ -313,7 +328,7 @@ end
     # TODO: seems to pass when D_inner = D_obs but fails otherwise
     D_outer = 2
     D_inner = 3
-    D_obs = 3
+    D_obs = 2
 
     # Define inner dynamics
     struct InnerDynamics{T} <: LinearGaussianLatentDynamics{T}
@@ -373,8 +388,11 @@ end
         rand(rng, D_outer, D_outer) zeros(D_outer, D_inner)
         rand(rng, D_inner, D_outer + D_inner)
     ]
+    # Make mean-reverting
+    A /= 3.0
+    A[diagind(A)] .= -0.5
     b = rand(rng, D_outer + D_inner)
-    Qs = [rand(rng, D_outer, D_outer) / 10.0, rand(rng, D_inner, D_inner) / 10.0]
+    Qs = [rand(rng, D_outer, D_outer), rand(rng, D_inner, D_inner)] ./ 10.0
     Qs = [Q * Q' for Q in Qs]  # make Q positive definite
     Q = [
         Qs[1] zeros(D_outer, D_inner)
@@ -385,7 +403,7 @@ end
     R = rand(rng, D_obs, D_obs)
     R = R * R' / 3.0  # make R positive definite
 
-    N_particles = 100000
+    N_particles = 1000
     T = 10
 
     observations = [rand(rng, D_obs) for _ in 1:T]
