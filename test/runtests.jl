@@ -311,9 +311,9 @@ end
     using StableRNGs
 
     # TODO: seems to pass when D_inner = D_obs but fails otherwise
-    D_outer = 1
-    D_inner = 1
-    D_obs = 1
+    D_outer = 2
+    D_inner = 3
+    D_obs = 3
 
     # Define inner dynamics
     struct InnerDynamics{T} <: LinearGaussianLatentDynamics{T}
@@ -385,8 +385,8 @@ end
     R = rand(rng, D_obs, D_obs)
     R = R * R' / 3.0  # make R positive definite
 
-    N_particles = 1000000
-    T = 1
+    N_particles = 100000
+    T = 10
 
     observations = [rand(rng, D_obs) for _ in 1:T]
 
@@ -417,7 +417,7 @@ end
     )
     hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
 
-    rbpf = BatchRBPF(BatchKalmanFilter(N_particles), N_particles; threshold=0.0)
+    rbpf = BatchRBPF(BatchKalmanFilter(N_particles), N_particles; threshold=0.8)
     states, ll = GeneralisedFilters.filter(hier_model, rbpf, observations)
 
     # Extract final filtered states

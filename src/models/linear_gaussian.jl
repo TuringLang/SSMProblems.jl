@@ -160,7 +160,7 @@ function batch_simulate(
     L = cholesky(Σ0).L
     # Ls = repeat(cu(reshape(Σ0, (size(Σ0)..., 1))), 1, 1, N)
     Ls = CuArray{T}(undef, size(Σ0)..., N)
-    Ls[:, :, :] .= cu(Σ0)
+    Ls[:, :, :] .= cu(L)
     return cu(μ0) .+ NNlib.batched_vec(Ls, CUDA.randn(T, D, N))
 end
 
@@ -175,7 +175,7 @@ function batch_simulate(
     D = length(b)
     L = cholesky(Q).L
     Ls = CuArray{T}(undef, size(Q)..., N)
-    Ls[:, :, :] .= cu(Q)
+    Ls[:, :, :] .= cu(L)
     As = CuArray{T}(undef, size(A)..., N)
     As[:, :, :] .= cu(A)
     return (NNlib.batched_vec(As, prev_state) .+ cu(b)) +
