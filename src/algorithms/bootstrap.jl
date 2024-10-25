@@ -3,13 +3,6 @@ export BootstrapFilter, BF
 struct BootstrapFilter{RS<:AbstractResampler} <: AbstractFilter
     N::Integer
     resampler::RS
-
-    function BootstrapFilter(
-        N::Integer; threshold::Real=1.0, resampler::AbstractResampler=Systematic()
-    )
-        conditional_resampler = ESSResampler(threshold, resampler)
-        return new{typeof(conditional_resampler)}(N, conditional_resampler)
-    end
 end
 
 """Shorthand for `BootstrapFilter`"""
