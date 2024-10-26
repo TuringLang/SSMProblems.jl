@@ -43,13 +43,12 @@ function smooth(
     idx_ref = rand(rng, Categorical(weights(particles.filtered)), M)
     trajectories = Array{eltype(model.dyn)}(undef, n_timestep, M)
 
-    forward_state = particles.filtered[idx_ref]
-    trajectories[end, :] = forward_state
+    trajectories[end, :] = particles.filtered[idx_ref]
     for step in (n_timestep - 1):-1:1
         for j in 1:M
             transitions = map(
                 x ->
-                    SSMProblems.logdensity(model.dyn, step, forward_state[j], x; kwargs...),
+                    SSMProblems.logdensity(model.dyn, step, x, trajectories[step+1]; kwargs...),
                 recorder.particles[step, :],
             )
             backward_weights = recorder.log_weights[step, :] + transitions
