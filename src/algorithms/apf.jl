@@ -74,12 +74,12 @@ end
 
 function update(
     model::StateSpaceModel{T},
-    filter::AuxiliaryParticleFilter,
+    filter::AuxiliaryParticleFilter{N},
     step::Integer,
     states::ParticleContainer,
     observation;
     kwargs...,
-) where {T}
+) where {T,N}
     @debug "step $step"
     log_increments = map(
         x -> SSMProblems.logdensity(model.obs, step, x, observation; kwargs...),

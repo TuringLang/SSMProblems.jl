@@ -25,7 +25,7 @@ function (callback::WeightedParticleRecorderCallback)(
     return nothing
 end
 
-function smooth(
+function sample(
     rng::Random.AbstractRNG,
     model::StateSpaceModel{T,LDT},
     alg::FFBS{<:BootstrapFilter{N}},
@@ -40,21 +40,34 @@ function smooth(
     )
 
     particles, _ = filter(rng, model, alg.filter, obs; callback=recorder, kwargs...)
+
+    # Backward sampling - exact
     idx_ref = rand(rng, Categorical(weights(particles.filtered)), M)
     trajectories = Array{eltype(model.dyn)}(undef, n_timestep, M)
 
     trajectories[end, :] = particles.filtered[idx_ref]
     for step in (n_timestep - 1):-1:1
         for j in 1:M
-            transitions = map(
-                x ->
-                    SSMProblems.logdensity(model.dyn, step, x, trajectories[step+1]; kwargs...),
+            backward_weights = backward(
+                model::StateSpaceModel,
+                step,
+                trajectories[step + 1],
                 recorder.particles[step, :],
+                recorder.log_weights[step, :];
+                kwargs...,
             )
-            backward_weights = recorder.log_weights[step, :] + transitions
             ancestor = rand(rng, Categorical(softmax(backward_weights)))
             trajectories[step, j] = recorder.particles[step, ancestor]
         end
     end
     return trajectories
+end
+
+function backward(
+    model::StateSpaceModel, step::Integer, state, particles::T, log_weights::WT; kwargs...
+) where {T,WT}
+    transitions = map(
+        x -> SSMProblems.logdensity(model.dyn, step, x, state; kwargs...), particles
+    )
+    return log_weights + transitions
 end
