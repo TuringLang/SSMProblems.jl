@@ -71,20 +71,9 @@ function update(
 end
 
 function reset_weights!(
-    state::ParticleState{T,WT}, idxs, filter::BootstrapFilter
+    state::ParticleState{T,WT}, idxs, ::BootstrapFilter
 ) where {T,WT<:Real}
-    fill!(state.log_weights, -log(WT(length(state.particles))))
-    return state
-end
-
-function logmarginal(states::ParticleContainer, ::BootstrapFilter)
-    return logsumexp(states.filtered.log_weights) - logsumexp(states.proposed.log_weights)
-end
-
-function reset_weights!(
-    state::ParticleState{T,WT}, idxs, ::BootstrapFilter{N}
-) where {T,WT<:Real,N}
-    fill!(state.log_weights, -log(WT(N)))
+    fill!(state.log_weights, zero(WT))
     return state
 end
 
