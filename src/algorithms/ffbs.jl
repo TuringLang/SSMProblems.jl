@@ -26,13 +26,13 @@ function (callback::WeightedParticleRecorderCallback)(
 end
 
 function gen_trajectory(
-    rng::Random.AbstractRNG, 
-    model::StateSpaceModel, 
+    rng::Random.AbstractRNG,
+    model::StateSpaceModel,
     particles::AbstractMatrix{T},  # Need better container
-    log_weights::AbstractMatrix{WT}, 
+    log_weights::AbstractMatrix{WT},
     forward_state,
     n_timestep::Int;
-    kwargs...
+    kwargs...,
 ) where {T,WT}
     trajectory = Vector{T}(undef, n_timestep)
     trajectory[end] = forward_state
@@ -51,7 +51,6 @@ function gen_trajectory(
     return trajectory
 end
 
-
 function backward(
     model::StateSpaceModel, step::Integer, state, particles::T, log_weights::WT; kwargs...
 ) where {T,WT}
@@ -60,7 +59,6 @@ function backward(
     end
     return log_weights + transitions
 end
-
 
 function sample(
     rng::Random.AbstractRNG,
@@ -71,7 +69,6 @@ function sample(
     callback=nothing,
     kwargs...,
 ) where {T,LDT,N}
-
     n_timestep = length(obs)
     recorder = WeightedParticleRecorderCallback(
         Array{eltype(model.dyn)}(undef, n_timestep, N), Array{T}(undef, n_timestep, N)
@@ -85,7 +82,14 @@ function sample(
 
     trajectories[end, :] = particles.filtered[idx_ref]
     for j in 1:M
-        trajectories[:, j] = gen_trajectory(rng, model, recorder.particles, recorder.log_weights, trajectories[end, j], n_timestep)
+        trajectories[:, j] = gen_trajectory(
+            rng,
+            model,
+            recorder.particles,
+            recorder.log_weights,
+            trajectories[end, j],
+            n_timestep,
+        )
     end
     return trajectories
 end
