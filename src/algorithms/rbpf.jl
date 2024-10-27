@@ -108,7 +108,7 @@ function update(
 
     states.filtered.log_weights = states.proposed.log_weights + log_increments
 
-    return states, logmarginal(states)
+    return states, logmarginal(states, algo)
 end
 
 #################################

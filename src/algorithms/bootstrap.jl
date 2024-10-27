@@ -1,7 +1,6 @@
 export BootstrapFilter, BF
 
-struct BootstrapFilter{RS<:AbstractResampler} <: AbstractFilter
-    N::Integer
+struct BootstrapFilter{N,RS<:AbstractResampler} <: AbstractParticleFilter{N}
     resampler::RS
 end
 
@@ -9,28 +8,21 @@ function BootstrapFilter(
     N::Integer; threshold::Real=1.0, resampler::AbstractResampler=Systematic()
 )
     conditional_resampler = ESSResampler(threshold, resampler)
-    return BootstrapFilter(N, conditional_resampler)
+    return BootstrapFilter{N, typeof(conditional_resampler)}(conditional_resampler)
 end
 
 """Shorthand for `BootstrapFilter`"""
 const BF = BootstrapFilter
 
-function BootstrapFilter(
-    N::Integer; threshold::Real=1.0, resampler::AbstractResampler=Systematic()
-)
-    conditional_resampler = ESSResampler(threshold, resampler)
-    return BootstrapFilter(N, conditional_resampler)
-end
-
 function initialise(
     rng::AbstractRNG,
     model::StateSpaceModel{T},
-    filter::BootstrapFilter;
+    filter::BootstrapFilter{N};
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
-) where {T}
-    initial_states = map(x -> SSMProblems.simulate(rng, model.dyn; kwargs...), 1:(filter.N))
-    initial_weights = zeros(T, filter.N)
+) where {N,T}
+    initial_states = map(x -> SSMProblems.simulate(rng, model.dyn; kwargs...), 1:N)
+    initial_weights = zeros(T, N)
 
     return update_ref!(
         ParticleContainer(initial_states, initial_weights), ref_state, filter
@@ -71,7 +63,7 @@ function update(
     states.filtered.log_weights = states.proposed.log_weights + log_increments
     states.filtered.particles = states.proposed.particles
 
-    return states, logmarginal(states)
+    return states, logmarginal(states, filter)
 end
 
 function reset_weights!(

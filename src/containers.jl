@@ -105,9 +105,13 @@ Base.keys(state::ParticleState) = LinearIndices(state.particles)
 Base.@propagate_inbounds Base.getindex(state::ParticleState, i) = state.particles[i]
 # Base.@propagate_inbounds Base.getindex(state::ParticleState, i::Vector{Int}) = state.particles[i]
 
-function reset_weights!(state::ParticleState{T,WT}) where {T,WT<:Real}
+function reset_weights!(state::ParticleState{T,WT}, idx, ::AbstractFilter) where {T,WT<:Real}
     fill!(state.log_weights, zero(WT))
     return state.log_weights
+end
+
+function logmarginal(states::ParticleContainer, ::AbstractFilter)
+    return logsumexp(states.filtered.log_weights) - logsumexp(states.proposed.log_weights)
 end
 
 function update_ref!(

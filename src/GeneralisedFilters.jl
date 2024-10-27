@@ -13,6 +13,8 @@ using NNlib
 
 abstract type AbstractFilter <: AbstractSampler end
 
+abstract type AbstractParticleFilter{N} <: AbstractFilter end
+
 """
     predict([rng,] model, alg, iter, state; kwargs...)
 
