@@ -4,6 +4,7 @@ using TestItemRunner
 @run_package_tests
 
 include("batch_kalman_test.jl")
+include("resamplers.jl")
 
 @testitem "Kalman filter test" begin
     using GeneralisedFilters
