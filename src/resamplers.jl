@@ -3,7 +3,7 @@ using Distributions
 
 using AcceleratedKernels: searchsortedfirst
 
-export Multinomial, Systematic, Metropolis, Rejection
+export Multinomial, Systematic, Stratified, Metropolis, Rejection
 
 abstract type AbstractResampler end
 
@@ -114,6 +114,17 @@ function sample_ancestors(
     return rand(rng, Distributions.Categorical(weights), n)
 end
 
+# Following Code 5 of Murray et. al (2015)
+function sample_ancestors(
+    rng::AbstractRNG, ::Multinomial, weights::CuVector{WT}, n::Int=length(weights)
+) where {WT}
+    W = cumsum(weights)
+    Wn = CUDA.@allowscalar W[n]
+    us = CUDA.rand(n) * Wn
+    as = searchsortedfirst(W, us)
+    return as
+end
+
 struct Systematic <: AbstractResampler end
 
 function sample_ancestors(
@@ -138,15 +149,45 @@ function sample_ancestors(
     return a
 end
 
-# Following Code 5 of Murray et. al (2015)
 function sample_ancestors(
-    rng::AbstractRNG, ::Multinomial, weights::CuVector{WT}, n::Int=length(weights)
+    rng::AbstractRNG, ::Systematic, weights::CuVector, n::Int=length(weights)
+)
+    offspring = sample_offspring(rng, weights, n)
+    return offspring_to_ancestors(offspring)
+end
+
+# Following Code 8 of Murray et. al (2015)
+function sample_offspring(
+    rng::AbstractRNG, weights::CuVector{WT}, n::Int=length(weights)
 ) where {WT}
     W = cumsum(weights)
     Wn = CUDA.@allowscalar W[n]
-    us = CUDA.rand(n) * Wn
-    as = searchsortedfirst(W, us)
-    return as
+    u0 = CUDA.@allowscalar rand(rng, WT)
+    r = n * W / Wn
+    offspring = min.(n, floor.(Int, r .+ u0))
+    return offspring
+end
+
+struct Stratified <: AbstractResampler end
+
+function sample_ancestors(
+    rng::AbstractRNG, ::Stratified, weights::CuVector, n::Int=length(weights)
+)
+    offspring = sample_offspring(rng, weights, n)
+    return offspring_to_ancestors(offspring)
+end
+
+# Following Code 7 of Murray et. al (2015)
+function sample_offspring(
+    rng::AbstractRNG, weights::CuVector{WT}, n::Int=length(weights)
+) where {WT}
+    u = rand(rng, n)
+    W = cumsum(weights)
+    Wn = CUDA.@allowscalar W[n]
+    r = n * W / Wn
+    k = min.(n, floor.(Int, r .+ 1))
+    offspring = min.(n, floor.(Int, r .+ u[k]))
+    return offspring
 end
 
 ## SINGLE PRECISION STABLE ALGORITHMS ######################################################
@@ -210,4 +251,60 @@ function sample_ancestors(
     end
 
     return a
+end
+
+## ANCESTOR-OFFSPRING CONVERSION ###########################################################
+
+function _offspring_to_ancestors_kernel!(ancestors, offspring, N)
+    index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    stride = blockDim().x * gridDim().x
+
+    @inbounds for i in index:stride:N
+        start = i == 1 ? 0 : offspring[i - 1]
+        finish = offspring[i]
+        for j in (start + 1):finish
+            ancestors[j] = i
+        end
+    end
+
+    return nothing
+end
+
+function offspring_to_ancestors(offspring::CuVector{<:Integer})
+    N = length(offspring)
+    ancestors = similar(offspring)
+
+    threads = 256
+    blocks = ceil(Int, N / threads)
+
+    @cuda threads = threads blocks = blocks _offspring_to_ancestors_kernel!(
+        ancestors, offspring, N
+    )
+
+    return ancestors
+end
+
+function _ancestors_to_offspring_kernel!(output, ancestors, N)
+    index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    stride = blockDim().x * gridDim().x
+
+    @inbounds for i in index:stride:N
+        CUDA.@atomic output[ancestors[i]] += 1
+    end
+
+    return nothing
+end
+
+function ancestors_to_offspring(ancestors::CuVector{Int})
+    N = length(ancestors)
+    offspring = CUDA.zeros(Int, N)
+
+    threads = 256
+    blocks = ceil(Int, N / threads)
+
+    @cuda threads = threads blocks = blocks _ancestors_to_offspring_kernel!(
+        offspring, ancestors, N
+    )
+
+    return offspring
 end
