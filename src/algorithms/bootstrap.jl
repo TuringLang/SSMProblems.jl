@@ -12,7 +12,7 @@ function BootstrapFilter(
     N::Integer; threshold::Real=1.0, resampler::AbstractResampler=Systematic()
 )
     conditional_resampler = ESSResampler(threshold, resampler)
-    return BootstrapFilter(N, conditional_resampler)
+    return BootstrapFilter{ESSResampler}(N, conditional_resampler)
 end
 
 function initialise(

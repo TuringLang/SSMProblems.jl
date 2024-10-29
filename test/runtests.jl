@@ -546,3 +546,217 @@ end
 
     # TODO: add proper test comparing to dense storage
 end
+
+# TODO: replace this with comparison to RTS smoother
+@testitem "CSMC test" begin
+    using GeneralisedFilters
+    using SSMProblems
+    using StableRNGs
+    using PDMats
+    using LinearAlgebra
+    using LogExpFunctions: softmax
+    using Random: randexp
+    using StatsBase: sample, Weights
+
+    T = Float32
+    rng = StableRNG(1234)
+    σx², σy² = randexp(rng, T, 2)
+
+    # initial state distribution
+    μ0 = zeros(T, 2)
+    Σ0 = PDMat(T[1 0; 0 1])
+
+    # state transition equation
+    A = T[1 1; 0 1]
+    b = T[0; 0]
+    Q = PDiagMat([σx²; 0])
+
+    # observation equation
+    H = T[1 0]
+    c = T[0;]
+    R = [σy²;;]
+
+    # when working with PDMats, the Kalman filter doesn't play nicely without this
+    function Base.convert(::Type{PDMat{T,MT}}, mat::MT) where {MT<:AbstractMatrix,T<:Real}
+        return PDMat(Symmetric(mat))
+    end
+
+    model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
+    _, _, data = sample(rng, model, 5)
+
+    # Naive smoother
+    N_particles_1 = 1000000
+    cb = GeneralisedFilters.DenseAncestorCallback(Vector{T})
+    bf = BF(N_particles_1; threshold=0.8)
+    bf_state, llbf = GeneralisedFilters.filter(rng, model, bf, data; callback=cb)
+    weights = softmax(bf_state.filtered.log_weights)
+    sampled_indices = sample(rng, 1:length(weights), Weights(weights), N_particles_1)
+    μs = Vector{Vector{T}}(undef, N_particles_1)
+    for i in 1:N_particles_1
+        μs[i] = GeneralisedFilters.get_ancestry(cb.container, sampled_indices[i])[3]
+    end
+
+    N_particles = 1000
+    cb = GeneralisedFilters.DenseAncestorCallback(Vector{T})
+
+    # TODO: re-introduce resampling and trace ancestory
+    let
+        bf = BF(N_particles; threshold=0.8, resampler=Multinomial())
+        bf_state, llbf = GeneralisedFilters.filter(rng, model, bf, data; callback=cb)
+        weights = softmax(bf_state.filtered.log_weights)
+        sampled_idx = sample(rng, 1:length(weights), Weights(weights))
+        ref_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
+
+        N_burnin = 100
+        N_sample = 2000
+        N_steps = N_burnin + N_sample
+        trajectory_samples = Vector{Vector{Vector{T}}}(undef, N_sample)
+        for i in 1:N_steps
+            bf_state, _ = GeneralisedFilters.filter(
+                rng, model, bf, data; ref_state=ref_traj
+            )
+            weights = softmax(bf_state.filtered.log_weights)
+            sampled_idx = sample(rng, 1:length(weights), Weights(weights))
+            ref_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
+            if i > N_burnin
+                trajectory_samples[i - N_burnin] = ref_traj
+            end
+        end
+
+        # Compare smoothed states
+        naive_mean = first.(sum(μs) / N_particles_1)
+        csmc_mean = first.(sum(getindex.(trajectory_samples, 3)) / N_sample)
+        @test csmc_mean ≈ naive_mean rtol = 1e-1
+    end
+end
+
+@testitem "RBCSMC test" begin
+    using GeneralisedFilters
+    using SSMProblems
+    using GaussianDistributions
+    using StableRNGs
+    using PDMats
+    using LinearAlgebra
+    using LogExpFunctions: softmax
+    using Random: randexp
+    using StatsBase: sample, Weights
+
+    D_outer = 1
+    D_inner = 1
+    D_obs = 1
+
+    # Define inner dynamics
+    struct InnerDynamics{T} <: LinearGaussianLatentDynamics{T}
+        μ0::Vector{T}
+        Σ0::Matrix{T}
+        A::Matrix{T}
+        b::Vector{T}
+        C::Matrix{T}
+        Q::Matrix{T}
+    end
+    GeneralisedFilters.calc_μ0(dyn::InnerDynamics; kwargs...) = dyn.μ0
+    GeneralisedFilters.calc_Σ0(dyn::InnerDynamics; kwargs...) = dyn.Σ0
+    GeneralisedFilters.calc_A(dyn::InnerDynamics, ::Integer; kwargs...) = dyn.A
+    function GeneralisedFilters.calc_b(dyn::InnerDynamics, ::Integer; prev_outer, kwargs...)
+        return dyn.b + dyn.C * prev_outer
+    end
+    GeneralisedFilters.calc_Q(dyn::InnerDynamics, ::Integer; kwargs...) = dyn.Q
+
+    rng = StableRNG(1234)
+    μ0 = rand(rng, D_outer + D_inner)
+    Σ0s = [rand(rng, D_outer, D_outer), rand(rng, D_inner, D_inner)]
+    Σ0s = [Σ * Σ' for Σ in Σ0s]  # make Σ0 positive definite
+    Σ0 = [
+        Σ0s[1] zeros(D_outer, D_inner)
+        zeros(D_inner, D_outer) Σ0s[2]
+    ]
+    A = [
+        rand(rng, D_outer, D_outer) zeros(D_outer, D_inner)
+        rand(rng, D_inner, D_outer + D_inner)
+    ]
+    # Make mean-reverting
+    A /= 3.0
+    A[diagind(A)] .= -0.5
+    b = rand(rng, D_outer + D_inner)
+    Qs = [rand(rng, D_outer, D_outer), rand(rng, D_inner, D_inner)] ./ 10.0
+    Qs = [Q * Q' for Q in Qs]  # make Q positive definite
+    Q = [
+        Qs[1] zeros(D_outer, D_inner)
+        zeros(D_inner, D_outer) Qs[2]
+    ]
+    H = [zeros(D_obs, D_outer) rand(rng, D_obs, D_inner)]
+    c = rand(rng, D_obs)
+    R = rand(rng, D_obs, D_obs)
+    R = R * R' / 3.0  # make R positive definite
+
+    outer_dyn = GeneralisedFilters.HomogeneousLinearGaussianLatentDynamics(
+        μ0[1:D_outer],
+        Σ0[1:D_outer, 1:D_outer],
+        A[1:D_outer, 1:D_outer],
+        b[1:D_outer],
+        Qs[1],
+    )
+    inner_dyn = InnerDynamics(
+        μ0[(D_outer + 1):end],
+        Σ0[(D_outer + 1):end, (D_outer + 1):end],
+        A[(D_outer + 1):end, (D_outer + 1):end],
+        b[(D_outer + 1):end],
+        A[(D_outer + 1):end, 1:D_outer],
+        Qs[2],
+    )
+    obs = GeneralisedFilters.HomogeneousLinearGaussianObservationProcess(
+        H[:, (D_outer + 1):end], c, R
+    )
+    model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
+
+    T = GeneralisedFilters.RaoBlackwellisedContainer{
+        Vector{Float64},Gaussian{Vector{Float64},Matrix{Float64}}
+    }
+    data = [rand(rng, D_obs) for _ in 1:5]
+
+    # Naive smoother
+    N_particles_1 = 100000
+    cb = GeneralisedFilters.DenseAncestorCallback(T)
+    rbpf = RBPF(KalmanFilter(), N_particles_1; threshold=0.8)
+    bf_state, llbf = GeneralisedFilters.filter(rng, model, rbpf, data; callback=cb)
+    weights = softmax(bf_state.filtered.log_weights)
+    sampled_indices = sample(rng, 1:length(weights), Weights(weights), N_particles_1)
+    μs = Vector{T}(undef, N_particles_1)
+    for i in 1:N_particles_1
+        μs[i] = GeneralisedFilters.get_ancestry(cb.container, sampled_indices[i])[3]
+    end
+
+    N_particles = 1000
+    cb = GeneralisedFilters.DenseAncestorCallback(T)
+
+    # TODO: re-introduce resampling and trace ancestory
+    let
+        rbpf = RBPF(KalmanFilter(), N_particles; threshold=0.8, resampler=Multinomial())
+        bf_state, llbf = GeneralisedFilters.filter(rng, model, rbpf, data; callback=cb)
+        weights = softmax(bf_state.filtered.log_weights)
+        sampled_idx = sample(rng, 1:length(weights), Weights(weights))
+        ref_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
+
+        N_burnin = 100
+        N_sample = 2000
+        N_steps = N_burnin + N_sample
+        trajectory_samples = Vector{Vector{T}}(undef, N_sample)
+        for i in 1:N_steps
+            bf_state, _ = GeneralisedFilters.filter(
+                rng, model, rbpf, data; ref_state=ref_traj
+            )
+            weights = softmax(bf_state.filtered.log_weights)
+            sampled_idx = sample(rng, 1:length(weights), Weights(weights))
+            ref_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
+            if i > N_burnin
+                trajectory_samples[i - N_burnin] = ref_traj
+            end
+        end
+
+        # Compare smoothed states
+        naive_mean = first.(sum(getproperty.(μs, :x)) / N_particles_1)
+        csmc_mean =
+            first.(sum(getproperty.(getindex.(trajectory_samples, 3), :x)) / N_sample)
+        @test csmc_mean[1] ≈ naive_mean[1] rtol = 1e-1
+    end
+end

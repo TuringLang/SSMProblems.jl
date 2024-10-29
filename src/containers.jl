@@ -113,10 +113,14 @@ end
 function update_ref!(
     pc::ParticleContainer{T}, ref_state::Union{Nothing,AbstractVector{T}}, step::Integer=0
 ) where {T}
+    # HACK: should really be handling the initialisation step too but this requires running
+    # the callback after the initialisation step to store that state
+    step == 0 && return pc
     # this comes from Nicolas Chopin's package particles
     if !isnothing(ref_state)
-        pc.proposed[1] = ref_state[step + 1]
-        pc.filtered[1] = ref_state[step + 1]
+        # TODO: setting both of these feels a bit strange
+        pc.proposed.particles[1] = ref_state[step]
+        pc.filtered.particles[1] = ref_state[step]
         pc.ancestors[1] = 1
     end
     return pc
@@ -124,6 +128,42 @@ end
 
 function logmarginal(states::ParticleContainer)
     return logsumexp(states.filtered.log_weights) - logsumexp(states.proposed.log_weights)
+end
+
+## DENSE PARTICLE STORAGE ##################################################################
+
+struct DenseParticleContainer{T}
+    particles::Vector{Vector{T}}
+    ancestors::Vector{Vector{Int}}
+end
+
+function get_ancestry(container::DenseParticleContainer{T}, i::Integer) where {T}
+    ancestory = Vector{T}(undef, length(container.particles))
+    @inbounds for (j, particles) in enumerate(container.particles)
+        ancestory[j] = particles[i]
+    end
+    return ancestory
+end
+
+"""
+    DenseAncestorCallback
+
+A callback for dense ancestry storage, which fills a `DenseParticleContainer`.
+"""
+struct DenseAncestorCallback{T}
+    container::DenseParticleContainer{T}
+
+    function DenseAncestorCallback(::Type{T}) where {T}
+        particles = Vector{T}[]
+        ancestors = Vector{Int}[]
+        return new{T}(DenseParticleContainer(particles, ancestors))
+    end
+end
+
+function (c::DenseAncestorCallback)(model, filter, step, states, data; kwargs...)
+    push!(c.container.particles, deepcopy(states.filtered.particles))
+    push!(c.container.ancestors, deepcopy(states.ancestors))
+    return nothing
 end
 
 ## SPARSE PARTICLE STORAGE #################################################################
