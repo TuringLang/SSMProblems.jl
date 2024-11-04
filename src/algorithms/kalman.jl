@@ -1,7 +1,7 @@
 export KalmanFilter, filter, BatchKalmanFilter
 using GaussianDistributions
 
-export KalmanFilter, KF
+export KalmanFilter, KF, KalmanSmoother, KS
 
 struct KalmanFilter <: AbstractFilter end
 
@@ -11,7 +11,7 @@ function initialise(
     rng::AbstractRNG, model::LinearGaussianStateSpaceModel, filter::KalmanFilter; kwargs...
 )
     μ0, Σ0 = calc_initial(model.dyn; kwargs...)
-    return Gaussian(μ0, Σ0)
+    return GaussianContainer(Gaussian(μ0, Σ0), Gaussian(μ0, Σ0))
 end
 
 function predict(
@@ -19,12 +19,12 @@ function predict(
     model::LinearGaussianStateSpaceModel,
     filter::KalmanFilter,
     step::Integer,
-    states::Gaussian;
+    states::GaussianContainer;
     kwargs...,
 )
-    μ, Σ = GaussianDistributions.pair(states)
+    μ, Σ = GaussianDistributions.pair(states.filtered)
     A, b, Q = calc_params(model.dyn, step; kwargs...)
-    states = Gaussian(A * μ + b, A * Σ * A' + Q)
+    states.proposed = Gaussian(A * μ + b, A * Σ * A' + Q)
     return states
 end
 
@@ -32,11 +32,11 @@ function update(
     model::LinearGaussianStateSpaceModel,
     filter::KalmanFilter,
     step::Integer,
-    states::Gaussian,
+    states::GaussianContainer,
     obs::AbstractVector;
     kwargs...,
 )
-    μ, Σ = GaussianDistributions.pair(states)
+    μ, Σ = GaussianDistributions.pair(states.proposed)
     H, c, R = calc_params(model.obs, step; kwargs...)
 
     # Update state
@@ -45,11 +45,12 @@ function update(
     S = H * Σ * H' + R
     K = Σ * H' / S
 
-    states = Gaussian(μ + K * y, Σ - K * H * Σ)
-
-    # Compute log-likelihood
     # HACK: force the covariance to be positive definite
     S = (S + S') / 2
+
+    states.filtered = Gaussian(μ + K * y, Σ - K * H * Σ)
+
+    # Compute log-likelihood
     ll = logpdf(MvNormal(m, S), obs)
 
     return states, ll
@@ -172,4 +173,78 @@ function update(
     log_likes[isnan.(log_likes)] .= -Inf
 
     return BatchGaussianDistribution(μ_filt, Σ_filt), dropdims(log_likes; dims=1)
+end
+
+## KALMAN SMOOTHER #########################################################################
+
+struct KalmanSmoother <: AbstractSmoother end
+
+const KS = KalmanSmoother()
+
+struct StateCallback{T}
+    proposed_states::Vector{Gaussian{Vector{T},Matrix{T}}}
+    filtered_states::Vector{Gaussian{Vector{T},Matrix{T}}}
+end
+function StateCallback(N::Integer, T::Type)
+    return StateCallback{T}(
+        Vector{Gaussian{Vector{T},Matrix{T}}}(undef, N),
+        Vector{Gaussian{Vector{T},Matrix{T}}}(undef, N),
+    )
+end
+
+function (callback::StateCallback)(
+    model::LinearGaussianStateSpaceModel,
+    algo::KalmanFilter,
+    iter::Integer,
+    states,
+    obs;
+    kwargs...,
+)
+    callback.proposed_states[iter] = states.proposed
+    callback.filtered_states[iter] = states.filtered
+    return nothing
+end
+
+function smooth(
+    rng::AbstractRNG,
+    model::LinearGaussianStateSpaceModel{T},
+    alg::KalmanSmoother,
+    observations::AbstractVector;
+    callback=nothing,
+    kwargs...,
+) where {T}
+    cache = StateCallback(length(observations), T)
+
+    state, ll = filter(rng, model, KalmanFilter(), observations; callback=cache, kwargs...)
+
+    back_state = state.filtered
+
+    for t in (length(observations) - 1):-1:1
+        back_state = backward(
+            rng, model, alg, t, back_state, observations[t]; states_cache=cache, kwargs...
+        )
+    end
+
+    return back_state, ll
+end
+
+function backward(
+    rng::AbstractRNG,
+    model::LinearGaussianStateSpaceModel{T},
+    alg::KalmanSmoother,
+    iter::Integer,
+    back_state,
+    obs;
+    states_cache,
+    kwargs...,
+) where {T}
+    μ, Σ = GaussianDistributions.pair(back_state)
+    μ_pred, Σ_pred = GaussianDistributions.pair(states_cache.proposed_states[iter + 1])
+    μ_filt, Σ_filt = GaussianDistributions.pair(states_cache.filtered_states[iter])
+
+    G = Σ_filt * model.dyn.A' * inv(Σ_pred)
+    μ = μ_filt .+ G * (μ .- μ_pred)
+    Σ = Σ_filt .+ G * (Σ .- Σ_pred) * G'
+
+    return Gaussian(μ, Σ)
 end

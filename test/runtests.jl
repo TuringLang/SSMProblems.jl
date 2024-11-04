@@ -74,6 +74,71 @@ include("resamplers.jl")
     end
 end
 
+@testitem "Kalman smoother test" begin
+    using GeneralisedFilters
+    using Distributions
+    using LinearAlgebra
+    using StableRNGs
+
+    for Dy in [2, 3, 4]
+        Dx = 3
+
+        rng = StableRNG(1234)
+        μ0 = rand(rng, Dx)
+        Σ0 = rand(rng, Dx, Dx)
+        Σ0 = Σ0 * Σ0'  # make Σ0 positive definite
+        A = rand(rng, Dx, Dx)
+        b = rand(rng, Dx)
+        Q = rand(rng, Dx, Dx)
+        Q = Q * Q'  # make Q positive definite
+        H = rand(rng, Dy, Dx)
+        c = rand(rng, Dy)
+        R = rand(rng, Dy, Dy)
+        R = R * R'  # make R positive definite
+
+        model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
+
+        observations = [rand(rng, Dy), rand(rng, Dy)]
+
+        ks = KalmanSmoother()
+
+        states, ll = GeneralisedFilters.smooth(rng, model, ks, observations)
+
+        # Let Z = [X0, X1, X2, Y1, Y2] be the joint state vector
+        # Write Z = P.Z + ϵ, where ϵ ~ N(μ_ϵ, Σ_ϵ)
+        P = [
+            zeros(Dx, 3Dx + 2Dy)
+            A zeros(Dx, 2Dx + 2Dy)
+            zeros(Dx, Dx) A zeros(Dx, Dx + 2Dy)
+            zeros(Dy, Dx) H zeros(Dy, Dx + 2Dy)
+            zeros(Dy, 2Dx) H zeros(Dy, 2Dy)
+        ]
+        μ_ϵ = [μ0; b; b; c; c]
+        Σ_ϵ = [
+            Σ0 zeros(Dx, 2Dx + 2Dy)
+            zeros(Dx, Dx) Q zeros(Dx, Dx + 2Dy)
+            zeros(Dx, 2Dx) Q zeros(Dx, 2Dy)
+            zeros(Dy, 3Dx) R zeros(Dy, Dy)
+            zeros(Dy, 3Dx + Dy) R
+        ]
+
+        # Note (I - P)Z = ϵ and solve for Z ~ N(μ_Z, Σ_Z)
+        μ_Z = (I - P) \ μ_ϵ
+        Σ_Z = ((I - P) \ Σ_ϵ) / (I - P)'
+
+        # Condition on observations using formula for MVN conditional distribution. See: 
+        # https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Conditional_distributions
+        y = [observations[1]; observations[2]]
+        I_x = (Dx + 1):(2Dx)  # just X1
+        I_y = (3Dx + 1):(3Dx + 2Dy)  # Y1 and Y2
+        μ_X1 = μ_Z[I_x] + Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ (y - μ_Z[I_y]))
+        Σ_X1 = Σ_Z[I_x, I_x] - Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ Σ_Z[I_y, I_x])
+
+        @test states.μ ≈ μ_X1
+        @test states.Σ ≈ Σ_X1
+    end
+end
+
 @testitem "Bootstrap filter test" begin
     using GeneralisedFilters
     using SSMProblems

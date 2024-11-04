@@ -11,6 +11,8 @@ using StatsBase
 using CUDA
 using NNlib
 
+## FILTERING BASE ##########################################################################
+
 abstract type AbstractFilter <: AbstractSampler end
 
 """
@@ -94,6 +96,13 @@ function step(
 
     return filtered_state, ll
 end
+
+## SMOOTHING BASE ##########################################################################
+
+abstract type AbstractSmoother <: AbstractSampler end
+
+# function smooth end
+# function backward end
 
 # Filtering utilities
 include("containers.jl")
