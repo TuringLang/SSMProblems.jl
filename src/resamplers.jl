@@ -152,13 +152,13 @@ end
 function sample_ancestors(
     rng::AbstractRNG, ::Systematic, weights::CuVector, n::Int=length(weights)
 )
-    offspring = sample_offspring(rng, weights, n)
+    offspring = sample_offspring(rng, Systematic(), weights, n)
     return offspring_to_ancestors(offspring)
 end
 
 # Following Code 8 of Murray et. al (2015)
 function sample_offspring(
-    rng::AbstractRNG, weights::CuVector{WT}, n::Int=length(weights)
+    rng::AbstractRNG, ::Systematic, weights::CuVector{WT}, n::Int=length(weights)
 ) where {WT}
     W = cumsum(weights)
     Wn = CUDA.@allowscalar W[n]
@@ -173,13 +173,13 @@ struct Stratified <: AbstractResampler end
 function sample_ancestors(
     rng::AbstractRNG, ::Stratified, weights::CuVector, n::Int=length(weights)
 )
-    offspring = sample_offspring(rng, weights, n)
+    offspring = sample_offspring(rng, Stratified(), weights, n)
     return offspring_to_ancestors(offspring)
 end
 
 # Following Code 7 of Murray et. al (2015)
 function sample_offspring(
-    rng::AbstractRNG, weights::CuVector{WT}, n::Int=length(weights)
+    rng::AbstractRNG, ::Stratified, weights::CuVector{WT}, n::Int=length(weights)
 ) where {WT}
     u = rand(rng, n)
     W = cumsum(weights)
