@@ -113,15 +113,14 @@ end
 function update_ref!(
     pc::ParticleContainer{T}, ref_state::Union{Nothing,AbstractVector{T}}, step::Integer=0
 ) where {T}
-    # HACK: should really be handling the initialisation step too but this requires running
-    # the callback after the initialisation step to store that state
-    step == 0 && return pc
     # this comes from Nicolas Chopin's package particles
     if !isnothing(ref_state)
         # TODO: setting both of these feels a bit strange
         pc.proposed.particles[1] = ref_state[step]
         pc.filtered.particles[1] = ref_state[step]
-        pc.ancestors[1] = 1
+        if step > 0
+            pc.ancestors[1] = 1
+        end
     end
     return pc
 end
@@ -133,16 +132,20 @@ end
 ## DENSE PARTICLE STORAGE ##################################################################
 
 struct DenseParticleContainer{T}
-    particles::Vector{Vector{T}}
+    particles::OffsetVector{Vector{T},Vector{Vector{T}}}
     ancestors::Vector{Vector{Int}}
 end
 
 function get_ancestry(container::DenseParticleContainer{T}, i::Integer) where {T}
-    ancestory = Vector{T}(undef, length(container.particles))
-    @inbounds for (j, particles) in enumerate(container.particles)
-        ancestory[j] = particles[i]
+    a = i
+    v = Vector{T}(undef, length(container.particles))
+    ancestry = OffsetVector(v, -1)
+    for t in length(container.ancestors):-1:1
+        ancestry[t] = container.particles[t][a]
+        a = container.ancestors[t][a]
     end
-    return ancestory
+    ancestry[0] = container.particles[0][a]
+    return ancestry
 end
 
 """
@@ -154,10 +157,15 @@ struct DenseAncestorCallback{T}
     container::DenseParticleContainer{T}
 
     function DenseAncestorCallback(::Type{T}) where {T}
-        particles = Vector{T}[]
+        particles = OffsetVector(Vector{T}[], -1)
         ancestors = Vector{Int}[]
         return new{T}(DenseParticleContainer(particles, ancestors))
     end
+end
+
+function (c::DenseAncestorCallback)(model, filter, states, data; kwargs...)
+    push!(c.container.particles, deepcopy(states.filtered.particles))
+    return nothing
 end
 
 function (c::DenseAncestorCallback)(model, filter, step, states, data; kwargs...)

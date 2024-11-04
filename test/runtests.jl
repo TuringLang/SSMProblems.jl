@@ -62,8 +62,8 @@ include("resamplers.jl")
         μ_X1 = μ_Z[I_x] + Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ (y - μ_Z[I_y]))
         Σ_X1 = Σ_Z[I_x, I_x] - Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ Σ_Z[I_y, I_x])
 
-        @test states.μ ≈ μ_X1
-        @test states.Σ ≈ Σ_X1
+        @test states.filtered.μ ≈ μ_X1
+        @test states.filtered.Σ ≈ Σ_X1
 
         # Exact marginal distribution to test log-likelihood
         μ_Y1 = μ_Z[I_y]
@@ -182,7 +182,7 @@ end
     ws = softmax(bf_state.filtered.log_weights)
 
     # Compare filtered states
-    @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
+    @test first(kf_state.filtered.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
 
     # since this is log valued, we can up the tolerance
     @test llkf ≈ llbf atol = 0.1
@@ -524,8 +524,8 @@ end
     # println("RBPF log-likelihood: ", ll)
 
     @test kf_ll ≈ ll rtol = 1e-2
-    @test first(kf_state.μ) ≈ sum(xs[1, :] .* weights) rtol = 1e-1
-    @test last(kf_state.μ) ≈ sum(zs.μs[end, :] .* weights) rtol = 1e-2
+    @test first(kf_state.filtered.μ) ≈ sum(xs[1, :] .* weights) rtol = 1e-1
+    @test last(kf_state.filtered.μ) ≈ sum(zs.μs[end, :] .* weights) rtol = 1e-2
 end
 
 @testitem "RBPF ancestory test" begin
@@ -612,7 +612,6 @@ end
     # TODO: add proper test comparing to dense storage
 end
 
-# TODO: replace this with comparison to RTS smoother
 @testitem "CSMC test" begin
     using GeneralisedFilters
     using SSMProblems
@@ -623,43 +622,36 @@ end
     using Random: randexp
     using StatsBase: sample, Weights
 
-    T = Float32
+    using OffsetArrays
+
+    Dx = 1
+    Dy = 1
+    T = Float64
+
     rng = StableRNG(1234)
-    σx², σy² = randexp(rng, T, 2)
+    μ0 = rand(rng, Dx)
+    Σ0 = rand(rng, Dx, Dx)
+    Σ0 = Σ0 * Σ0'  # make Σ0 positive definite
+    A = rand(rng, Dx, Dx)
+    b = rand(rng, Dx)
+    Q = rand(rng, Dx, Dx)
+    Q = Q * Q'  # make Q positive definite
+    H = rand(rng, Dy, Dx)
+    c = rand(rng, Dy)
+    R = rand(rng, Dy, Dy)
+    R = R * R'  # make R positive definite
 
-    # initial state distribution
-    μ0 = zeros(T, 2)
-    Σ0 = PDMat(T[1 0; 0 1])
-
-    # state transition equation
-    A = T[1 1; 0 1]
-    b = T[0; 0]
-    Q = PDiagMat([σx²; 0])
-
-    # observation equation
-    H = T[1 0]
-    c = T[0;]
-    R = [σy²;;]
-
-    # when working with PDMats, the Kalman filter doesn't play nicely without this
-    function Base.convert(::Type{PDMat{T,MT}}, mat::MT) where {MT<:AbstractMatrix,T<:Real}
-        return PDMat(Symmetric(mat))
-    end
+    model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
 
     model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
     _, _, data = sample(rng, model, 5)
 
-    # Naive smoother
-    N_particles_1 = 1000000
-    cb = GeneralisedFilters.DenseAncestorCallback(Vector{T})
-    bf = BF(N_particles_1; threshold=0.8)
-    bf_state, llbf = GeneralisedFilters.filter(rng, model, bf, data; callback=cb)
-    weights = softmax(bf_state.filtered.log_weights)
-    sampled_indices = sample(rng, 1:length(weights), Weights(weights), N_particles_1)
-    μs = Vector{Vector{T}}(undef, N_particles_1)
-    for i in 1:N_particles_1
-        μs[i] = GeneralisedFilters.get_ancestry(cb.container, sampled_indices[i])[3]
-    end
+    t_smooth = 2
+
+    # Kalman smoother
+    state, _ = GeneralisedFilters.smooth(
+        rng, model, KalmanSmoother(), data; t_smooth=t_smooth
+    )
 
     N_particles = 1000
     cb = GeneralisedFilters.DenseAncestorCallback(Vector{T})
@@ -673,9 +665,11 @@ end
         ref_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
 
         N_burnin = 100
-        N_sample = 2000
+        N_sample = 500
         N_steps = N_burnin + N_sample
-        trajectory_samples = Vector{Vector{Vector{T}}}(undef, N_sample)
+        trajectory_samples = Vector{OffsetVector{Vector{T},Vector{Vector{T}}}}(
+            undef, N_sample
+        )
         for i in 1:N_steps
             bf_state, _ = GeneralisedFilters.filter(
                 rng, model, bf, data; ref_state=ref_traj
@@ -689,9 +683,8 @@ end
         end
 
         # Compare smoothed states
-        naive_mean = first.(sum(μs) / N_particles_1)
-        csmc_mean = first.(sum(getindex.(trajectory_samples, 3)) / N_sample)
-        @test csmc_mean ≈ naive_mean rtol = 1e-1
+        csmc_mean = sum(getindex.(trajectory_samples, t_smooth)) / N_sample
+        @test csmc_mean ≈ state.μ rtol = 1e-1
     end
 end
 

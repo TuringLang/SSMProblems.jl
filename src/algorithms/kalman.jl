@@ -193,6 +193,12 @@ function StateCallback(N::Integer, T::Type)
 end
 
 function (callback::StateCallback)(
+    model::LinearGaussianStateSpaceModel, algo::KalmanFilter, states, obs; kwargs...
+)
+    return nothing
+end
+
+function (callback::StateCallback)(
     model::LinearGaussianStateSpaceModel,
     algo::KalmanFilter,
     iter::Integer,
@@ -210,6 +216,7 @@ function smooth(
     model::LinearGaussianStateSpaceModel{T},
     alg::KalmanSmoother,
     observations::AbstractVector;
+    t_smooth=1,
     callback=nothing,
     kwargs...,
 ) where {T}
@@ -219,7 +226,7 @@ function smooth(
 
     back_state = state.filtered
 
-    for t in (length(observations) - 1):-1:1
+    for t in (length(observations) - 1):-1:t_smooth
         back_state = backward(
             rng, model, alg, t, back_state, observations[t]; states_cache=cache, kwargs...
         )

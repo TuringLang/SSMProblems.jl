@@ -4,6 +4,7 @@ using AbstractMCMC: AbstractMCMC, AbstractSampler
 import Distributions: MvNormal
 import Random: AbstractRNG, default_rng, rand
 using GaussianDistributions: pairs, Gaussian
+using OffsetArrays
 using SSMProblems
 using StatsBase
 
@@ -60,6 +61,7 @@ function filter(
     kwargs...,
 )
     states = initialise(rng, model, alg; kwargs...)
+    isnothing(callback) || callback(model, alg, states, observations; kwargs...)
     log_evidence = zero(eltype(model))
 
     for t in eachindex(observations)
