@@ -1,6 +1,8 @@
 using DataStructures: Stack
 using Random: rand
 
+using AcceleratedKernels
+
 ## GAUSSIAN STATES #########################################################################
 
 # TODO: add Kalman gain, innovation covariance, and residuals
@@ -250,6 +252,92 @@ function rand(rng::AbstractRNG, tree::ParticleTree, weights::AbstractVector{<:Re
         j = tree.parents[j]
     end
     return reverse(xs)
+end
+
+## GPU SPARSE PARTICLE STORAGE #############################################################
+
+# TODO: make the state type more general
+mutable struct ParallelParticleTree{T,M<:CUDA.AbstractMemory}
+    states::CuMatrix{T,M}
+    parents::CuVector{Int64,M}
+    leaves::CuVector{Int64,M}
+    offspring::CuVector{Int64,M}
+
+    function ParallelParticleTree(states::CuMatrix{T}, M::Integer) where {T}
+        parents = CUDA.zeros(Int64, M)
+        offspring = CUDA.zeros(Int64, M)
+        N = size(states, 2)
+        tree_states = CuArray{T}(undef, size(states, 1), M)
+        tree_states[:, 1:N] = states
+        leaves = CuArray(1:N)
+        return new{T,CUDA.DeviceMemory}(tree_states, parents, leaves, offspring)
+    end
+end
+
+function scatter!(r, p, q)
+    return r[q] .= p
+end
+
+function gather!(r, p, q)
+    return r .= p[q]
+end
+
+function update_offspring!(offspring, leaves, parents)
+    AcceleratedKernels.foreachindex(leaves) do i
+        j = leaves[i]
+        while (j > 0) && (offspring[j] == 0)
+            j = parents[j]
+            if j > 0
+                offspring[j] -= 1
+            end
+        end
+    end
+end
+
+function insert!(tree::ParallelParticleTree, states, ancestors::CuVector{Int64})
+    b = CuVector{Int64}(undef, length(ancestors))
+    gather!(b, tree.leaves, ancestors)
+
+    # Update offspring counts
+    offspring = ancestors_to_offspring(ancestors)
+    scatter!(tree.offspring, offspring, tree.leaves)
+
+    # Prune tree
+    update_offspring!(tree.offspring, tree.leaves, tree.parents)
+
+    # Expand tree if necessary
+    # TODO: can we combine this with z computation and update z if expanding?
+    if sum(tree.offspring .== 0) < length(ancestors)
+        println("Expanding tree")
+        expand!(tree)
+    end
+    z = cumsum(tree.offspring .== 0)
+
+    # Insert new states
+    new_leaves = searchsortedfirst(z, CuArray(1:length(tree.leaves)))
+    scatter!(tree.parents, b, new_leaves)
+    tree.states[:, new_leaves] .= states
+    tree.leaves .= new_leaves
+    return tree
+end
+
+function expand!(tree::ParallelParticleTree{T}) where {T}
+    M = size(tree.states, 2)
+
+    new_parents = CUDA.zeros(Int64, 2M)
+    new_parents[1:length(tree.parents)] = tree.parents
+    tree.parents = new_parents
+
+    new_offspring = CUDA.zeros(Int64, 2M)
+    new_offspring[1:length(tree.offspring)] = tree.offspring
+    tree.offspring = new_offspring
+
+    # new_states = CuArray(undef, size(tree.states, 1), 2 * M)
+    new_states = CuArray{T}(undef, size(tree.states, 1), 2 * M)
+    new_states[:, 1:M] = tree.states
+    tree.states = new_states
+
+    return tree
 end
 
 ## ANCESTOR STORAGE CALLBACK ###############################################################
