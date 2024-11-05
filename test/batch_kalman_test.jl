@@ -39,6 +39,7 @@
     ]
 
     states = first.(outputs)
+    states = getproperty.(states, :filtered)
     log_likelihoods = last.(outputs)
 
     struct BatchLinearGaussianDynamics{T,MT} <: LinearGaussianLatentDynamics{T}
@@ -164,6 +165,6 @@
     # println("Batch states: ", batch_output[1].μs')
     # println("Individual states: ", getproperty.(states, :μ))
 
-    @test Array(batch_output[2])[end] .≈ log_likelihoods[end]
+    @test Array(batch_output[2])[end] .≈ log_likelihoods[end] rtol = 1e-5
     @test Array(batch_output[1].μs) ≈ stack(getproperty.(states, :μ)) rtol = 1e-5
 end
