@@ -129,5 +129,6 @@ include("algorithms/kalman.jl")
 include("algorithms/forward.jl")
 include("algorithms/rbpf.jl")
 include("algorithms/ffbs.jl")
+include("algorithms/guidedpf.jl")
 
 end
