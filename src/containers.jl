@@ -340,6 +340,34 @@ function expand!(tree::ParallelParticleTree{T}) where {T}
     return tree
 end
 
+"""
+    ParallelAncestorCallback
+
+A callback for parallel sparse ancestry storage, which preallocates and returns a populated 
+`ParallelParticleTree` object.
+"""
+struct ParallelAncestorCallback{T}
+    tree::ParallelParticleTree{T}
+
+    function ParallelAncestorCallback(
+        ::Type{T}, N::Integer, D::Integer, C::Real=1.0
+    ) where {T}
+        M = floor(Int64, C * N * log(N))
+        nodes = CuArray{T}(undef, D, N)
+        return new{T}(ParallelParticleTree(nodes, M))
+    end
+end
+
+function (c::ParallelAncestorCallback)(model, filter, step, states, data; kwargs...)
+    if step == 1
+        # this may be incorrect, but it is functional
+        @inbounds c.tree.states[:, 1:(filter.N)] = deepcopy(states.filtered.particles)
+    end
+    # TODO: this is a combined prune/insert step—split them up
+    insert!(c.tree, states.filtered.particles, states.ancestors)
+    return nothing
+end
+
 ## ANCESTOR STORAGE CALLBACK ###############################################################
 
 """
