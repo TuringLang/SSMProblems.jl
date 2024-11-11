@@ -546,3 +546,138 @@ end
 
     # TODO: add proper test comparing to dense storage
 end
+
+@testitem "GPU-RBPF ancestory test" begin
+    using GeneralisedFilters
+    using CUDA
+    using NNlib
+    using LinearAlgebra
+    using StableRNGs
+
+    # TODO: seems to pass when D_inner = D_obs but fails otherwise
+    D_outer = 2
+    D_inner = 3
+    D_obs = 2
+
+    # Define inner dynamics
+    struct InnerDynamics{T} <: LinearGaussianLatentDynamics{T}
+        μ0::Vector{T}
+        Σ0::Matrix{T}
+        A::Matrix{T}
+        b::Vector{T}
+        C::Matrix{T}
+        Q::Matrix{T}
+    end
+    function GeneralisedFilters.batch_calc_μ0s(
+        dyn::InnerDynamics{T}, N; kwargs...
+    ) where {T}
+        μ0s = CuArray{T}(undef, length(dyn.μ0), N)
+        return μ0s[:, :] .= cu(dyn.μ0)
+    end
+
+    function GeneralisedFilters.batch_calc_Σ0s(
+        dyn::InnerDynamics{T}, N::Integer; kwargs...
+    ) where {T}
+        Σ0s = CuArray{T}(undef, size(dyn.Σ0)..., N)
+        return Σ0s[:, :, :] .= cu(dyn.Σ0)
+    end
+
+    function GeneralisedFilters.batch_calc_As(
+        dyn::InnerDynamics{T}, ::Integer, N::Integer; kwargs...
+    ) where {T}
+        As = CuArray{T}(undef, size(dyn.A)..., N)
+        As[:, :, :] .= cu(dyn.A)
+        return As
+    end
+
+    function GeneralisedFilters.batch_calc_bs(
+        dyn::InnerDynamics{T}, ::Integer, N::Integer; prev_outer, kwargs...
+    ) where {T}
+        Cs = CuArray{T}(undef, size(dyn.C)..., N)
+        Cs[:, :, :] .= cu(dyn.C)
+        return NNlib.batched_vec(Cs, prev_outer) .+ cu(dyn.b)
+    end
+
+    function GeneralisedFilters.batch_calc_Qs(
+        dyn::InnerDynamics{T}, ::Integer, N::Integer; kwargs...
+    ) where {T}
+        Q = CuArray{T}(undef, size(dyn.Q)..., N)
+        return Q[:, :, :] .= cu(dyn.Q)
+    end
+
+    rng = StableRNG(1234)
+    μ0 = rand(rng, D_outer + D_inner)
+    Σ0s = [rand(rng, D_outer, D_outer), rand(rng, D_inner, D_inner)]
+    Σ0s = [Σ * Σ' for Σ in Σ0s]  # make Σ0 positive definite
+    Σ0 = [
+        Σ0s[1] zeros(D_outer, D_inner)
+        zeros(D_inner, D_outer) Σ0s[2]
+    ]
+    A = [
+        rand(rng, D_outer, D_outer) zeros(D_outer, D_inner)
+        rand(rng, D_inner, D_outer + D_inner)
+    ]
+    # Make mean-reverting
+    A /= 3.0
+    A[diagind(A)] .= -0.5
+    b = rand(rng, D_outer + D_inner)
+    Qs = [rand(rng, D_outer, D_outer), rand(rng, D_inner, D_inner)] ./ 10.0
+    Qs = [Q * Q' for Q in Qs]  # make Q positive definite
+    Q = [
+        Qs[1] zeros(D_outer, D_inner)
+        zeros(D_inner, D_outer) Qs[2]
+    ]
+    H = [zeros(D_obs, D_outer) rand(rng, D_obs, D_inner)]
+    c = rand(rng, D_obs)
+    R = rand(rng, D_obs, D_obs)
+    R = R * R' / 3.0  # make R positive definite
+
+    N_particles = 2000
+    T = 20
+
+    observations = [rand(rng, D_obs) for _ in 1:T]
+
+    # Rao-Blackwellised particle filtering
+
+    outer_dyn = GeneralisedFilters.HomogeneousLinearGaussianLatentDynamics(
+        μ0[1:D_outer],
+        Σ0[1:D_outer, 1:D_outer],
+        A[1:D_outer, 1:D_outer],
+        b[1:D_outer],
+        Qs[1],
+    )
+    inner_dyn = InnerDynamics(
+        μ0[(D_outer + 1):end],
+        Σ0[(D_outer + 1):end, (D_outer + 1):end],
+        A[(D_outer + 1):end, (D_outer + 1):end],
+        b[(D_outer + 1):end],
+        A[(D_outer + 1):end, 1:D_outer],
+        Qs[2],
+    )
+    obs = GeneralisedFilters.HomogeneousLinearGaussianObservationProcess(
+        H[:, (D_outer + 1):end], c, R
+    )
+    hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
+
+    M = floor(Int64, 1.0 * N_particles * log(N_particles))
+    tree = GeneralisedFilters.ParallelParticleTree(
+        GeneralisedFilters.RaoBlackwellisedParticle(
+            CuArray{Float32}(undef, D_outer, N_particles),
+            GeneralisedFilters.BatchGaussianDistribution(
+                CuArray{Float32}(undef, D_inner, N_particles),
+                CuArray{Float32}(undef, D_inner, D_inner, N_particles),
+            ),
+        ),
+        M,
+    )
+    cb = GeneralisedFilters.ParallelAncestorCallback(tree)
+
+    rbpf = BatchRBPF(
+        BatchKalmanFilter(N_particles), N_particles; threshold=0.8, resampler=Multinomial()
+    )
+    states, ll = GeneralisedFilters.filter(hier_model, rbpf, observations; callback=cb)
+
+    ancestry = GeneralisedFilters.get_ancestry(tree, T)
+
+    println(ancestry[:, 1, :])
+end

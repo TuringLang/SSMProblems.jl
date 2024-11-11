@@ -117,7 +117,7 @@ end
 
 struct BatchRBPF{F<:AbstractFilter,RS<:AbstractResampler} <: AbstractFilter
     inner_algo::F
-    n_particles::Int
+    N::Int
     resampler::RS
 end
 function BatchRBPF(
@@ -148,7 +148,7 @@ end
 function initialise(
     rng::AbstractRNG, model::HierarchicalSSM{T}, algo::BatchRBPF; kwargs...
 ) where {T}
-    N = algo.n_particles
+    N = algo.N
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
     xs = batch_simulate(outer_dyn, N, kwargs...)
@@ -168,22 +168,24 @@ function predict(
     states::RaoBlackwellisedParticleContainer;
     kwargs...,
 )
-    N = filter.n_particles
+    N = filter.N
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
     states.proposed, states.ancestors = resample(rng, filter.resampler, states.filtered)
 
-    new_x = batch_simulate(outer_dyn, step, states.proposed.x_particles, N; kwargs...)
-    states.proposed.z_particles = predict(
+    new_x = batch_simulate(
+        outer_dyn, step, states.proposed.particles.x_particles, N; kwargs...
+    )
+    states.proposed.particles.z_particles = predict(
         inner_model,
         filter.inner_algo,
         step,
-        states.proposed.z_particles;
-        prev_outer=states.proposed.x_particles,
+        states.proposed.particles.z_particles;
+        prev_outer=states.proposed.particles.x_particles,
         new_outer=new_x,
         kwargs...,
     )
-    states.proposed.x_particles = new_x
+    states.proposed.particles.x_particles = new_x
 
     return states
 end
@@ -196,16 +198,16 @@ function update(
     obs;
     kwargs...,
 )
-    states.filtered.z_particles, inner_lls = update(
+    states.filtered.particles.z_particles, inner_lls = update(
         model.inner_model,
         filter.inner_algo,
         step,
-        states.proposed.z_particles,
+        states.proposed.particles.z_particles,
         obs;
-        new_outer=states.proposed.x_particles,
+        new_outer=states.proposed.particles.x_particles,
         kwargs...,
     )
-    states.filtered.x_particles = deepcopy(states.proposed.x_particles)
+    states.filtered.particles.x_particles = deepcopy(states.proposed.particles.x_particles)
     states.filtered.log_weights = states.proposed.log_weights .+ inner_lls
 
     step_ll = (

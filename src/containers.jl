@@ -19,6 +19,24 @@ function Base.getindex(d::BatchGaussianDistribution, i)
     return BatchGaussianDistribution(d.μs[:, i], d.Σs[:, :, i])
 end
 
+function Base.getindex(d::BatchGaussianDistribution, i::Vector{Int})
+    return BatchGaussianDistribution(d.μs[:, i], d.Σs[:, :, i])
+end
+function Base.setindex!(d::BatchGaussianDistribution, value::BatchGaussianDistribution, i)
+    d.μs[:, i] = value.μs
+    d.Σs[:, :, i] = value.Σs
+    return d
+end
+function expand!(d::BatchGaussianDistribution, M::Integer)
+    new_μs = CuArray(zeros(eltype(d.μs), size(d.μs, 1), M))
+    new_Σs = CuArray(zeros(eltype(d.Σs), size(d.Σs, 1), size(d.Σs, 2), M))
+    new_μs[:, 1:size(d.μs, 2)] = d.μs
+    new_Σs[:, :, 1:size(d.Σs, 3)] = d.Σs
+    d.μs = new_μs
+    d.Σs = new_Σs
+    return nothing
+end
+
 ## RAO-BLACKWELLISED STATES ################################################################
 
 """
@@ -32,35 +50,64 @@ mutable struct RaoBlackwellisedContainer{XT,ZT}
     z::ZT
 end
 
-# TODO: this needs to be generalised to account for the flatten Levy SSM state
-mutable struct RaoBlackwellisedParticleState{T,M<:CUDA.AbstractMemory,ZT}
+mutable struct RaoBlackwellisedParticle{T,M<:CUDA.AbstractMemory,ZT}
     x_particles::CuArray{T,2,M}
     z_particles::ZT
+end
+
+# TODO: this needs to be generalised to account for the flatten Levy SSM state
+mutable struct RaoBlackwellisedParticleState{
+    T,M<:CUDA.AbstractMemory,PT<:RaoBlackwellisedParticle
+}
+    particles::PT
     log_weights::CuArray{T,1,M}
 end
 
 StatsBase.weights(state::RaoBlackwellisedParticleState) = softmax(state.log_weights)
-Base.length(state::RaoBlackwellisedParticleState) = size(state.x_particles, 2)
+Base.length(state::RaoBlackwellisedParticleState) = length(state.log_weights)
+
+# Allow particle to be get and set via tree_states[:, 1:N] = states
+function Base.getindex(state::RaoBlackwellisedParticle, i)
+    return RaoBlackwellisedParticle(state.x_particles[:, i], state.z_particles)
+end
+function Base.setindex!(state::RaoBlackwellisedParticle, value::RaoBlackwellisedParticle, i)
+    state.x_particles[:, i] = value.x_particles
+    state.z_particles[i] = value.z_particles
+    return state
+end
+Base.length(state::RaoBlackwellisedParticle) = size(state.x_particles, 2)
+
+# Method for increasing size of particle container
+function expand!(p::RaoBlackwellisedParticle, M::Integer)
+    new_x_particles = CuArray(zeros(eltype(p.x_particles), size(p.x_particles, 1), M))
+    new_x_particles[:, 1:size(p.x_particles, 2)] = p.x_particles
+    p.x_particles = new_x_particles
+    return expand!(p.z_particles, M)
+end
 
 """
     RaoBlackwellisedParticleContainer
 """
-mutable struct RaoBlackwellisedParticleContainer{T,M<:CUDA.AbstractMemory,ZT}
-    filtered::RaoBlackwellisedParticleState{T,M,ZT}
-    proposed::RaoBlackwellisedParticleState{T,M,ZT}
+mutable struct RaoBlackwellisedParticleContainer{T,M<:CUDA.AbstractMemory,PT}
+    filtered::RaoBlackwellisedParticleState{T,M,PT}
+    proposed::RaoBlackwellisedParticleState{T,M,PT}
     ancestors::CuArray{Int,1,M}
 
     function RaoBlackwellisedParticleContainer(
         x_particles::CuArray{T,2,M}, z_particles::ZT, log_weights::CuArray{T,1,M}
     ) where {T,M<:CUDA.AbstractMemory,ZT}
         init_particles = RaoBlackwellisedParticleState(
-            x_particles, z_particles, log_weights
+            RaoBlackwellisedParticle(x_particles, z_particles), log_weights
         )
         prop_particles = RaoBlackwellisedParticleState(
-            similar(x_particles), deepcopy(z_particles), CUDA.zeros(T, size(x_particles, 2))
+            RaoBlackwellisedParticle(similar(x_particles), deepcopy(z_particles)),
+            CUDA.zeros(T, size(x_particles, 2)),
         )
         ancestors = CuArray(1:size(x_particles, 2))
-        return new{T,M,ZT}(init_particles, prop_particles, ancestors)
+
+        return new{T,M,typeof(RaoBlackwellisedParticle(x_particles, z_particles))}(
+            init_particles, prop_particles, ancestors
+        )
     end
 end
 
@@ -257,20 +304,22 @@ end
 ## GPU SPARSE PARTICLE STORAGE #############################################################
 
 # TODO: make the state type more general
-mutable struct ParallelParticleTree{T,M<:CUDA.AbstractMemory}
-    states::CuMatrix{T,M}
+mutable struct ParallelParticleTree{ST,M<:CUDA.AbstractMemory}
+    states::ST
     parents::CuVector{Int64,M}
     leaves::CuVector{Int64,M}
     offspring::CuVector{Int64,M}
 
-    function ParallelParticleTree(states::CuMatrix{T}, M::Integer) where {T}
+    function ParallelParticleTree(states::ST, M::Integer) where {ST}
         parents = CUDA.zeros(Int64, M)
         offspring = CUDA.zeros(Int64, M)
-        N = size(states, 2)
-        tree_states = CuArray{T}(undef, size(states, 1), M)
-        tree_states[:, 1:N] = states
+        N = length(states)
+        # tree_states = CuArray{T}(undef, size(states, 1), M)
+        # tree_states[:, 1:N] = states
+        expand!(states, M)
+        tree_states = states
         leaves = CuArray(1:N)
-        return new{T,CUDA.DeviceMemory}(tree_states, parents, leaves, offspring)
+        return new{ST,CUDA.DeviceMemory}(tree_states, parents, leaves, offspring)
     end
 end
 
@@ -316,7 +365,7 @@ function insert!(tree::ParallelParticleTree, states, ancestors::CuVector{Int64})
     # Insert new states
     new_leaves = searchsortedfirst(z, CuArray(1:length(tree.leaves)))
     scatter!(tree.parents, b, new_leaves)
-    tree.states[:, new_leaves] .= states
+    tree.states[new_leaves] = states
     tree.leaves .= new_leaves
     return tree
 end
@@ -333,11 +382,25 @@ function expand!(tree::ParallelParticleTree{T}) where {T}
     tree.offspring = new_offspring
 
     # new_states = CuArray(undef, size(tree.states, 1), 2 * M)
-    new_states = CuArray{T}(undef, size(tree.states, 1), 2 * M)
-    new_states[:, 1:M] = tree.states
-    tree.states = new_states
+    # new_states = CuArray{T}(undef, size(tree.states, 1), 2 * M)
+    # new_states[:, 1:M] = tree.states
+    # tree.states = new_states
+    expand!(tree.states, 2M)
 
     return tree
+end
+
+# TODO: generalise this for any type of state
+# TODO: this doesn't how how many timesteps there are
+function get_ancestry(tree::ParallelParticleTree, T::Integer)
+    D = size(tree.states.x_particles, 1)
+    paths = CuArray{Float32,3}(undef, D, length(tree.leaves), T)
+    parents = tree.leaves
+    for t in T:-1:1
+        paths[:, :, t] = tree.states.x_particles[:, parents]
+        gather!(parents, tree.parents, parents)
+    end
+    return paths
 end
 
 """
@@ -346,22 +409,23 @@ end
 A callback for parallel sparse ancestry storage, which preallocates and returns a populated 
 `ParallelParticleTree` object.
 """
+# TODO: this should be initialised during inference so types don't need to be predetermined
 struct ParallelAncestorCallback{T}
     tree::ParallelParticleTree{T}
 
-    function ParallelAncestorCallback(
-        ::Type{T}, N::Integer, D::Integer, C::Real=1.0
-    ) where {T}
-        M = floor(Int64, C * N * log(N))
-        nodes = CuArray{T}(undef, D, N)
-        return new{T}(ParallelParticleTree(nodes, M))
-    end
+    # function ParallelAncestorCallback(
+    #     ::Type{T}, N::Integer, D::Integer, C::Real=1.0
+    # ) where {T}
+    #     M = floor(Int64, C * N * log(N))
+    #     nodes = CuArray{T}(undef, D, N)
+    #     return new{T}(ParallelParticleTree(nodes, M))
+    # end
 end
 
 function (c::ParallelAncestorCallback)(model, filter, step, states, data; kwargs...)
     if step == 1
         # this may be incorrect, but it is functional
-        @inbounds c.tree.states[:, 1:(filter.N)] = deepcopy(states.filtered.particles)
+        @inbounds c.tree.states[1:(filter.N)] = deepcopy(states.filtered.particles)
     end
     # TODO: this is a combined prune/insert step—split them up
     insert!(c.tree, states.filtered.particles, states.ancestors)
