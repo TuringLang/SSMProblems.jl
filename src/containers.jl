@@ -82,7 +82,8 @@ function expand!(p::RaoBlackwellisedParticle, M::Integer)
     new_x_particles = CuArray(zeros(eltype(p.x_particles), size(p.x_particles, 1), M))
     new_x_particles[:, 1:size(p.x_particles, 2)] = p.x_particles
     p.x_particles = new_x_particles
-    return expand!(p.z_particles, M)
+    expand!(p.z_particles, M)
+    return nothing
 end
 
 """
@@ -311,6 +312,10 @@ mutable struct ParallelParticleTree{ST,M<:CUDA.AbstractMemory}
     offspring::CuVector{Int64,M}
 
     function ParallelParticleTree(states::ST, M::Integer) where {ST}
+        if M < length(states)
+            throw(ArgumentError("M must be greater than or equal to the number of states"))
+        end
+
         parents = CUDA.zeros(Int64, M)
         offspring = CUDA.zeros(Int64, M)
         N = length(states)
@@ -371,7 +376,7 @@ function insert!(tree::ParallelParticleTree, states, ancestors::CuVector{Int64})
 end
 
 function expand!(tree::ParallelParticleTree{T}) where {T}
-    M = size(tree.states, 2)
+    M = length(tree.states)
 
     new_parents = CUDA.zeros(Int64, 2M)
     new_parents[1:length(tree.parents)] = tree.parents

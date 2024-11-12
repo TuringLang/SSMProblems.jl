@@ -659,7 +659,7 @@ end
     )
     hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
 
-    M = floor(Int64, 1.0 * N_particles * log(N_particles))
+    M = N_particles * 2 - 1  # force expansion
     tree = GeneralisedFilters.ParallelParticleTree(
         GeneralisedFilters.RaoBlackwellisedParticle(
             CuArray{Float32}(undef, D_outer, N_particles),
