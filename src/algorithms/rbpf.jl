@@ -146,7 +146,11 @@ function searchsorted!(ws_cdf, us, idxs)
 end
 
 function initialise(
-    rng::AbstractRNG, model::HierarchicalSSM{T}, algo::BatchRBPF; kwargs...
+    rng::AbstractRNG,
+    model::HierarchicalSSM{T},
+    algo::BatchRBPF;
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+    kwargs...,
 ) where {T}
     N = algo.n_particles
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
@@ -155,17 +159,18 @@ function initialise(
     zs = initialise(inner_model, algo.inner_algo; new_outer=xs, kwargs...)
     log_ws = CUDA.zeros(T, N)
 
-    return RaoBlackwellisedParticleContainer(xs, zs, log_ws)
+    # return RaoBlackwellisedParticleContainer(xs, zs, log_ws)
+    return update_ref!(RaoBlackwellisedParticleContainer(xs, zs, log_ws), ref_state)
 end
 
 # TODO: use RNG
-# TODO: include ref_state
 function predict(
     rng::AbstractRNG,
     model::HierarchicalSSM,
     filter::BatchRBPF,
     step::Integer,
     states::RaoBlackwellisedParticleContainer;
+    ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
     N = filter.n_particles
@@ -185,7 +190,8 @@ function predict(
     )
     states.proposed.x_particles = new_x
 
-    return states
+    # return states
+    return update_ref!(states, ref_state, step)
 end
 
 function update(

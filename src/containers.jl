@@ -125,6 +125,28 @@ function update_ref!(
     return pc
 end
 
+function update_ref!(
+    pc::RaoBlackwellisedParticleContainer,
+    ref_state::Union{Nothing,AbstractVector},
+    step::Integer=0,
+)
+    # this comes from Nicolas Chopin's package particles
+    if !isnothing(ref_state)
+        # TODO: setting both of these feels a bit strange
+        # TODO: update these to match particle interface in GPU sparse storage PR
+        CUDA.@allowscalar begin
+            pc.proposed.x_particles[:, 1] = ref_state[step].x_particles
+            # TODO: handle these recursively
+            pc.filtered.z_particles.μs[:, 1] = ref_state[step].z_particles.μs
+            pc.filtered.z_particles.Σs[:, :, 1] = ref_state[step].z_particles.Σs
+            if step > 0
+                pc.ancestors[1] = 1
+            end
+        end
+    end
+    return pc
+end
+
 function logmarginal(states::ParticleContainer)
     return logsumexp(states.filtered.log_weights) - logsumexp(states.proposed.log_weights)
 end
