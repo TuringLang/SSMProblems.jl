@@ -471,12 +471,52 @@ end
 function get_ancestry(tree::ParallelParticleTree, T::Integer)
     D = size(tree.states.x_particles, 1)
     paths = CuArray{Float32,3}(undef, D, length(tree.leaves), T)
-    parents = tree.leaves
+    parents = copy(tree.leaves)
     for t in T:-1:1
         paths[:, :, t] = tree.states.x_particles[:, parents]
         gather!(parents, tree.parents, parents)
     end
     return paths
+end
+
+# Get ancestory of a single particle
+# HACK: this is hard-coded for the Gaussian RB case
+# HACK: this is incredibly rough code used as a proof of concept that the GPU-RB-CSMC is correct
+function get_ancestry(container::ParallelParticleTree, i::Integer, T::Integer)
+    path = OffsetVector(
+        Vector{
+            RaoBlackwellisedParticleState{
+                Float32,
+                CUDA.DeviceMemory,
+                RaoBlackwellisedParticle{
+                    Float32,
+                    CUDA.DeviceMemory,
+                    BatchGaussianDistribution{Float32,CUDA.DeviceMemory},
+                },
+            },
+        }(
+            undef, T + 1
+        ),
+        -1,
+    )
+    CUDA.@allowscalar begin
+        ancestor_index = container.leaves[i]
+        for t in T:-1:0
+            selected_particle = GeneralisedFilters.RaoBlackwellisedParticleState(
+                RaoBlackwellisedParticle(
+                    container.states.x_particles[:, [ancestor_index]],
+                    BatchGaussianDistribution(
+                        container.states.z_particles.μs[:, [ancestor_index]],
+                        container.states.z_particles.Σs[:, :, [ancestor_index]],
+                    ),
+                ),
+                CUDA.zeros(1),  # arbitrary log weight
+            )
+            path[t] = selected_particle
+            ancestor_index = container.parents[ancestor_index]
+        end
+        return path
+    end
 end
 
 """
@@ -498,11 +538,13 @@ struct ParallelAncestorCallback{T}
     # end
 end
 
+function (c::ParallelAncestorCallback)(model, filter, states, data; kwargs...)
+    # Initialisation
+    @inbounds c.tree.states[1:(filter.N)] = deepcopy(states.filtered.particles)
+    return nothing
+end
+
 function (c::ParallelAncestorCallback)(model, filter, step, states, data; kwargs...)
-    if step == 1
-        # this may be incorrect, but it is functional
-        @inbounds c.tree.states[1:(filter.N)] = deepcopy(states.filtered.particles)
-    end
     # TODO: this is a combined prune/insert step—split them up
     insert!(c.tree, states.filtered.particles, states.ancestors)
     return nothing

@@ -1095,3 +1095,188 @@ end
 
     println(ancestry[:, 1, :])
 end
+
+@testitem "GPU Conditional Kalman-RBPF validity test" begin
+    using GeneralisedFilters
+    using CUDA
+    using NNlib
+    using LinearAlgebra
+    using OffsetArrays
+    using Random
+    using StableRNGs
+    using StatsBase
+
+    D_outer = 1
+    D_inner = 1
+    D_obs = 1
+
+    # Define inner dynamics
+    struct InnerDynamics{T} <: LinearGaussianLatentDynamics{T}
+        μ0::Vector{T}
+        Σ0::Matrix{T}
+        A::Matrix{T}
+        b::Vector{T}
+        C::Matrix{T}
+        Q::Matrix{T}
+    end
+    function GeneralisedFilters.batch_calc_μ0s(
+        dyn::InnerDynamics{T}, N; kwargs...
+    ) where {T}
+        μ0s = CuArray{T}(undef, length(dyn.μ0), N)
+        return μ0s[:, :] .= cu(dyn.μ0)
+    end
+
+    function GeneralisedFilters.batch_calc_Σ0s(
+        dyn::InnerDynamics{T}, N::Integer; kwargs...
+    ) where {T}
+        Σ0s = CuArray{T}(undef, size(dyn.Σ0)..., N)
+        return Σ0s[:, :, :] .= cu(dyn.Σ0)
+    end
+
+    function GeneralisedFilters.batch_calc_As(
+        dyn::InnerDynamics{T}, ::Integer, N::Integer; kwargs...
+    ) where {T}
+        As = CuArray{T}(undef, size(dyn.A)..., N)
+        As[:, :, :] .= cu(dyn.A)
+        return As
+    end
+
+    function GeneralisedFilters.batch_calc_bs(
+        dyn::InnerDynamics{T}, ::Integer, N::Integer; prev_outer, kwargs...
+    ) where {T}
+        Cs = CuArray{T}(undef, size(dyn.C)..., N)
+        Cs[:, :, :] .= cu(dyn.C)
+        return NNlib.batched_vec(Cs, prev_outer) .+ cu(dyn.b)
+    end
+
+    function GeneralisedFilters.batch_calc_Qs(
+        dyn::InnerDynamics{T}, ::Integer, N::Integer; kwargs...
+    ) where {T}
+        Q = CuArray{T}(undef, size(dyn.Q)..., N)
+        return Q[:, :, :] .= cu(dyn.Q)
+    end
+
+    rng = StableRNG(1234)
+    μ0 = rand(rng, D_outer + D_inner)
+    Σ0s = [rand(rng, D_outer, D_outer), rand(rng, D_inner, D_inner)]
+    Σ0s = [Σ * Σ' for Σ in Σ0s]  # make Σ0 positive definite
+    Σ0 = [
+        Σ0s[1] zeros(D_outer, D_inner)
+        zeros(D_inner, D_outer) Σ0s[2]
+    ]
+    A = [
+        rand(rng, D_outer, D_outer) zeros(D_outer, D_inner)
+        rand(rng, D_inner, D_outer + D_inner)
+    ]
+    # Make mean-reverting
+    A /= 3.0
+    A[diagind(A)] .= -0.5
+    b = rand(rng, D_outer + D_inner)
+    Qs = [rand(rng, D_outer, D_outer), rand(rng, D_inner, D_inner)] ./ 10.0
+    Qs = [Q * Q' for Q in Qs]  # make Q positive definite
+    Q = [
+        Qs[1] zeros(D_outer, D_inner)
+        zeros(D_inner, D_outer) Qs[2]
+    ]
+    H = [zeros(D_obs, D_outer) rand(rng, D_obs, D_inner)]
+    c = rand(rng, D_obs)
+    R = rand(rng, D_obs, D_obs)
+    R = R * R' / 3.0  # make R positive definite
+
+    N_particles = 1000
+    T = 5
+    t_smooth = 2
+
+    observations = [rand(rng, D_obs) for _ in 1:T]
+
+    # Kalman smoother
+    full_model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
+    state, _ = GeneralisedFilters.smooth(
+        Random.default_rng(), full_model, KalmanSmoother(), observations; t_smooth=t_smooth
+    )
+
+    outer_dyn = GeneralisedFilters.HomogeneousLinearGaussianLatentDynamics(
+        μ0[1:D_outer],
+        Σ0[1:D_outer, 1:D_outer],
+        A[1:D_outer, 1:D_outer],
+        b[1:D_outer],
+        Qs[1],
+    )
+    inner_dyn = InnerDynamics(
+        μ0[(D_outer + 1):end],
+        Σ0[(D_outer + 1):end, (D_outer + 1):end],
+        A[(D_outer + 1):end, (D_outer + 1):end],
+        b[(D_outer + 1):end],
+        A[(D_outer + 1):end, 1:D_outer],
+        Qs[2],
+    )
+    obs = GeneralisedFilters.HomogeneousLinearGaussianObservationProcess(
+        H[:, (D_outer + 1):end], c, R
+    )
+    hier_model = HierarchicalSSM(outer_dyn, inner_dyn, obs)
+
+    particle_template = GeneralisedFilters.RaoBlackwellisedParticle(
+        CuArray{Float32}(undef, D_outer, N_particles),
+        GeneralisedFilters.BatchGaussianDistribution(
+            CuArray{Float32}(undef, D_inner, N_particles),
+            CuArray{Float32}(undef, D_inner, D_inner, N_particles),
+        ),
+    )
+    particle_type = typeof(particle_template)
+
+    let
+        M = floor(Int64, N_particles * log(N_particles))
+        tree = GeneralisedFilters.ParallelParticleTree(deepcopy(particle_template), M)
+        cb = GeneralisedFilters.ParallelAncestorCallback(tree)
+
+        rbpf = BatchRBPF(
+            BatchKalmanFilter(N_particles),
+            N_particles;
+            threshold=0.8,
+            resampler=Multinomial(),
+        )
+        rbpf_state, _ = GeneralisedFilters.filter(
+            hier_model, rbpf, observations; callback=cb
+        )
+
+        weights = softmax(rbpf_state.filtered.log_weights)
+        sampled_idx = CUDA.@allowscalar sample(1:length(weights), Weights(weights))
+        ref_traj = GeneralisedFilters.get_ancestry(tree, sampled_idx, T)
+
+        N_burnin = 100
+        N_sample = 5000
+        N_steps = N_burnin + N_sample
+        trajectory_samples = Vector{OffsetArray{particle_type,1,Vector{particle_type}}}(
+            undef, N_sample
+        )
+        for i in 1:N_steps
+            tree = GeneralisedFilters.ParallelParticleTree(deepcopy(particle_template), M)
+            cb = GeneralisedFilters.ParallelAncestorCallback(tree)
+            rbpf_state, _ = GeneralisedFilters.filter(
+                hier_model, rbpf, observations; ref_state=ref_traj, callback=cb
+            )
+            weights = softmax(rbpf_state.filtered.log_weights)
+            sampled_idx = CUDA.@allowscalar sample(1:length(weights), Weights(weights))
+            ref_traj = GeneralisedFilters.get_ancestry(tree, sampled_idx, T)
+            if i > N_burnin
+                trajectory_samples[i - N_burnin] = getproperty.(ref_traj, :particles)
+            end
+        end
+
+        # Compare smoothed states
+        csmc_mean =
+            sum(getproperty.(getindex.(trajectory_samples, t_smooth), :x_particles)) /
+            N_sample
+        println("CSMC mean: ", CUDA.@allowscalar only(csmc_mean))
+        println("Kalman smoother mean: ", state.μ[1])
+
+        csmc_mean =
+            sum(
+                getproperty.(
+                    getproperty.(getindex.(trajectory_samples, t_smooth), :z_particles), :μs
+                ),
+            ) / N_sample
+        println("CSMC mean: ", CUDA.@allowscalar only(csmc_mean))
+        println("Kalman smoother mean: ", state.μ[2])
+    end
+end
