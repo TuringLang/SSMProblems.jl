@@ -560,12 +560,12 @@ A callback for sparse ancestry storage, which preallocates and returns a populat
 """
 struct AncestorCallback{T}
     tree::ParticleTree{T}
+end
 
-    function AncestorCallback(::Type{T}, N::Integer, C::Real=1.0) where {T}
-        M = floor(Int64, C * N * log(N))
-        nodes = Vector{T}(undef, N)
-        return new{T}(ParticleTree(nodes, M))
-    end
+function AncestorCallback(::Type{T}, N::Integer, C::Real=1.0) where {T}
+    M = floor(Int64, C * N * log(N))
+    nodes = Vector{T}(undef, N)
+    return new{T}(ParticleTree(nodes, M))
 end
 
 function (c::AncestorCallback)(model, filter, step, states, data; kwargs...)
