@@ -7,11 +7,19 @@ struct KalmanFilter <: AbstractFilter end
 
 KF() = KalmanFilter()
 
+function instantiate(
+    model::LinearGaussianStateSpaceModel{T}, filter::KalmanFilter; kwargs...
+) where {T}
+    Dx = length(calc_μ0(model.dyn))
+    gaussian_state = Gaussian(Vector{T}(undef, Dx), Matrix{T}(undef, Dx, Dx))
+    return GaussianContainer(gaussian_state, deepcopy(gaussian_state))
+end
+
 function initialise(
     rng::AbstractRNG, model::LinearGaussianStateSpaceModel, filter::KalmanFilter; kwargs...
 )
     μ0, Σ0 = calc_initial(model.dyn; kwargs...)
-    return GaussianContainer(Gaussian(μ0, Σ0), Gaussian(μ0, Σ0))
+    return Gaussian(μ0, Σ0)
 end
 
 function predict(
@@ -19,24 +27,23 @@ function predict(
     model::LinearGaussianStateSpaceModel,
     filter::KalmanFilter,
     step::Integer,
-    states::GaussianContainer;
+    filtered::Gaussian;
     kwargs...,
 )
-    μ, Σ = GaussianDistributions.pair(states.filtered)
+    μ, Σ = GaussianDistributions.pair(filtered)
     A, b, Q = calc_params(model.dyn, step; kwargs...)
-    states.proposed = Gaussian(A * μ + b, A * Σ * A' + Q)
-    return states
+    return Gaussian(A * μ + b, A * Σ * A' + Q)
 end
 
 function update(
     model::LinearGaussianStateSpaceModel,
     filter::KalmanFilter,
     step::Integer,
-    states::GaussianContainer,
+    proposed::Gaussian,
     obs::AbstractVector;
     kwargs...,
 )
-    μ, Σ = GaussianDistributions.pair(states.proposed)
+    μ, Σ = GaussianDistributions.pair(proposed)
     H, c, R = calc_params(model.obs, step; kwargs...)
 
     # Update state
@@ -48,12 +55,12 @@ function update(
     # HACK: force the covariance to be positive definite
     S = (S + S') / 2
 
-    states.filtered = Gaussian(μ + K * y, Σ - K * H * Σ)
+    filtered = Gaussian(μ + K * y, Σ - K * H * Σ)
 
     # Compute log-likelihood
     ll = logpdf(MvNormal(m, S), obs)
 
-    return states, ll
+    return filtered, ll
 end
 
 struct BatchKalmanFilter <: AbstractFilter
@@ -222,10 +229,11 @@ function smooth(
 ) where {T}
     cache = StateCallback(length(observations), T)
 
-    state, ll = filter(rng, model, KalmanFilter(), observations; callback=cache, kwargs...)
+    filtered, ll = filter(
+        rng, model, KalmanFilter(), observations; callback=cache, kwargs...
+    )
 
-    back_state = state.filtered
-
+    back_state = filtered
     for t in (length(observations) - 1):-1:t_smooth
         back_state = backward(
             rng, model, alg, t, back_state, observations[t]; states_cache=cache, kwargs...

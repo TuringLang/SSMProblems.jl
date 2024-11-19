@@ -1,6 +1,35 @@
 export BootstrapFilter, BF
 
-struct BootstrapFilter{RS<:AbstractResampler} <: AbstractFilter
+abstract type AbstractParticleFilter <: AbstractFilter end
+
+function step(
+    rng::AbstractRNG,
+    model::AbstractStateSpaceModel,
+    alg::AbstractParticleFilter,
+    iter::Integer,
+    intermediate,
+    observation;
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+    kwargs...,
+)
+    intermediate.proposed, intermediate.ancestors = resample(
+        rng, alg.resampler, intermediate.filtered
+    )
+
+    intermediate.proposed = predict(rng, model, alg, iter, intermediate.filtered; kwargs...)
+    # TODO: this is quite inelegant and should be refactored
+    if !isnothing(ref_state)
+        intermediate.ancestors[1] = 1
+    end
+
+    intermediate.filtered, ll_increment = update(
+        model, alg, iter, intermediate.proposed, observation; kwargs...
+    )
+
+    return intermediate, ll_increment
+end
+
+struct BootstrapFilter{RS<:AbstractResampler} <: AbstractParticleFilter
     N::Integer
     resampler::RS
 end
@@ -15,6 +44,16 @@ function BootstrapFilter(
     return BootstrapFilter{ESSResampler}(N, conditional_resampler)
 end
 
+function instantiate(
+    model::StateSpaceModel{T}, filter::BootstrapFilter; kwargs...
+) where {T}
+    N = filter.N
+    particle_state = ParticleState(Vector{Vector{T}}(undef, N), Vector{T}(undef, N))
+    return ParticleContainer(
+        particle_state, deepcopy(particle_state), Vector{Int}(undef, N)
+    )
+end
+
 function initialise(
     rng::AbstractRNG,
     model::StateSpaceModel{T},
@@ -22,10 +61,10 @@ function initialise(
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 ) where {T}
-    initial_states = map(x -> SSMProblems.simulate(rng, model.dyn; kwargs...), 1:(filter.N))
-    initial_weights = zeros(T, filter.N)
+    particles = map(x -> SSMProblems.simulate(rng, model.dyn; kwargs...), 1:(filter.N))
+    weights = zeros(T, filter.N)
 
-    return update_ref!(ParticleContainer(initial_states, initial_weights), ref_state)
+    return update_ref!(ParticleState(particles, weights), ref_state)
 end
 
 function predict(
@@ -33,34 +72,35 @@ function predict(
     model::StateSpaceModel,
     filter::BootstrapFilter,
     step::Integer,
-    states::ParticleContainer{T};
-    ref_state::Union{Nothing,AbstractVector{T}}=nothing,
+    filtered::ParticleState;
+    ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
-) where {T}
-    states.proposed, states.ancestors = resample(rng, filter.resampler, states.filtered)
-    states.proposed.particles = map(
-        x -> SSMProblems.simulate(rng, model.dyn, step, x; kwargs...),
-        collect(states.proposed),
+)
+    new_particles = map(
+        x -> SSMProblems.simulate(rng, model.dyn, step, x; kwargs...), collect(filtered)
     )
+    proposed = ParticleState(new_particles, deepcopy(filtered.log_weights))
 
-    return update_ref!(states, ref_state, step)
+    return update_ref!(proposed, ref_state, step)
 end
 
 function update(
     model::StateSpaceModel{T},
     filter::BootstrapFilter,
     step::Integer,
-    states::ParticleContainer,
+    proposed::ParticleState,
     observation;
     kwargs...,
 ) where {T}
     log_increments = map(
         x -> SSMProblems.logdensity(model.obs, step, x, observation; kwargs...),
-        collect(states.proposed),
+        collect(proposed),
     )
 
-    states.filtered.log_weights = states.proposed.log_weights + log_increments
-    states.filtered.particles = states.proposed.particles
+    new_weights = proposed.log_weights + log_increments
+    filtered = ParticleState(deepcopy(proposed.particles), new_weights)
 
-    return states, logmarginal(states)
+    ll_increment = logsumexp(filtered.log_weights) - logsumexp(proposed.log_weights)
+
+    return filtered, ll_increment
 end

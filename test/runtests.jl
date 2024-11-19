@@ -21,7 +21,7 @@ include("resamplers.jl")
         model = TestModels.create_linear_gaussian_model(rng, Dx, Dy)
         _, _, ys = sample(rng, model, 1)
 
-        states, ll = GeneralisedFilters.filter(rng, model, KalmanFilter(), ys)
+        filtered, ll = GeneralisedFilters.filter(rng, model, KalmanFilter(), ys)
 
         # Let Z = [X0, X1, Y1] be the joint state vector
         μ_Z, Σ_Z = TestModels._compute_joint(model, 1)
@@ -34,8 +34,8 @@ include("resamplers.jl")
         μ_X1 = μ_Z[I_x] + Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ (y - μ_Z[I_y]))
         Σ_X1 = Σ_Z[I_x, I_x] - Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ Σ_Z[I_y, I_x])
 
-        @test states.filtered.μ ≈ μ_X1
-        @test states.filtered.Σ ≈ Σ_X1
+        @test filtered.μ ≈ μ_X1
+        @test filtered.Σ ≈ Σ_X1
 
         # Exact marginal distribution to test log-likelihood
         μ_Y1 = μ_Z[I_y]
@@ -112,17 +112,17 @@ end
     end
 
     model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
-    _, _, data = sample(rng, model, 20)
+    _, _, data = sample(rng, model, 10)
 
-    bf = BF(2^12; threshold=0.8)
+    bf = BF(2^16; threshold=0.8)
     bf_state, llbf = GeneralisedFilters.filter(rng, model, bf, data)
     kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), data)
 
-    xs = bf_state.filtered.particles
-    ws = softmax(bf_state.filtered.log_weights)
+    xs = bf_state.particles
+    ws = softmax(bf_state.log_weights)
 
     # Compare filtered states
-    @test first(kf_state.filtered.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
+    @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
 
     # since this is log valued, we can up the tolerance
     @test llkf ≈ llbf atol = 0.1
@@ -186,6 +186,7 @@ end
     using LogExpFunctions: softmax
     using SSMProblems
     using StableRNGs
+    using StatsBase
 
     SEED = 1234
     D_outer = 2
@@ -205,13 +206,13 @@ end
     kf_states, kf_ll = GeneralisedFilters.filter(rng, full_model, KalmanFilter(), ys)
 
     # Rao-Blackwellised particle filtering
-    rbpf = BatchRBPF(BatchKalmanFilter(N_particles), N_particles)
+    rbpf = RBPF(KalmanFilter(), N_particles)
     states, ll = GeneralisedFilters.filter(rng, hier_model, rbpf, ys)
 
     # Extract final filtered states
-    xs = map(p -> getproperty(p, :x), states.filtered.particles)
-    zs = map(p -> getproperty(p, :z), states.filtered.particles)
-    log_ws = states.filtered.log_weights
+    xs = map(p -> getproperty(p, :x), states.particles)
+    zs = map(p -> getproperty(p, :z), states.particles)
+    log_ws = states.log_weights
 
     @test kf_ll ≈ ll rtol = 1e-2
 

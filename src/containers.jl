@@ -137,14 +137,14 @@ mutable struct ParticleContainer{T,WT}
     filtered::ParticleState{T,WT}
     proposed::ParticleState{T,WT}
     ancestors::Vector{Int}
+end
 
-    function ParticleContainer(
-        initial_states::Vector{T}, log_weights::Vector{WT}
-    ) where {T,WT<:Real}
-        init_particles = ParticleState(initial_states, log_weights)
-        prop_particles = ParticleState(similar(initial_states), zero(log_weights))
-        return new{T,WT}(init_particles, prop_particles, eachindex(log_weights))
-    end
+function ParticleContainer(
+    initial_states::Vector{T}, log_weights::Vector{WT}
+) where {T,WT<:Real}
+    init_particles = ParticleState(initial_states, log_weights)
+    prop_particles = ParticleState(similar(initial_states), zero(log_weights))
+    return ParticleContainer{T,WT}(init_particles, prop_particles, eachindex(log_weights))
 end
 
 Base.collect(state::ParticleState) = state.particles
@@ -161,18 +161,12 @@ function reset_weights!(state::ParticleState{T,WT}) where {T,WT<:Real}
 end
 
 function update_ref!(
-    pc::ParticleContainer{T}, ref_state::Union{Nothing,AbstractVector{T}}, step::Integer=0
-) where {T}
-    # this comes from Nicolas Chopin's package particles
+    filtered::ParticleState, ref_state::Union{Nothing,AbstractVector}, step::Integer=0
+)
     if !isnothing(ref_state)
-        # TODO: setting both of these feels a bit strange
-        pc.proposed.particles[1] = ref_state[step]
-        pc.filtered.particles[1] = ref_state[step]
-        if step > 0
-            pc.ancestors[1] = 1
-        end
+        filtered.particles[1] = ref_state[step]
     end
-    return pc
+    return filtered
 end
 
 function update_ref!(
@@ -196,10 +190,6 @@ function update_ref!(
         end
     end
     return pc
-end
-
-function logmarginal(states::ParticleContainer)
-    return logsumexp(states.filtered.log_weights) - logsumexp(states.proposed.log_weights)
 end
 
 ## DENSE PARTICLE STORAGE ##################################################################

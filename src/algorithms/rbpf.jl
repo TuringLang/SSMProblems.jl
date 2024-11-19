@@ -5,7 +5,7 @@ import StatsBase: Weights
 
 export RBPF, BatchRBPF
 
-struct RBPF{F<:AbstractFilter,RS<:AbstractResampler} <: AbstractFilter
+struct RBPF{F<:AbstractFilter,RS<:AbstractResampler} <: AbstractParticleFilter
     inner_algo::F
     N::Int
     resampler::RS
@@ -20,25 +20,67 @@ function RBPF(
     return RBPF(inner_algo, N, ESSResampler(threshold, resampler))
 end
 
-function initialise(
-    rng::AbstractRNG, model::HierarchicalSSM{T}, algo::RBPF; kwargs...
-) where {T}
+function instantiate(model::HierarchicalSSM{T}, algo::RBPF; kwargs...) where {T}
     N = algo.N
-    outer_dyn, inner_model = model.outer_dyn, model.inner_model
+    outer_type = eltype(model.outer_dyn)
+    inner_type = rb_eltype(model.inner_model)
 
-    # Create containers
-    outer_type, inner_type = eltype(outer_dyn), rb_eltype(inner_model)
     particles = Vector{RaoBlackwellisedContainer{outer_type,inner_type}}(undef, N)
-    log_ws = zeros(T, N)
+    particle_state = ParticleState(particles, Vector{T}(undef, N))
 
-    # Initialise containers
-    for i in 1:N
-        x = simulate(rng, outer_dyn; kwargs...)
-        z = initialise(inner_model, algo.inner_algo; new_outer=x, kwargs...)
-        particles[i] = RaoBlackwellisedContainer(x, z)
-    end
+    return ParticleContainer(
+        particle_state, deepcopy(particle_state), Vector{Int}(undef, N)
+    )
+end
 
-    return ParticleContainer(particles, log_ws)
+function initialise(
+    rng::AbstractRNG,
+    model::HierarchicalSSM{T},
+    algo::RBPF;
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+    kwargs...,
+) where {T}
+    # N = algo.N
+    # outer_dyn, inner_model = model.outer_dyn, model.inner_model
+
+    # # Create containers
+    # outer_type, inner_type = eltype(outer_dyn), rb_eltype(inner_model)
+    # particles = Vector{RaoBlackwellisedContainer{outer_type,inner_type}}(undef, N)
+    # log_ws = zeros(T, N)
+
+    # # Initialise containers
+    # for i in 1:N
+    #     x = simulate(rng, outer_dyn; kwargs...)
+    #     z = initialise(inner_model, algo.inner_algo; new_outer=x, kwargs...)
+    #     particles[i] = RaoBlackwellisedContainer(x, z)
+    # end
+    particles = map(
+        x -> RaoBlackwellisedContainer(
+            simulate(rng, model.outer_dyn; kwargs...),
+            initialise(model.inner_model, algo.inner_algo; new_outer=x, kwargs...),
+        ),
+        1:(algo.N),
+    )
+    log_ws = zeros(T, algo.N)
+
+    return update_ref!(ParticleState(particles, log_ws), ref_state)
+end
+
+function predict(
+    rng::AbstractRNG,
+    model::HierarchicalSSM,
+    algo::RBPF,
+    t::Integer,
+    filtered;
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+    kwargs...,
+)
+    new_particles = map(
+        x -> marginal_predict(rng, model, algo, t, x; kwargs...), filtered.particles
+    )
+    proposed = ParticleState(new_particles, deepcopy(filtered.log_weights))
+
+    return update_ref!(proposed, ref_state, t)
 end
 
 function marginal_predict(
@@ -59,45 +101,21 @@ function marginal_predict(
     return RaoBlackwellisedContainer(proposed_x, proposed_z)
 end
 
-function marginal_update(
-    model::HierarchicalSSM, algo::RBPF, t::Integer, state, obs; kwargs...
-)
-    filtered_z, log_increment = update(
-        model.inner_model, algo.inner_algo, t, state.z, obs; new_outer=state.x, kwargs...
-    )
-
-    return RaoBlackwellisedContainer(state.x, filtered_z), log_increment
-end
-
-function predict(
-    rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, t::Integer, states; kwargs...
-)
-    states.proposed, states.ancestors = resample(rng, algo.resampler, states.filtered)
-
-    states.proposed.particles = map(
-        x -> marginal_predict(rng, model, algo, t, x; kwargs...),
-        states.filtered[states.ancestors],
-    )
-
-    return states
-end
-
 function update(
-    model::HierarchicalSSM{T}, algo::RBPF, t::Integer, states, obs; kwargs...
+    model::HierarchicalSSM{T}, algo::RBPF, t::Integer, proposed, obs; kwargs...
 ) where {T}
-    log_increments = similar(states.filtered.log_weights)
+    log_increments = similar(proposed.log_weights)
+    new_particles = deepcopy(proposed.particles)
     for i in 1:(algo.N)
-        states.filtered.particles[i].z, log_increments[i] = update(
+        new_particles[i].z, log_increments[i] = update(
             model.inner_model,
             algo.inner_algo,
             t,
-            states.proposed.particles[i].z,
+            proposed.particles[i].z,
             obs;
-            new_outer=states.proposed.particles[i].x,
+            new_outer=proposed.particles[i].x,
             kwargs...,
         )
-
-        states.filtered.particles[i].x = states.proposed.particles[i].x
     end
 
     ## TODO: make this also work...
@@ -106,9 +124,22 @@ function update(
     #     collect(states.proposed)
     # )
 
-    states.filtered.log_weights = states.proposed.log_weights + log_increments
+    new_weights = proposed.log_weights + log_increments
+    filtered = ParticleState(new_particles, new_weights)
 
-    return states, logmarginal(states)
+    ll_increment = logsumexp(new_weights) - logsumexp(proposed.log_weights)
+
+    return filtered, ll_increment
+end
+
+function marginal_update(
+    model::HierarchicalSSM, algo::RBPF, t::Integer, state, obs; kwargs...
+)
+    filtered_z, log_increment = update(
+        model.inner_model, algo.inner_algo, t, state.z, obs; new_outer=state.x, kwargs...
+    )
+
+    return RaoBlackwellisedContainer(state.x, filtered_z), log_increment
 end
 
 #################################
