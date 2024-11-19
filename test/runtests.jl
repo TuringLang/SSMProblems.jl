@@ -515,9 +515,9 @@ end
     K = 3
     t_smooth = 2
     T = Float32
-    N_particles = 1000
+    N_particles = 2000
     N_burnin = 100
-    N_sample = 500
+    N_sample = 1000
 
     rng = StableRNG(1234)
 
