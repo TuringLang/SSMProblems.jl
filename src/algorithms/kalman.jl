@@ -172,9 +172,9 @@ function update(
 
     inv_term = NNlib.batched_vec(S_inv, y .- m)
     log_likes =
-        -0.5f0 * NNlib.batched_vec(reshape(y .- m, 1, size(y, 1), size(S, 3)), inv_term)
+        -T(0.5) * NNlib.batched_vec(reshape(y .- m, 1, size(y, 1), size(S, 3)), inv_term)
     D = size(y, 1)
-    log_likes = log_likes .- 0.5f0 * log_dets .- D / 2 * log(T(2π))
+    log_likes = log_likes .- T(0.5) * log_dets .- D / T(2) * log(T(2π))
 
     # HACK: only errors seems to be from numerical stability so will just overwrite
     log_likes[isnan.(log_likes)] .= -Inf

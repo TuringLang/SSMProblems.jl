@@ -3,6 +3,19 @@ using Random: rand
 
 using AcceleratedKernels
 
+## INTERMEDIATE ############################################################################
+
+# To combat the increasing complexity the `instantiate` methods, this is a generic container
+# that doesn't need to be aware of type information a priori. I don't think this is actually
+# going to have too much of an impact on performance since it no heavy operations are
+# performed at this level.
+mutable struct Intermediate
+    proposed::Any
+    filtered::Any
+    ancestors::Any
+    Intermediate() = new()
+end
+
 ## GAUSSIAN STATES #########################################################################
 
 # TODO: add Kalman gain, innovation covariance, and residuals
@@ -165,31 +178,33 @@ function update_ref!(
 )
     if !isnothing(ref_state)
         filtered.particles[1] = ref_state[step]
+        # TODO: is this correct?
+        if step > 0
+            filtered.log_weights[1] = 0
+        end
     end
     return filtered
 end
 
 function update_ref!(
-    pc::RaoBlackwellisedParticleContainer,
+    filtered::RaoBlackwellisedParticleState,
     ref_state::Union{Nothing,AbstractVector},
     step::Integer=0,
 )
-    # this comes from Nicolas Chopin's package particles
     if !isnothing(ref_state)
-        # TODO: setting both of these feels a bit strange
         CUDA.@allowscalar begin
-            # TODO: handle these recursively
-            pc.proposed.particles.x_particles[:, 1] = ref_state[step].particles.x_particles
-            pc.filtered.particles.z_particles.μs[:, 1] =
+            filtered.particles.x_particles[:, 1] = ref_state[step].particles.x_particles
+            filtered.particles.z_particles.μs[:, 1] =
                 ref_state[step].particles.z_particles.μs
-            pc.filtered.particles.z_particles.Σs[:, :, 1] =
+            filtered.particles.z_particles.Σs[:, :, 1] =
                 ref_state[step].particles.z_particles.Σs
+            # TODO: is this correct?
             if step > 0
-                pc.ancestors[1] = 1
+                filtered.log_weights[1] = 0
             end
         end
     end
-    return pc
+    return filtered
 end
 
 ## DENSE PARTICLE STORAGE ##################################################################
@@ -536,7 +551,7 @@ end
 
 function (c::ParallelAncestorCallback)(model, filter, step, states, data; kwargs...)
     # TODO: this is a combined prune/insert step—split them up
-    insert!(c.tree, states.filtered.particles, states.ancestors)
+    insert!(c.tree, states.proposed.particles, states.ancestors)
     return nothing
 end
 
@@ -558,15 +573,15 @@ function AncestorCallback(::Type{T}, N::Integer, C::Real=1.0) where {T}
     return new{T}(ParticleTree(nodes, M))
 end
 
-function (c::AncestorCallback)(model, filter, step, states, data; kwargs...)
-    if step == 1
-        # this may be incorrect, but it is functional
-        @inbounds c.tree.states[1:(filter.N)] = deepcopy(states.filtered.particles)
-    end
-    # TODO: when using non-stack version, may be more efficient to wait until storage full
-    # to prune
-    prune!(c.tree, get_offspring(states.ancestors))
-    insert!(c.tree, states.filtered.particles, states.ancestors)
+function (c::AncestorCallback)(model, filter, intermediate, data; kwargs...)
+    # Initialisation
+    @inbounds c.tree.states[1:(filter.N)] = deepcopy(intermediate.filtered.particles)
+    return nothing
+end
+
+function (c::AncestorCallback)(model, filter, step, intermediate, data; kwargs...)
+    prune!(c.tree, get_offspring(intermediate.ancestors))
+    insert!(c.tree, intermediate.proposed.particles, intermediate.ancestors)
     return nothing
 end
 

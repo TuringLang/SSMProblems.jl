@@ -16,10 +16,10 @@ function step(
         rng, alg.resampler, intermediate.filtered
     )
 
-    intermediate.proposed = predict(rng, model, alg, iter, intermediate.filtered; kwargs...)
+    intermediate.proposed = predict(rng, model, alg, iter, intermediate.proposed; kwargs...)
     # TODO: this is quite inelegant and should be refactored
     if !isnothing(ref_state)
-        intermediate.ancestors[1] = 1
+        CUDA.@allowscalar intermediate.ancestors[1] = 1
     end
 
     intermediate.filtered, ll_increment = update(

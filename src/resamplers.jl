@@ -82,7 +82,7 @@ function resample(
     if cond_resampler.threshold * n ≥ ess
         return resample(rng, cond_resampler.resampler, state)
     else
-        return deepcopy(state), collect(1:n)
+        return deepcopy(state), CuArray(1:n)
     end
 end
 
