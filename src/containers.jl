@@ -189,11 +189,9 @@ function update_ref!(
 )
     if !isnothing(ref_state)
         CUDA.@allowscalar begin
-            filtered.particles.x_particles[:, 1] = ref_state[step].particles.x_particles
-            filtered.particles.z_particles.μs[:, 1] =
-                ref_state[step].particles.z_particles.μs
-            filtered.particles.z_particles.Σs[:, :, 1] =
-                ref_state[step].particles.z_particles.Σs
+            filtered.particles.x_particles[:, 1] = ref_state[step].x_particles
+            filtered.particles.z_particles.μs[:, 1] = ref_state[step].z_particles.μs
+            filtered.particles.z_particles.Σs[:, :, 1] = ref_state[step].z_particles.Σs
         end
     end
     return filtered
@@ -482,14 +480,10 @@ end
 function get_ancestry(container::ParallelParticleTree, i::Integer, T::Integer)
     path = OffsetVector(
         Vector{
-            RaoBlackwellisedParticleState{
+            RaoBlackwellisedParticle{
                 Float32,
                 CUDA.DeviceMemory,
-                RaoBlackwellisedParticle{
-                    Float32,
-                    CUDA.DeviceMemory,
-                    BatchGaussianDistribution{Float32,CUDA.DeviceMemory},
-                },
+                BatchGaussianDistribution{Float32,CUDA.DeviceMemory},
             },
         }(
             undef, T + 1
@@ -499,15 +493,12 @@ function get_ancestry(container::ParallelParticleTree, i::Integer, T::Integer)
     CUDA.@allowscalar begin
         ancestor_index = container.leaves[i]
         for t in T:-1:0
-            selected_particle = GeneralisedFilters.RaoBlackwellisedParticleState(
-                RaoBlackwellisedParticle(
-                    container.states.x_particles[:, [ancestor_index]],
-                    BatchGaussianDistribution(
-                        container.states.z_particles.μs[:, [ancestor_index]],
-                        container.states.z_particles.Σs[:, :, [ancestor_index]],
-                    ),
+            selected_particle = RaoBlackwellisedParticle(
+                container.states.x_particles[:, [ancestor_index]],
+                BatchGaussianDistribution(
+                    container.states.z_particles.μs[:, [ancestor_index]],
+                    container.states.z_particles.Σs[:, :, [ancestor_index]],
                 ),
-                CUDA.zeros(1),  # arbitrary log weight
             )
             path[t] = selected_particle
             ancestor_index = container.parents[ancestor_index]

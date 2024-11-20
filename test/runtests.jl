@@ -437,15 +437,12 @@ end
 
     # Generate random reference trajectory
     ref_trajectory = [
-        GeneralisedFilters.RaoBlackwellisedParticleState(
-            GeneralisedFilters.RaoBlackwellisedParticle(
-                CuArray(rand(rng, T, D_outer, 1)),
-                GeneralisedFilters.BatchGaussianDistribution(
-                    CuArray(rand(rng, T, D_inner, 1)),
-                    CuArray(reshape(TestModels.rand_cov(rng, T, D_inner), Val(3))),
-                ),
+        GeneralisedFilters.RaoBlackwellisedParticle(
+            CuArray(rand(rng, T, D_outer, 1)),
+            GeneralisedFilters.BatchGaussianDistribution(
+                CuArray(rand(rng, T, D_inner, 1)),
+                CuArray(reshape(TestModels.rand_cov(rng, T, D_inner), Val(3))),
             ),
-            CUDA.zeros(T, 1),  # arbitrary log weight
         ) for _ in 0:K
     ]
     ref_trajectory = OffsetVector(ref_trajectory, -1)
@@ -515,9 +512,9 @@ end
     K = 3
     t_smooth = 2
     T = Float32
-    N_particles = 2000
+    N_particles = 4000
     N_burnin = 100
-    N_sample = 1000
+    N_sample = 2000
 
     rng = StableRNG(1234)
 
@@ -558,7 +555,7 @@ end
         sampled_idx = CUDA.@allowscalar sample(1:length(weights), Weights(weights))
         global ref_traj = GeneralisedFilters.get_ancestry(tree, sampled_idx, K)
         if i > N_burnin
-            trajectory_samples[i - N_burnin] = getproperty.(ref_traj, :particles)
+            trajectory_samples[i - N_burnin] = ref_traj
         end
     end
 
