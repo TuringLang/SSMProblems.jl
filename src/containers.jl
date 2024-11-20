@@ -178,10 +178,6 @@ function update_ref!(
 )
     if !isnothing(ref_state)
         filtered.particles[1] = ref_state[step]
-        # TODO: is this correct?
-        if step > 0
-            filtered.log_weights[1] = 0
-        end
     end
     return filtered
 end
@@ -198,10 +194,6 @@ function update_ref!(
                 ref_state[step].particles.z_particles.μs
             filtered.particles.z_particles.Σs[:, :, 1] =
                 ref_state[step].particles.z_particles.Σs
-            # TODO: is this correct?
-            if step > 0
-                filtered.log_weights[1] = 0
-            end
         end
     end
     return filtered
