@@ -310,9 +310,9 @@ end
     K = 5
     t_smooth = 2
     T = Float64
-    N_particles = 1000
+    N_particles = 10
     N_burnin = 100
-    N_sample = 500
+    N_sample = 10000
 
     rng = StableRNG(SEED)
     model = TestModels.create_linear_gaussian_model(rng, Dx, Dy)
@@ -366,7 +366,7 @@ end
     K = 5
     t_smooth = 2
     T = Float64
-    N_particles = 2000
+    N_particles = 20
     N_burnin = 100
     N_sample = 500
 
@@ -512,7 +512,7 @@ end
     K = 3
     t_smooth = 2
     T = Float32
-    N_particles = 4000
+    N_particles = 40
     N_burnin = 100
     N_sample = 2000
 
