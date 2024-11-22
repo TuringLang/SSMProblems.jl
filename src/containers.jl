@@ -174,27 +174,27 @@ function reset_weights!(state::ParticleState{T,WT}) where {T,WT<:Real}
 end
 
 function update_ref!(
-    filtered::ParticleState, ref_state::Union{Nothing,AbstractVector}, step::Integer=0
+    proposed::ParticleState, ref_state::Union{Nothing,AbstractVector}, step::Integer=0
 )
     if !isnothing(ref_state)
-        filtered.particles[1] = ref_state[step]
+        proposed.particles[1] = ref_state[step]
     end
-    return filtered
+    return proposed
 end
 
 function update_ref!(
-    filtered::RaoBlackwellisedParticleState,
+    proposed::RaoBlackwellisedParticleState,
     ref_state::Union{Nothing,AbstractVector},
     step::Integer=0,
 )
     if !isnothing(ref_state)
         CUDA.@allowscalar begin
-            filtered.particles.x_particles[:, 1] = ref_state[step].x_particles
-            filtered.particles.z_particles.μs[:, 1] = ref_state[step].z_particles.μs
-            filtered.particles.z_particles.Σs[:, :, 1] = ref_state[step].z_particles.Σs
+            proposed.particles.x_particles[:, 1] = ref_state[step].x_particles
+            proposed.particles.z_particles.μs[:, 1] = ref_state[step].z_particles.μs
+            proposed.particles.z_particles.Σs[:, :, 1] = ref_state[step].z_particles.Σs
         end
     end
-    return filtered
+    return proposed
 end
 
 ## DENSE PARTICLE STORAGE ##################################################################
