@@ -292,6 +292,49 @@ end
     paths = GeneralisedFilters.get_ancestry(tree)
 end
 
+@testitem "Dense ancestry test" setup = [TestModels] begin
+    using GeneralisedFilters
+    using SSMProblems
+    using StableRNGs
+    using PDMats
+    using LinearAlgebra
+    using LogExpFunctions: softmax
+    using Random: randexp, AbstractRNG
+    using StatsBase: sample, Weights
+
+    using OffsetArrays
+
+    struct DummyResampler <: GeneralisedFilters.AbstractResampler end
+
+    function GeneralisedFilters.sample_ancestors(
+        rng::AbstractRNG, resampler::DummyResampler, weights::Vector{T}
+    ) where {T}
+        return [mod1(a - 1, length(weights)) for a in 1:length(weights)]
+    end
+
+    SEED = 1234
+    K = 5
+    N_particles = max(10, K + 2)
+
+    rng = StableRNG(SEED)
+    model = TestModels.create_linear_gaussian_model(rng, 1, 1)
+    _, _, ys = sample(rng, model, K)
+
+    ref_traj = OffsetVector([rand(rng, 1) for _ in 0:K], -1)
+
+    bf = BF(N_particles; threshold=1.0, resampler=DummyResampler())
+    cb = GeneralisedFilters.DenseAncestorCallback(Vector{Float64})
+    bf_state, _ = GeneralisedFilters.filter(
+        rng, model, bf, ys; ref_state=ref_traj, callback=cb
+    )
+
+    traj = GeneralisedFilters.get_ancestry(cb.container, N_particles)
+    true_traj = [cb.container.particles[t][N_particles - K + t] for t in 0:K]
+
+    @test traj.parent == true_traj
+    @test GeneralisedFilters.get_ancestry(cb.container, 1) == ref_traj
+end
+
 @testitem "CSMC test" setup = [TestModels] begin
     using GeneralisedFilters
     using SSMProblems
