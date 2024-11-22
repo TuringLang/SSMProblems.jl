@@ -428,7 +428,7 @@ function insert!(tree::ParallelParticleTree, states, ancestors::CuVector{Int64})
     # Expand tree if necessary
     # TODO: can we combine this with z computation and update z if expanding?
     if sum(tree.offspring .== 0) < length(ancestors)
-        println("Expanding tree")
+        @debug "expanding tree"
         expand!(tree)
     end
     z = cumsum(tree.offspring .== 0)
