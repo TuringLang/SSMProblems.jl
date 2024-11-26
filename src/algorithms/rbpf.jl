@@ -240,6 +240,6 @@ function update(
         new_weights,
     )
 
-    step_ll = (logsumexp(filtered.log_weights) - logsumexp(proposed.log_weights))
+    step_ll = logsumexp(filtered.log_weights) - logsumexp(proposed.log_weights)
     return filtered, step_ll
 end

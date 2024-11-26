@@ -16,6 +16,11 @@ mutable struct Intermediate
     Intermediate() = new()
 end
 
+mutable struct NonParticleIntermediate{T}
+    proposed::T
+    filtered::T
+end
+
 ## GAUSSIAN STATES #########################################################################
 
 # TODO: add Kalman gain, innovation covariance, and residuals

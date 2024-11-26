@@ -11,8 +11,8 @@
 
     rng = StableRNG(1234)
     K = 3
-    Dx = 3
-    Dy = 2
+    Dx = 4
+    Dy = 3
     μ0s = [rand(rng, Dx) for _ in 1:K]
     Σ0s = [rand(rng, Dx, Dx) for _ in 1:K]
     Σ0s .= Σ0s .* transpose.(Σ0s)
@@ -39,7 +39,6 @@
     ]
 
     states = first.(outputs)
-    states = getproperty.(states, :filtered)
     log_likelihoods = last.(outputs)
 
     struct BatchLinearGaussianDynamics{T,MT} <: LinearGaussianLatentDynamics{T}
@@ -127,6 +126,21 @@
         BatchLinearGaussianObservations(Hs, cs, Rs),
     )
 
+    function GeneralisedFilters.instantiate(
+        rng::AbstractRNG,
+        model::SSMProblems.AbstractStateSpaceModel,
+        alg::BatchKalmanFilter;
+        kwargs...,
+    )
+        μ0s, Σ0s = GeneralisedFilters.batch_calc_initial(
+            model.dyn, alg.batch_size; kwargs...
+        )
+        return GeneralisedFilters.NonParticleIntermediate(
+            GeneralisedFilters.BatchGaussianDistribution(μ0s, Σ0s),
+            GeneralisedFilters.BatchGaussianDistribution(μ0s, Σ0s),
+        )
+    end
+
     # TODO: combine this into usual framework by allowing log_evidence to be a vector or
     # defininig a specific version for batch algorithms
     function GeneralisedFilters.filter(
@@ -137,18 +151,21 @@
         callback=nothing,
         kwargs...,
     )
-        states = GeneralisedFilters.initialise(rng, model, alg; kwargs...)
+        intermediate = GeneralisedFilters.instantiate(rng, model, alg; kwargs...)
+        intermediate.filtered = GeneralisedFilters.initialise(rng, model, alg; kwargs...)
+        isnothing(callback) || callback(model, alg, intermediate, observations; kwargs...)
         log_evidence = CUDA.zeros(size(observations[1], 2))
 
         for t in eachindex(observations)
-            states, log_marginal = GeneralisedFilters.step(
-                rng, model, alg, t, states, observations[t]; callback, kwargs...
+            intermediate, ll_increment = GeneralisedFilters.step(
+                rng, model, alg, t, intermediate, observations[t]; callback, kwargs...
             )
-            log_evidence += log_marginal
-            isnothing(callback) || callback(model, alg, t, states, observations; kwargs...)
+            log_evidence .+= ll_increment
+            isnothing(callback) ||
+                callback(model, alg, t, intermediate, observations; kwargs...)
         end
 
-        return states, log_evidence
+        return intermediate.filtered, log_evidence
     end
 
     Ys_batch = Vector{Matrix{Float64}}(undef, T)
