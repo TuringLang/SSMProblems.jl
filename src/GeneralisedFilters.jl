@@ -17,11 +17,16 @@ using NNlib
 abstract type AbstractFilter <: AbstractSampler end
 
 """
-    instantiate(model, alg; kwargs...)
+    instantiate(model, alg, initial; kwargs...)
 
 Create an intermediate storage object to store the proposed/filtered states at each step.
 """
 function instantiate end
+
+# Default method
+function instantiate(model, alg, initial; kwargs...)
+    return Intermediate(initial, deepcopy(initial))
+end
 
 """
     initialise([rng,] model, alg; kwargs...)
@@ -67,8 +72,8 @@ function filter(
     callback=nothing,
     kwargs...,
 )
-    intermediate = instantiate(model, alg; kwargs...)
-    intermediate.filtered = initialise(rng, model, alg; kwargs...)
+    initial = initialise(rng, model, alg; kwargs...)
+    intermediate = instantiate(model, alg, initial; kwargs...)
     isnothing(callback) || callback(model, alg, intermediate, observations; kwargs...)
     log_evidence = zero(eltype(model))
 

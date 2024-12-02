@@ -3,22 +3,17 @@ using Random: rand
 
 using AcceleratedKernels
 
-## INTERMEDIATE ############################################################################
+## INTERMEDIATES ############################################################################
 
-# To combat the increasing complexity the `instantiate` methods, this is a generic container
-# that doesn't need to be aware of type information a priori. I don't think this is actually
-# going to have too much of an impact on performance since it no heavy operations are
-# performed at this level.
-mutable struct Intermediate
-    proposed::Any
-    filtered::Any
-    ancestors::Any
-    Intermediate() = new()
+mutable struct ParticleIntermediate{DT,AT}
+    proposed::DT
+    filtered::DT
+    ancestors::AT
 end
 
-mutable struct NonParticleIntermediate{T}
-    proposed::T
-    filtered::T
+mutable struct Intermediate{DT}
+    proposed::DT
+    filtered::DT
 end
 
 ## GAUSSIAN STATES #########################################################################

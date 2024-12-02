@@ -47,13 +47,10 @@ function BootstrapFilter(
 end
 
 function instantiate(
-    model::StateSpaceModel{T}, filter::BootstrapFilter; kwargs...
+    ::StateSpaceModel{T}, filter::BootstrapFilter, initial; kwargs...
 ) where {T}
     N = filter.N
-    particle_state = ParticleState(Vector{Vector{T}}(undef, N), Vector{T}(undef, N))
-    return ParticleContainer(
-        particle_state, deepcopy(particle_state), Vector{Int}(undef, N)
-    )
+    return ParticleIntermediate(initial, deepcopy(initial), Vector{Int}(undef, N))
 end
 
 function initialise(

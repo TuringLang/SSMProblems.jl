@@ -7,14 +7,6 @@ struct KalmanFilter <: AbstractFilter end
 
 KF() = KalmanFilter()
 
-function instantiate(
-    model::LinearGaussianStateSpaceModel{T}, filter::KalmanFilter; kwargs...
-) where {T}
-    Dx = length(calc_μ0(model.dyn))
-    gaussian_state = Gaussian(Vector{T}(undef, Dx), Matrix{T}(undef, Dx, Dx))
-    return GaussianContainer(gaussian_state, deepcopy(gaussian_state))
-end
-
 function initialise(
     rng::AbstractRNG, model::LinearGaussianStateSpaceModel, filter::KalmanFilter; kwargs...
 )

@@ -20,17 +20,9 @@ function RBPF(
     return RBPF(inner_algo, N, ESSResampler(threshold, resampler))
 end
 
-function instantiate(model::HierarchicalSSM{T}, algo::RBPF; kwargs...) where {T}
-    N = algo.N
-    outer_type = eltype(model.outer_dyn)
-    inner_type = rb_eltype(model.inner_model)
-
-    particles = Vector{RaoBlackwellisedContainer{outer_type,inner_type}}(undef, N)
-    particle_state = ParticleState(particles, Vector{T}(undef, N))
-
-    return ParticleContainer(
-        particle_state, deepcopy(particle_state), Vector{Int}(undef, N)
-    )
+function instantiate(::HierarchicalSSM{T}, filter::RBPF, initial; kwargs...) where {T}
+    N = filter.N
+    return ParticleIntermediate(initial, deepcopy(initial), Vector{Int}(undef, N))
 end
 
 function initialise(
@@ -162,8 +154,9 @@ function searchsorted!(ws_cdf, us, idxs)
     end
 end
 
-function instantiate(model::HierarchicalSSM{T}, algo::BatchRBPF; kwargs...) where {T}
-    return Intermediate()
+function instantiate(model::HierarchicalSSM, algo::BatchRBPF, initial; kwargs...)
+    N = algo.N
+    return ParticleIntermediate(initial, deepcopy(initial), CuArray{Int}(undef, N))
 end
 
 function initialise(

@@ -126,21 +126,6 @@
         BatchLinearGaussianObservations(Hs, cs, Rs),
     )
 
-    function GeneralisedFilters.instantiate(
-        rng::AbstractRNG,
-        model::SSMProblems.AbstractStateSpaceModel,
-        alg::BatchKalmanFilter;
-        kwargs...,
-    )
-        μ0s, Σ0s = GeneralisedFilters.batch_calc_initial(
-            model.dyn, alg.batch_size; kwargs...
-        )
-        return GeneralisedFilters.NonParticleIntermediate(
-            GeneralisedFilters.BatchGaussianDistribution(μ0s, Σ0s),
-            GeneralisedFilters.BatchGaussianDistribution(μ0s, Σ0s),
-        )
-    end
-
     # TODO: combine this into usual framework by allowing log_evidence to be a vector or
     # defininig a specific version for batch algorithms
     function GeneralisedFilters.filter(
@@ -151,8 +136,8 @@
         callback=nothing,
         kwargs...,
     )
-        intermediate = GeneralisedFilters.instantiate(rng, model, alg; kwargs...)
-        intermediate.filtered = GeneralisedFilters.initialise(rng, model, alg; kwargs...)
+        initial = GeneralisedFilters.initialise(rng, model, alg; kwargs...)
+        intermediate = GeneralisedFilters.instantiate(model, alg, initial; kwargs...)
         isnothing(callback) || callback(model, alg, intermediate, observations; kwargs...)
         log_evidence = CUDA.zeros(size(observations[1], 2))
 
