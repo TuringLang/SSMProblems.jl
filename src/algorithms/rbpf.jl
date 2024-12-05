@@ -169,7 +169,7 @@ function initialise(
     N = algo.N
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
-    xs = batch_simulate(outer_dyn, N, kwargs...)
+    xs = batch_simulate(outer_dyn, N; kwargs...)
     zs = initialise(inner_model, algo.inner_algo; new_outer=xs, kwargs...)
     log_ws = CUDA.zeros(T, N)
 
