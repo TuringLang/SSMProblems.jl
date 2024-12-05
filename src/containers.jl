@@ -40,14 +40,12 @@ function Base.setindex!(d::BatchGaussianDistribution, value::BatchGaussianDistri
     d.Σs[:, :, i] = value.Σs
     return d
 end
-function expand!(d::BatchGaussianDistribution, M::Integer)
+function expand(d::BatchGaussianDistribution, M::Integer)
     new_μs = CuArray(zeros(eltype(d.μs), size(d.μs, 1), M))
     new_Σs = CuArray(zeros(eltype(d.Σs), size(d.Σs, 1), size(d.Σs, 2), M))
     new_μs[:, 1:size(d.μs, 2)] = d.μs
     new_Σs[:, :, 1:size(d.Σs, 3)] = d.Σs
-    d.μs = new_μs
-    d.Σs = new_Σs
-    return nothing
+    return BatchGaussianDistribution(new_μs, new_Σs)
 end
 
 ## RAO-BLACKWELLISED STATES ################################################################
@@ -63,8 +61,8 @@ mutable struct RaoBlackwellisedContainer{XT,ZT}
     z::ZT
 end
 
-mutable struct RaoBlackwellisedParticle{T,M<:CUDA.AbstractMemory,ZT}
-    x_particles::CuArray{T,2,M}
+mutable struct RaoBlackwellisedParticle{XT,ZT}
+    x_particles::XT
     z_particles::ZT
 end
 
@@ -90,13 +88,17 @@ function Base.setindex!(state::RaoBlackwellisedParticle, value::RaoBlackwellised
 end
 Base.length(state::RaoBlackwellisedParticle) = size(state.x_particles, 2)
 
+function expand(particles::CuArray{T,2,Mem}, M::Integer) where {T,Mem<:CUDA.AbstractMemory}
+    new_particles = CuArray(zeros(eltype(particles), size(particles, 1), M))
+    new_particles[:, 1:size(particles, 2)] = particles
+    return new_particles
+end
+
 # Method for increasing size of particle container
-function expand!(p::RaoBlackwellisedParticle, M::Integer)
-    new_x_particles = CuArray(zeros(eltype(p.x_particles), size(p.x_particles, 1), M))
-    new_x_particles[:, 1:size(p.x_particles, 2)] = p.x_particles
-    p.x_particles = new_x_particles
-    expand!(p.z_particles, M)
-    return nothing
+function expand(p::RaoBlackwellisedParticle, M::Integer)
+    new_x = expand(p.x_particles, M)
+    new_z = expand(p.z_particles, M)
+    return RaoBlackwellisedParticle(new_x, new_z)
 end
 
 """
@@ -387,7 +389,7 @@ mutable struct ParallelParticleTree{ST,M<:CUDA.AbstractMemory}
         N = length(states)
         # tree_states = CuArray{T}(undef, size(states, 1), M)
         # tree_states[:, 1:N] = states
-        expand!(states, M)
+        states = expand(states, M)
         tree_states = states
         leaves = CuArray(1:N)
         return new{ST,CUDA.DeviceMemory}(tree_states, parents, leaves, offspring)
@@ -456,7 +458,7 @@ function expand!(tree::ParallelParticleTree{T}) where {T}
     # new_states = CuArray{T}(undef, size(tree.states, 1), 2 * M)
     # new_states[:, 1:M] = tree.states
     # tree.states = new_states
-    expand!(tree.states, 2M)
+    tree.states = expand(tree.states, 2M)
 
     return tree
 end
