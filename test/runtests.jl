@@ -88,7 +88,7 @@ end
     using LogExpFunctions: softmax
     using Random: randexp
 
-    T = Float32
+    T = Float64
     rng = StableRNG(1234)
     σx², σy² = randexp(rng, T, 2)
 
@@ -468,7 +468,7 @@ end
     D_inner = 3
     D_obs = 2
     K = 5
-    T = Float32
+    T = Float64  # TODO: revert to Float32 once SSM type parameters are resolved
     N_particles = 1000
 
     rng = StableRNG(1234)
@@ -509,7 +509,7 @@ end
     D_inner = 3
     D_obs = 2
     K = 5
-    T = Float32
+    T = Float64
     N_particles = 1000
 
     rng = StableRNG(1234)
@@ -554,7 +554,7 @@ end
     D_obs = 1
     K = 3
     t_smooth = 2
-    T = Float32
+    T = Float64
     N_particles = 40
     N_burnin = 100
     N_sample = 2000
