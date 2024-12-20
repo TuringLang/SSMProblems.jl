@@ -29,10 +29,10 @@ mutable struct BatchGaussianDistribution{T,M<:CUDA.AbstractMemory}
     Σs::CuArray{T,3,M}
 end
 function Base.getindex(d::BatchGaussianDistribution, i)
-    return BatchGaussianDistribution(d.μs[:, i], d.Σs[:, :, i])
+    return BatchGaussianDistribution(d.μs[:, [i]], d.Σs[:, :, [i]])
 end
 
-function Base.getindex(d::BatchGaussianDistribution, i::Vector{Int})
+function Base.getindex(d::BatchGaussianDistribution, i::AbstractVector)
     return BatchGaussianDistribution(d.μs[:, i], d.Σs[:, :, i])
 end
 function Base.setindex!(d::BatchGaussianDistribution, value::BatchGaussianDistribution, i)
@@ -79,7 +79,10 @@ Base.length(state::RaoBlackwellisedParticleState) = length(state.log_weights)
 
 # Allow particle to be get and set via tree_states[:, 1:N] = states
 function Base.getindex(state::RaoBlackwellisedParticle, i)
-    return RaoBlackwellisedParticle(state.x_particles[:, i], state.z_particles)
+    return RaoBlackwellisedParticle(state.x_particles[:, [i]], state.z_particles[i])
+end
+function Base.getindex(state::RaoBlackwellisedParticle, i::AbstractVector)
+    return RaoBlackwellisedParticle(state.x_particles[:, i], state.z_particles[i])
 end
 function Base.setindex!(state::RaoBlackwellisedParticle, value::RaoBlackwellisedParticle, i)
     state.x_particles[:, i] = value.x_particles
@@ -463,46 +466,26 @@ function expand!(tree::ParallelParticleTree{T}) where {T}
     return tree
 end
 
-# TODO: generalise this for any type of state
-# TODO: this doesn't how how many timesteps there are
-function get_ancestry(tree::ParallelParticleTree, T::Integer)
-    D = size(tree.states.x_particles, 1)
-    paths = CuArray{Float32,3}(undef, D, length(tree.leaves), T)
+# Get ancestry of all particles
+function get_ancestry(tree::ParallelParticleTree{ST}, T::Integer) where {ST}
+    paths = OffsetVector(Vector{ST}(undef, T + 1), -1)
     parents = copy(tree.leaves)
     for t in T:-1:1
-        paths[:, :, t] = tree.states.x_particles[:, parents]
+        paths[t] = tree.states[parents]
         gather!(parents, tree.parents, parents)
     end
     return paths
 end
 
 # Get ancestory of a single particle
-# HACK: this is hard-coded for the Gaussian RB case
-# HACK: this is incredibly rough code used as a proof of concept that the GPU-RB-CSMC is correct
-function get_ancestry(container::ParallelParticleTree, i::Integer, T::Integer)
-    path = OffsetVector(
-        Vector{
-            RaoBlackwellisedParticle{
-                Float32,
-                CUDA.DeviceMemory,
-                BatchGaussianDistribution{Float32,CUDA.DeviceMemory},
-            },
-        }(
-            undef, T + 1
-        ),
-        -1,
-    )
+function get_ancestry(
+    container::ParallelParticleTree{ST}, i::Integer, T::Integer
+) where {ST}
+    path = OffsetVector(Vector{ST}(undef, T + 1), -1)
     CUDA.@allowscalar begin
         ancestor_index = container.leaves[i]
         for t in T:-1:0
-            selected_particle = RaoBlackwellisedParticle(
-                container.states.x_particles[:, [ancestor_index]],
-                BatchGaussianDistribution(
-                    container.states.z_particles.μs[:, [ancestor_index]],
-                    container.states.z_particles.Σs[:, :, [ancestor_index]],
-                ),
-            )
-            path[t] = selected_particle
+            path[t] = container.states[ancestor_index]
             ancestor_index = container.parents[ancestor_index]
         end
         return path
