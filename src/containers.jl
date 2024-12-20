@@ -18,7 +18,6 @@ end
 
 ## GAUSSIAN STATES #########################################################################
 
-# TODO: add Kalman gain, innovation covariance, and residuals
 mutable struct GaussianContainer{XT,ΣT}
     proposed::Gaussian{XT,ΣT}
     filtered::Gaussian{XT,ΣT}
@@ -375,7 +374,6 @@ end
 
 ## GPU SPARSE PARTICLE STORAGE #############################################################
 
-# TODO: make the state type more general
 mutable struct ParallelParticleTree{ST,M<:CUDA.AbstractMemory}
     states::ST
     parents::CuVector{Int64,M}
@@ -390,8 +388,6 @@ mutable struct ParallelParticleTree{ST,M<:CUDA.AbstractMemory}
         parents = CUDA.zeros(Int64, M)
         offspring = CUDA.zeros(Int64, M)
         N = length(states)
-        # tree_states = CuArray{T}(undef, size(states, 1), M)
-        # tree_states[:, 1:N] = states
         states = expand(states, M)
         tree_states = states
         leaves = CuArray(1:N)
@@ -431,7 +427,6 @@ function insert!(tree::ParallelParticleTree, states, ancestors::CuVector{Int64})
     update_offspring!(tree.offspring, tree.leaves, tree.parents)
 
     # Expand tree if necessary
-    # TODO: can we combine this with z computation and update z if expanding?
     if sum(tree.offspring .== 0) < length(ancestors)
         @debug "expanding tree"
         expand!(tree)
@@ -457,10 +452,6 @@ function expand!(tree::ParallelParticleTree{T}) where {T}
     new_offspring[1:length(tree.offspring)] = tree.offspring
     tree.offspring = new_offspring
 
-    # new_states = CuArray(undef, size(tree.states, 1), 2 * M)
-    # new_states = CuArray{T}(undef, size(tree.states, 1), 2 * M)
-    # new_states[:, 1:M] = tree.states
-    # tree.states = new_states
     tree.states = expand(tree.states, 2M)
 
     return tree
@@ -501,14 +492,6 @@ A callback for parallel sparse ancestry storage, which preallocates and returns 
 # TODO: this should be initialised during inference so types don't need to be predetermined
 struct ParallelAncestorCallback{T}
     tree::ParallelParticleTree{T}
-
-    # function ParallelAncestorCallback(
-    #     ::Type{T}, N::Integer, D::Integer, C::Real=1.0
-    # ) where {T}
-    #     M = floor(Int64, C * N * log(N))
-    #     nodes = CuArray{T}(undef, D, N)
-    #     return new{T}(ParallelParticleTree(nodes, M))
-    # end
 end
 
 function (c::ParallelAncestorCallback)(model, filter, states, data; kwargs...)
