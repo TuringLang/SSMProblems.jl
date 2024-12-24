@@ -132,6 +132,7 @@ abstract type AbstractSmoother <: AbstractSampler end
 # function backward end
 
 # Filtering utilities
+include("callbacks.jl")
 include("containers.jl")
 include("resamplers.jl")
 
