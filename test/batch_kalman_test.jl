@@ -126,33 +126,6 @@
         BatchLinearGaussianObservations(Hs, cs, Rs),
     )
 
-    # TODO: combine this into usual framework by allowing log_evidence to be a vector or
-    # defininig a specific version for batch algorithms
-    function GeneralisedFilters.filter(
-        rng::AbstractRNG,
-        model::SSMProblems.AbstractStateSpaceModel,
-        alg::BatchKalmanFilter,
-        observations::AbstractVector;
-        callback=nothing,
-        kwargs...,
-    )
-        initial = GeneralisedFilters.initialise(rng, model, alg; kwargs...)
-        intermediate = GeneralisedFilters.instantiate(model, alg, initial; kwargs...)
-        isnothing(callback) || callback(model, alg, intermediate, observations; kwargs...)
-        log_evidence = CUDA.zeros(size(observations[1], 2))
-
-        for t in eachindex(observations)
-            intermediate, ll_increment = GeneralisedFilters.step(
-                rng, model, alg, t, intermediate, observations[t]; callback, kwargs...
-            )
-            log_evidence .+= ll_increment
-            isnothing(callback) ||
-                callback(model, alg, t, intermediate, observations; kwargs...)
-        end
-
-        return intermediate.filtered, log_evidence
-    end
-
     Ys_batch = Vector{Matrix{Float64}}(undef, T)
     for t in 1:T
         Ys_batch[t] = stack(Ys[k][t] for k in 1:K)

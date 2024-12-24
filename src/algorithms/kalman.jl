@@ -55,7 +55,7 @@ function update(
     return filtered, ll
 end
 
-struct BatchKalmanFilter <: AbstractFilter
+struct BatchKalmanFilter <: AbstractBatchFilter
     batch_size::Int
 end
 

@@ -15,6 +15,7 @@ using NNlib
 ## FILTERING BASE ##########################################################################
 
 abstract type AbstractFilter <: AbstractSampler end
+abstract type AbstractBatchFilter <: AbstractFilter end
 
 """
     instantiate(model, alg, initial; kwargs...)
@@ -75,7 +76,7 @@ function filter(
     initial = initialise(rng, model, alg; kwargs...)
     intermediate = instantiate(model, alg, initial; kwargs...)
     isnothing(callback) || callback(model, alg, intermediate, observations; kwargs...)
-    log_evidence = zero(eltype(model))
+    log_evidence = initialise_log_evidence(alg, model)
 
     for t in eachindex(observations)
         intermediate, ll_increment = step(
@@ -87,6 +88,14 @@ function filter(
     end
 
     return intermediate.filtered, log_evidence
+end
+
+function initialise_log_evidence(::AbstractFilter, model::AbstractStateSpaceModel)
+    return zero(eltype(model))
+end
+
+function initialise_log_evidence(alg::AbstractBatchFilter, model::AbstractStateSpaceModel)
+    return CUDA.zeros(eltype(model), alg.batch_size)
 end
 
 function filter(
