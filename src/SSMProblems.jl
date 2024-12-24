@@ -21,6 +21,9 @@ export LatentDynamics, ObservationProcess, AbstractStateSpaceModel, StateSpaceMo
     Alternatively, you may specify methods for the function `distribution` which will be
     used to define the above methods.
 
+    All of these methods should accept keyword arguments through `kwargs...` to facilitate
+    inference-time dependencies of the dynamics as explained in [Control Variables and Keyword Arguments](@ref).
+
     # Parameters
     - `T`: The type of the state of the latent dynamics.
 """
@@ -43,6 +46,9 @@ Base.eltype(::Type{<:LatentDynamics{T}}) where {T} = T
     Alternatively, you may specify a method for `distribution`, which will be used to define
     both of the above methods.
 
+    All of these methods should accept keyword arguments through `kwargs...` to facilitate
+    inference-time dependencies of the observations as explained in [Control Variables and Keyword Arguments](@ref).
+
     # Parameters
     - `T`: The type of the state of the latent dynamics.
     - `U`: The type of the observation.
@@ -60,7 +66,7 @@ abstract type ObservationProcess{T} end
 Base.eltype(::Type{<:ObservationProcess{T}}) where {T} = T
 
 """
-    distribution(dyn::LatentDynamics, extra)
+    distribution(dyn::LatentDynamics; kwargs...)
 
 Return the initialisation distribution for the latent dynamics.
 
@@ -78,7 +84,7 @@ function distribution(dyn::LatentDynamics; kwargs...)
 end
 
 """
-    distribution(dyn::LatentDynamics, step::Integer, prev_state, extra)
+    distribution(dyn::LatentDynamics, step::Integer, prev_state; kwargs...)
 
 Return the transition distribution for the latent dynamics.
 
@@ -96,7 +102,7 @@ function distribution(dyn::LatentDynamics, step::Integer, state; kwargs...)
 end
 
 """
-    distribution(obs::ObservationProcess, step::Integer, state, extra)
+    distribution(obs::ObservationProcess, step::Integer, state; kwargs...)
 
 Return the observation distribution for the observation process.
 
@@ -114,7 +120,7 @@ function distribution(obs::ObservationProcess, step::Integer, state; kwargs...)
 end
 
 """
-    simulate([rng::AbstractRNG], dyn::LatentDynamics)
+    simulate([rng::AbstractRNG], dyn::LatentDynamics; kwargs...)
 
     Simulate an initial state for the latent dynamics.
 
@@ -132,7 +138,7 @@ end
 simulate(dyn::LatentDynamics; kwargs...) = simulate(default_rng(), dyn; kwargs...)
 
 """
-    simulate([rng::AbstractRNG], dyn::LatentDynamics, step::Integer, prev_state, extra)
+    simulate([rng::AbstractRNG], dyn::LatentDynamics, step::Integer, prev_state; kwargs...)
 
 Simulate a transition of the latent dynamics.
 
@@ -154,7 +160,7 @@ function simulate(dynamics::LatentDynamics, prev_state, step; kwargs...)
 end
 
 """
-    simulate([rng::AbstractRNG], process::ObservationProcess, step::Integer, state, extra)
+    simulate([rng::AbstractRNG], process::ObservationProcess, step::Integer, state; kwargs...)
 
 Simulate an observation given the current state.
 
@@ -176,7 +182,7 @@ function simulate(obs::ObservationProcess, step::Integer, state; kwargs...)
 end
 
 """
-    logdensity(dyn::LatentDynamics, new_state)
+    logdensity(dyn::LatentDynamics, new_state; kwargs...)
 
 Compute the log-density of an initial state for the latent dynamics.
 
@@ -193,7 +199,7 @@ function logdensity(dyn::LatentDynamics, new_state; kwargs...)
 end
 
 """
-    logdensity(dyn::LatentDynamics, step::Integer, prev_state, new_state, extra)
+    logdensity(dyn::LatentDynamics, step::Integer, prev_state, new_state; kwargs...)
 
 Compute the log-density of a transition of the latent dynamics.
 
@@ -210,7 +216,7 @@ function logdensity(dyn::LatentDynamics, step::Integer, prev_state, new_state; k
 end
 
 """
-    logdensity(obs::ObservationProcess, step::Integer, state, observation, extra)
+    logdensity(obs::ObservationProcess, step::Integer, state, observation; kwargs...)
 
 Compute the log-density of an observation given the current state.
 

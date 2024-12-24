@@ -1,4 +1,4 @@
-# Control Variables and Extras
+# Control Variables and Keyword Arguments
 
 All functions that form part of the `SSMProblems` model interface should accept
 keyword arguments.
