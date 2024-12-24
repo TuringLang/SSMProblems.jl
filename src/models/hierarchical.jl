@@ -40,6 +40,3 @@ function AbstractMCMC.sample(
 
     return x0, z0, xs, zs, ys
 end
-
-# TODO: move to SSMProblems
-function batch_simulate end
