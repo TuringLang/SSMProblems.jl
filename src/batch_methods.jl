@@ -12,7 +12,9 @@ Methods for performing batch simulation and log-density evaluation for state spa
 
     See also [`LatentDynamics`](@ref).
 """
-function batch_simulate end
+function batch_simulate(rng::AbstractRNG, dyn::LatentDynamics, N::Integer; kwargs...)
+    throw(MethodError(batch_simulate, (rng, dyn, N, kwargs...)))
+end
 
 """
     batch_simulate([rng::AbstractRNG], dyn::LatentDynamics, step::Integer, prev_states; kwargs...)
@@ -24,7 +26,11 @@ function batch_simulate end
 
     See also [`LatentDynamics`](@ref).
 """
-function batch_simulate end
+function batch_simulate(
+    rng::AbstractRNG, dyn::LatentDynamics, step::Integer, prev_states; kwargs...
+)
+    throw(MethodError(batch_simulate, (rng, dyn, step, prev_states, kwargs...)))
+end
 
 """
     batch_simulate([rng::AbstractRNG], obs::ObservationProcess, step::Integer, states; kwargs...)
@@ -36,9 +42,11 @@ function batch_simulate end
 
     See also [`ObservationProcess`](@ref).
 """
-function batch_simulate end
-
-function batch_logdensity end
+function batch_simulate(
+    rng::AbstractRNG, obs::ObservationProcess, step::Integer, states; kwargs...
+)
+    throw(MethodError(batch_simulate, (rng, obs, step, states, kwargs...)))
+end
 
 """
     batch_logdensity([rng::AbstractRNG], dyn::LatentDynamics, new_states; kwargs...)
@@ -50,7 +58,9 @@ function batch_logdensity end
 
     See also [`LatentDynamics`](@ref).
 """
-function batch_logdensity end
+function batch_logdensity(rng::AbstractRNG, dyn::LatentDynamics, new_states; kwargs...)
+    throw(MethodError(batch_logdensity, (rng, dyn, new_states, kwargs...)))
+end
 
 """
     batch_logdensity([rng::AbstractRNG], dyn::LatentDynamics, step::Integer, prev_states, new_states; kwargs...)
@@ -62,7 +72,13 @@ function batch_logdensity end
 
     See also [`LatentDynamics`](@ref).
 """
-function batch_logdensity end
+function batch_logdensity(
+    rng::AbstractRNG, dyn::LatentDynamics, step::Integer, prev_states, new_states; kwargs...
+)
+    throw(
+        MethodError(batch_logdensity, (rng, dyn, step, prev_states, new_states, kwargs...))
+    )
+end
 
 """
     batch_logdensity([rng::AbstractRNG], obs::ObservationProcess, step::Integer, state, observations; kwargs...)
@@ -74,4 +90,8 @@ function batch_logdensity end
 
     See also [`ObservationProcess`](@ref).
 """
-function batch_logdensity end
+function batch_logdensity(
+    rng::AbstractRNG, obs::ObservationProcess, step::Integer, state, observations; kwargs...
+)
+    throw(MethodError(batch_logdensity, (rng, obs, step, state, observations, kwargs...)))
+end

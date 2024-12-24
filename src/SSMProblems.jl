@@ -274,6 +274,7 @@ end
 """
 Base.eltype(::Type{<:StateSpaceModel{T,LD,OP}}) where {T,LD,OP} = T
 
+include("batch_methods.jl")
 include("utils/forward_simulation.jl")
 
 end
