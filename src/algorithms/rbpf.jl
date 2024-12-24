@@ -169,7 +169,7 @@ function initialise(
     N = algo.N
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
-    xs = batch_simulate(outer_dyn, N; kwargs...)
+    xs = SSMProblems.batch_simulate(rng, outer_dyn, N; kwargs...)
     zs = initialise(inner_model, algo.inner_algo; new_outer=xs, kwargs...)
     log_ws = CUDA.zeros(T, N)
 
@@ -188,10 +188,11 @@ function predict(
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    N = filter.N
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
-    new_xs = batch_simulate(outer_dyn, step, filtered.particles.x_particles, N; kwargs...)
+    new_xs = SSMProblems.batch_simulate(
+        rng, outer_dyn, step, filtered.particles.x_particles; kwargs...
+    )
     new_zs = predict(
         inner_model,
         filter.inner_algo,

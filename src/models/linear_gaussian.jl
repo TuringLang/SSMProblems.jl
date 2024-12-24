@@ -152,25 +152,25 @@ function batch_calc_params(
     )
 end
 
-function batch_simulate(
-    dyn::HomogeneousLinearGaussianLatentDynamics{T}, N::Integer; kwargs...
+function SSMProblems.batch_simulate(
+    ::AbstractRNG, dyn::HomogeneousLinearGaussianLatentDynamics{T}, N::Integer; kwargs...
 ) where {T}
     μ0, Σ0 = GeneralisedFilters.calc_initial(dyn; kwargs...)
     D = length(μ0)
     L = cholesky(Σ0).L
-    # Ls = repeat(cu(reshape(Σ0, (size(Σ0)..., 1))), 1, 1, N)
     Ls = CuArray{T}(undef, size(Σ0)..., N)
     Ls[:, :, :] .= cu(L)
     return cu(μ0) .+ NNlib.batched_vec(Ls, CUDA.randn(T, D, N))
 end
 
-function batch_simulate(
+function SSMProblems.batch_simulate(
+    ::AbstractRNG,
     dyn::GeneralisedFilters.HomogeneousLinearGaussianLatentDynamics{T},
     step::Integer,
-    prev_state,
-    N::Integer;
+    prev_state;
     kwargs...,
 ) where {T}
+    N = size(prev_state, 2)
     A, b, Q = GeneralisedFilters.calc_params(dyn, step; kwargs...)
     D = length(b)
     L = cholesky(Q).L
