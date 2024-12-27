@@ -252,8 +252,8 @@ end
     states, ll = GeneralisedFilters.filter(hier_model, rbpf, ys)
 
     # Extract final filtered states
-    xs = states.particles.x_particles
-    zs = states.particles.z_particles
+    xs = states.particles.xs
+    zs = states.particles.zs
     log_ws = states.log_weights
 
     weights = softmax(log_ws)
@@ -277,7 +277,7 @@ end
     _, _, ys = sample(rng, full_model, T)
 
     # Manually create tree to force expansion on second step
-    particle_type = GeneralisedFilters.RaoBlackwellisedContainer{
+    particle_type = GeneralisedFilters.RaoBlackwellisedParticle{
         eltype(hier_model.outer_dyn),GeneralisedFilters.rb_eltype(hier_model.inner_model)
     }
     nodes = Vector{particle_type}(undef, N_particles)
@@ -424,7 +424,7 @@ end
         rng, full_model, KalmanSmoother(), ys; t_smooth=t_smooth
     )
 
-    particle_type = GeneralisedFilters.RaoBlackwellisedContainer{
+    particle_type = GeneralisedFilters.RaoBlackwellisedParticle{
         Vector{T},Gaussian{Vector{T},Matrix{T}}
     }
 
@@ -480,7 +480,7 @@ end
 
     # Generate random reference trajectory
     ref_trajectory = [
-        GeneralisedFilters.RaoBlackwellisedParticle(
+        GeneralisedFilters.BatchRaoBlackwellisedParticles(
             CuArray(rand(rng, T, D_outer, 1)),
             GeneralisedFilters.BatchGaussianDistribution(
                 CuArray(rand(rng, T, D_inner, 1)),
@@ -522,7 +522,7 @@ end
     # Manually create tree to force expansion on second step
     M = N_particles * 2 - 1
     tree = GeneralisedFilters.ParallelParticleTree(
-        GeneralisedFilters.RaoBlackwellisedParticle(
+        GeneralisedFilters.BatchRaoBlackwellisedParticles(
             CuArray{T}(undef, D_outer, N_particles),
             GeneralisedFilters.BatchGaussianDistribution(
                 CuArray{T}(undef, D_inner, N_particles),
@@ -571,7 +571,7 @@ end
         rng, full_model, KalmanSmoother(), ys; t_smooth=t_smooth
     )
 
-    particle_template = GeneralisedFilters.RaoBlackwellisedParticle(
+    particle_template = GeneralisedFilters.BatchRaoBlackwellisedParticles(
         CuArray{Float32}(undef, D_outer, N_particles),
         GeneralisedFilters.BatchGaussianDistribution(
             CuArray{Float32}(undef, D_inner, N_particles),
@@ -603,8 +603,8 @@ end
     end
 
     # Extract inner and outer trajectories
-    x_trajectories = getproperty.(getindex.(trajectory_samples, t_smooth), :x_particles)
-    z_trajectories = getproperty.(getindex.(trajectory_samples, t_smooth), :z_particles)
+    x_trajectories = getproperty.(getindex.(trajectory_samples, t_smooth), :xs)
+    z_trajectories = getproperty.(getindex.(trajectory_samples, t_smooth), :zs)
 
     # Compare to ground truth
     CUDA.@allowscalar begin

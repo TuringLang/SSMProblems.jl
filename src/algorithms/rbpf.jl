@@ -33,7 +33,7 @@ function initialise(
     kwargs...,
 ) where {T}
     particles = map(
-        x -> RaoBlackwellisedContainer(
+        x -> RaoBlackwellisedParticle(
             simulate(rng, model.outer_dyn; kwargs...),
             initialise(model.inner_model, algo.inner_algo; new_outer=x, kwargs...),
         ),
@@ -41,7 +41,7 @@ function initialise(
     )
     log_ws = zeros(T, algo.N)
 
-    return update_ref!(ParticleState(particles, log_ws), ref_state)
+    return update_ref!(ParticleDistribution(particles, log_ws), ref_state)
 end
 
 function predict(
@@ -56,7 +56,7 @@ function predict(
     new_particles = map(
         x -> marginal_predict(rng, model, algo, t, x; kwargs...), filtered.particles
     )
-    proposed = ParticleState(new_particles, deepcopy(filtered.log_weights))
+    proposed = ParticleDistribution(new_particles, deepcopy(filtered.log_weights))
 
     return update_ref!(proposed, ref_state, t)
 end
@@ -76,7 +76,7 @@ function marginal_predict(
         kwargs...,
     )
 
-    return RaoBlackwellisedContainer(proposed_x, proposed_z)
+    return RaoBlackwellisedParticle(proposed_x, proposed_z)
 end
 
 function update(
@@ -103,7 +103,7 @@ function update(
     # )
 
     new_weights = proposed.log_weights + log_increments
-    filtered = ParticleState(new_particles, new_weights)
+    filtered = ParticleDistribution(new_particles, new_weights)
 
     ll_increment = logsumexp(new_weights) - logsumexp(proposed.log_weights)
 
@@ -117,7 +117,7 @@ function marginal_update(
         model.inner_model, algo.inner_algo, t, state.z, obs; new_outer=state.x, kwargs...
     )
 
-    return RaoBlackwellisedContainer(state.x, filtered_z), log_increment
+    return RaoBlackwellisedParticle(state.x, filtered_z), log_increment
 end
 
 #################################
@@ -174,7 +174,10 @@ function initialise(
     log_ws = CUDA.zeros(T, N)
 
     return update_ref!(
-        RaoBlackwellisedParticleState(RaoBlackwellisedParticle(xs, zs), log_ws), ref_state
+        RaoBlackwellisedParticleDistribution(
+            BatchRaoBlackwellisedParticles(xs, zs), log_ws
+        ),
+        ref_state,
     )
 end
 
@@ -184,26 +187,26 @@ function predict(
     model::HierarchicalSSM,
     filter::BatchRBPF,
     step::Integer,
-    filtered::RaoBlackwellisedParticleState;
+    filtered::RaoBlackwellisedParticleDistribution;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
     new_xs = SSMProblems.batch_simulate(
-        rng, outer_dyn, step, filtered.particles.x_particles; kwargs...
+        rng, outer_dyn, step, filtered.particles.xs; kwargs...
     )
     new_zs = predict(
         inner_model,
         filter.inner_algo,
         step,
-        filtered.particles.z_particles;
-        prev_outer=filtered.particles.x_particles,
+        filtered.particles.zs;
+        prev_outer=filtered.particles.xs,
         new_outer=new_xs,
         kwargs...,
     )
-    proposed = RaoBlackwellisedParticleState(
-        RaoBlackwellisedParticle(new_xs, new_zs), deepcopy(filtered.log_weights)
+    proposed = RaoBlackwellisedParticleDistribution(
+        BatchRaoBlackwellisedParticles(new_xs, new_zs), deepcopy(filtered.log_weights)
     )
 
     # return states
@@ -214,7 +217,7 @@ function update(
     model::HierarchicalSSM,
     filter::BatchRBPF,
     step::Integer,
-    proposed::RaoBlackwellisedParticleState,
+    proposed::RaoBlackwellisedParticleDistribution,
     obs;
     kwargs...,
 )
@@ -222,16 +225,15 @@ function update(
         model.inner_model,
         filter.inner_algo,
         step,
-        proposed.particles.z_particles,
+        proposed.particles.zs,
         obs;
-        new_outer=proposed.particles.x_particles,
+        new_outer=proposed.particles.xs,
         kwargs...,
     )
 
     new_weights = proposed.log_weights + inner_lls
-    filtered = RaoBlackwellisedParticleState(
-        RaoBlackwellisedParticle(deepcopy(proposed.particles.x_particles), new_zs),
-        new_weights,
+    filtered = RaoBlackwellisedParticleDistribution(
+        BatchRaoBlackwellisedParticles(deepcopy(proposed.particles.xs), new_zs), new_weights
     )
 
     step_ll = logsumexp(filtered.log_weights) - logsumexp(proposed.log_weights)

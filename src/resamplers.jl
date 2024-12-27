@@ -8,12 +8,14 @@ export Multinomial, Systematic, Stratified, Metropolis, Rejection
 abstract type AbstractResampler end
 
 function resample(
-    rng::AbstractRNG, resampler::AbstractResampler, states::ParticleState{PT,WT}
+    rng::AbstractRNG, resampler::AbstractResampler, states::ParticleDistribution{PT,WT}
 ) where {PT,WT}
     weights = StatsBase.weights(states)
     idxs = sample_ancestors(rng, resampler, weights)
 
-    new_state = ParticleState(deepcopy(states.particles[idxs]), zeros(WT, length(states)))
+    new_state = ParticleDistribution(
+        deepcopy(states.particles[idxs]), zeros(WT, length(states))
+    )
 
     return new_state, idxs
 end
@@ -22,15 +24,14 @@ end
 function resample(
     rng::AbstractRNG,
     resampler::AbstractResampler,
-    states::RaoBlackwellisedParticleState{T,M,ZT},
+    states::RaoBlackwellisedParticleDistribution{T,M,ZT},
 ) where {T,M,ZT}
     weights = StatsBase.weights(states)
     idxs = sample_ancestors(rng, resampler, weights)
 
-    new_state = RaoBlackwellisedParticleState(
-        RaoBlackwellisedParticle(
-            deepcopy(states.particles.x_particles[:, idxs]),
-            deepcopy(states.particles.z_particles[idxs]),
+    new_state = RaoBlackwellisedParticleDistribution(
+        BatchRaoBlackwellisedParticles(
+            deepcopy(states.particles.xs[:, idxs]), deepcopy(states.particles.zs[idxs])
         ),
         CUDA.zeros(T, length(states)),
     )
@@ -51,7 +52,7 @@ struct ESSResampler <: AbstractConditionalResampler
 end
 
 function resample(
-    rng::AbstractRNG, cond_resampler::ESSResampler, state::ParticleState{PT,WT}
+    rng::AbstractRNG, cond_resampler::ESSResampler, state::ParticleDistribution{PT,WT}
 ) where {PT,WT}
     n = length(state)
     # TODO: computing weights twice. Should create a wrapper to avoid this
@@ -71,7 +72,7 @@ end
 function resample(
     rng::AbstractRNG,
     cond_resampler::ESSResampler,
-    state::RaoBlackwellisedParticleState{T,M,ZT},
+    state::RaoBlackwellisedParticleDistribution{T,M,ZT},
 ) where {T,M,ZT}
     n = length(state)
     # TODO: computing weights twice. Should create a wrapper to avoid this

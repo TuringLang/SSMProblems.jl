@@ -63,7 +63,7 @@ function initialise(
     particles = map(x -> SSMProblems.simulate(rng, model.dyn; kwargs...), 1:(filter.N))
     weights = zeros(T, filter.N)
 
-    return update_ref!(ParticleState(particles, weights), ref_state)
+    return update_ref!(ParticleDistribution(particles, weights), ref_state)
 end
 
 function predict(
@@ -71,14 +71,14 @@ function predict(
     model::StateSpaceModel,
     filter::BootstrapFilter,
     step::Integer,
-    filtered::ParticleState;
+    filtered::ParticleDistribution;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
     new_particles = map(
         x -> SSMProblems.simulate(rng, model.dyn, step, x; kwargs...), collect(filtered)
     )
-    proposed = ParticleState(new_particles, deepcopy(filtered.log_weights))
+    proposed = ParticleDistribution(new_particles, deepcopy(filtered.log_weights))
 
     return update_ref!(proposed, ref_state, step)
 end
@@ -87,7 +87,7 @@ function update(
     model::StateSpaceModel{T},
     filter::BootstrapFilter,
     step::Integer,
-    proposed::ParticleState,
+    proposed::ParticleDistribution,
     observation;
     kwargs...,
 ) where {T}
@@ -97,7 +97,7 @@ function update(
     )
 
     new_weights = proposed.log_weights + log_increments
-    filtered = ParticleState(deepcopy(proposed.particles), new_weights)
+    filtered = ParticleDistribution(deepcopy(proposed.particles), new_weights)
 
     ll_increment = logsumexp(filtered.log_weights) - logsumexp(proposed.log_weights)
 

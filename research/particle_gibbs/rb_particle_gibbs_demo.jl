@@ -128,7 +128,7 @@ println("Ground truth posterior variance: ", state.Σ[end, end])
 ##########################################
 
 # Setup
-particle_template = GeneralisedFilters.RaoBlackwellisedParticle(
+particle_template = GeneralisedFilters.BatchRaoBlackwellisedParticles(
     CuArray{Float32}(undef, D_outer, N_particles),
     GeneralisedFilters.BatchGaussianDistribution(
         CuArray{Float32}(undef, D_inner, N_particles),
@@ -196,7 +196,7 @@ for i in 1:N_steps
     sampled_idx = CUDA.@allowscalar sample(1:length(weights), Weights(weights))
     global ref_traj = GeneralisedFilters.get_ancestry(tree, sampled_idx, K)
 
-    ref_traj_outer_cpu = map(r -> Array(dropdims(r.x_particles; dims=2)), ref_traj)
+    ref_traj_outer_cpu = map(r -> Array(dropdims(r.xs; dims=2)), ref_traj)
 
     ### θ | x, y (MH)
     b_outer_prop = b_outer_curr .+ ϵ * randn(rng, T, D_outer)

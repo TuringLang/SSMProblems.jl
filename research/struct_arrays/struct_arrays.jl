@@ -2,7 +2,7 @@ using CUDA
 using StaticArrays
 using StructArrays
 
-struct RaoBlackWellisedParticle{XT,ZT}
+struct BatchRaoBlackwellisedParticles{XT,ZT}
     x::XT
     z::ZT
 end
