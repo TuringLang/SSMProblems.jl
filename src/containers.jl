@@ -1,307 +1,159 @@
-using DataStructures: Stack
-using Random: rand
+"""Containers used for storing representations of the filtering distribution."""
 
-## GAUSSIAN STATES #########################################################################
+## INTERMEDIATES ###########################################################################
 
-# TODO: add Kalman gain, innovation covariance, and residuals
-mutable struct GaussianContainer{XT,ΣT}
-    proposed::Gaussian{XT,ΣT}
-    filtered::Gaussian{XT,ΣT}
+mutable struct ParticleIntermediate{DT,AT}
+    proposed::DT
+    filtered::DT
+    ancestors::AT
 end
 
-mutable struct BatchGaussianDistribution{T,M<:CUDA.AbstractMemory}
-    μs::CuArray{T,2,M}
-    Σs::CuArray{T,3,M}
-end
-function Base.getindex(d::BatchGaussianDistribution, i)
-    return BatchGaussianDistribution(d.μs[:, i], d.Σs[:, :, i])
-end
-
-## RAO-BLACKWELLISED STATES ################################################################
-
-"""
-    RaoBlackwellisedContainer
-
-A container for Rao-Blackwellised states, composed of a marginalised state `z` (e.g. a
-Gaussian or Categorical distribution) and a singular state `x`.
-"""
-mutable struct RaoBlackwellisedContainer{XT,ZT}
-    x::XT
-    z::ZT
-end
-
-# TODO: this needs to be generalised to account for the flatten Levy SSM state
-mutable struct RaoBlackwellisedParticleState{T,M<:CUDA.AbstractMemory,ZT}
-    x_particles::CuArray{T,2,M}
-    z_particles::ZT
-    log_weights::CuArray{T,1,M}
-end
-
-StatsBase.weights(state::RaoBlackwellisedParticleState) = softmax(state.log_weights)
-Base.length(state::RaoBlackwellisedParticleState) = size(state.x_particles, 2)
-
-"""
-    RaoBlackwellisedParticleContainer
-"""
-mutable struct RaoBlackwellisedParticleContainer{T,M<:CUDA.AbstractMemory,ZT}
-    filtered::RaoBlackwellisedParticleState{T,M,ZT}
-    proposed::RaoBlackwellisedParticleState{T,M,ZT}
-    ancestors::CuArray{Int,1,M}
-
-    function RaoBlackwellisedParticleContainer(
-        x_particles::CuArray{T,2,M}, z_particles::ZT, log_weights::CuArray{T,1,M}
-    ) where {T,M<:CUDA.AbstractMemory,ZT}
-        init_particles = RaoBlackwellisedParticleState(
-            x_particles, z_particles, log_weights
-        )
-        prop_particles = RaoBlackwellisedParticleState(
-            similar(x_particles), deepcopy(z_particles), CUDA.zeros(T, size(x_particles, 2))
-        )
-        ancestors = CuArray(1:size(x_particles, 2))
-        return new{T,M,ZT}(init_particles, prop_particles, ancestors)
-    end
+mutable struct Intermediate{DT}
+    proposed::DT
+    filtered::DT
 end
 
 ## PARTICLES ###############################################################################
 
 """
-    ParticleState
+    ParticleDistribution
 
 A container for particle filters which composes the weighted sample into a distibution-like
 object, with the states (or particles) distributed accoring to their log-weights.
 """
-mutable struct ParticleState{PT,WT<:Real}
+mutable struct ParticleDistribution{PT,WT<:Real}
     particles::Vector{PT}
     log_weights::Vector{WT}
 end
 
-StatsBase.weights(state::ParticleState) = softmax(state.log_weights)
+StatsBase.weights(state::ParticleDistribution) = softmax(state.log_weights)
 
-"""
-    ParticleContainer
-
-A container for information passed through each iteration of an abstract particle filter,
-composed of both proposed and filtered states, as well as the ancestor indices.
-"""
-mutable struct ParticleContainer{T,WT}
-    filtered::ParticleState{T,WT}
-    proposed::ParticleState{T,WT}
-    ancestors::Vector{Int}
-
-    function ParticleContainer(
-        initial_states::Vector{T}, log_weights::Vector{WT}
-    ) where {T,WT<:Real}
-        init_particles = ParticleState(initial_states, log_weights)
-        prop_particles = ParticleState(similar(initial_states), zero(log_weights))
-        return new{T,WT}(init_particles, prop_particles, eachindex(log_weights))
-    end
-end
-
-Base.collect(state::ParticleState) = state.particles
-Base.length(state::ParticleState) = length(state.particles)
-Base.keys(state::ParticleState) = LinearIndices(state.particles)
+Base.collect(state::ParticleDistribution) = state.particles
+Base.length(state::ParticleDistribution) = length(state.particles)
+Base.keys(state::ParticleDistribution) = LinearIndices(state.particles)
 
 # not sure if this is kosher, since it doesn't follow the convention of Base.getindex
-Base.@propagate_inbounds Base.getindex(state::ParticleState, i) = state.particles[i]
-# Base.@propagate_inbounds Base.getindex(state::ParticleState, i::Vector{Int}) = state.particles[i]
+Base.@propagate_inbounds Base.getindex(state::ParticleDistribution, i) = state.particles[i]
+# Base.@propagate_inbounds Base.getindex(state::ParticleDistribution, i::Vector{Int}) = state.particles[i]
 
-function reset_weights!(state::ParticleState{T,WT}) where {T,WT<:Real}
+function reset_weights!(state::ParticleDistribution{T,WT}) where {T,WT<:Real}
     fill!(state.log_weights, zero(WT))
     return state.log_weights
 end
 
 function update_ref!(
-    pc::ParticleContainer{T}, ref_state::Union{Nothing,AbstractVector{T}}, step::Integer=0
-) where {T}
-    # this comes from Nicolas Chopin's package particles
+    proposed::ParticleDistribution,
+    ref_state::Union{Nothing,AbstractVector},
+    step::Integer=0,
+)
     if !isnothing(ref_state)
-        pc.proposed[1] = ref_state[step + 1]
-        pc.filtered[1] = ref_state[step + 1]
-        pc.ancestors[1] = 1
+        proposed.particles[1] = ref_state[step]
     end
-    return pc
+    return proposed
 end
 
-function logmarginal(states::ParticleContainer)
-    return logsumexp(states.filtered.log_weights) - logsumexp(states.proposed.log_weights)
-end
-
-## SPARSE PARTICLE STORAGE #################################################################
-
-Base.append!(s::Stack, a::AbstractVector) = map(x -> push!(s, x), a)
+## RAO-BLACKWELLISED PARTICLE ##############################################################
 
 """
-    ParticleTree
+    RaoBlackwellisedParticle
 
-A sparse container for particle ancestry, which tracks the lineage of the filtered draws.
-
-# Reference
-
-Jacob, P., Murray L., & Rubenthaler S. (2015). Path storage in the particle 
-filter [doi:10.1007/s11222-013-9445-x](https://dx.doi.org/10.1007/s11222-013-9445-x)
+A container for Rao-Blackwellised states, composed of a marginalised state `z` (e.g. a
+Gaussian or Categorical distribution) and a singular state `x`.
 """
-mutable struct ParticleTree{T}
-    states::Vector{T}
-    parents::Vector{Int64}
-    leaves::Vector{Int64}
-    offspring::Vector{Int64}
-    free_indices::Stack{Int64}
-
-    function ParticleTree(states::Vector{T}, M::Integer) where {T}
-        nodes = Vector{T}(undef, M)
-        initial_free_indices = Stack{Int64}()
-        append!(initial_free_indices, M:-1:(length(states) + 1))
-        @inbounds nodes[1:length(states)] = states
-        return new{T}(
-            nodes, zeros(Int64, M), 1:length(states), zeros(Int64, M), initial_free_indices
-        )
-    end
+mutable struct RaoBlackwellisedParticle{XT,ZT}
+    x::XT
+    z::ZT
 end
 
-Base.length(tree::ParticleTree) = length(tree.states)
-Base.keys(tree::ParticleTree) = LinearIndices(tree.states)
+## RAO-BLACKWELLISED PARTICLE DISTRIBUTIONS ################################################
 
-function prune!(tree::ParticleTree, offspring::Vector{Int64})
-    # insert new offspring counts
-    setindex!(tree.offspring, offspring, tree.leaves)
+mutable struct BatchRaoBlackwellisedParticles{XT,ZT}
+    xs::XT
+    zs::ZT
+end
 
-    # update each branch
-    @inbounds for i in eachindex(offspring)
-        j = tree.leaves[i]
-        while (j > 0) && (tree.offspring[j] == 0)
-            push!(tree.free_indices, j)
-            j = tree.parents[j]
-            if j > 0
-                tree.offspring[j] -= 1
-            end
+mutable struct RaoBlackwellisedParticleDistribution{
+    T,M<:CUDA.AbstractMemory,PT<:BatchRaoBlackwellisedParticles
+}
+    particles::PT
+    log_weights::CuArray{T,1,M}
+end
+
+function StatsBase.weights(state::RaoBlackwellisedParticleDistribution)
+    return softmax(state.log_weights)
+end
+function Base.length(state::RaoBlackwellisedParticleDistribution)
+    return length(state.log_weights)
+end
+
+# Allow particle to be get and set via tree_states[:, 1:N] = states
+function Base.getindex(state::BatchRaoBlackwellisedParticles, i)
+    return BatchRaoBlackwellisedParticles(state.xs[:, [i]], state.zs[i])
+end
+function Base.getindex(state::BatchRaoBlackwellisedParticles, i::AbstractVector)
+    return BatchRaoBlackwellisedParticles(state.xs[:, i], state.zs[i])
+end
+function Base.setindex!(
+    state::BatchRaoBlackwellisedParticles, value::BatchRaoBlackwellisedParticles, i
+)
+    state.xs[:, i] = value.xs
+    state.zs[i] = value.zs
+    return state
+end
+Base.length(state::BatchRaoBlackwellisedParticles) = size(state.xs, 2)
+
+function expand(particles::CuArray{T,2,Mem}, M::Integer) where {T,Mem<:CUDA.AbstractMemory}
+    new_particles = CuArray(zeros(eltype(particles), size(particles, 1), M))
+    new_particles[:, 1:size(particles, 2)] = particles
+    return new_particles
+end
+
+# Method for increasing size of particle container
+function expand(p::BatchRaoBlackwellisedParticles, M::Integer)
+    new_x = expand(p.xs, M)
+    new_z = expand(p.zs, M)
+    return BatchRaoBlackwellisedParticles(new_x, new_z)
+end
+
+function update_ref!(
+    proposed::RaoBlackwellisedParticleDistribution,
+    ref_state::Union{Nothing,AbstractVector},
+    step::Integer=0,
+)
+    if !isnothing(ref_state)
+        CUDA.@allowscalar begin
+            proposed.particles.xs[:, 1] = ref_state[step].xs
+            proposed.particles.zs[1] = ref_state[step].zs
         end
     end
-    return tree
+    return proposed
 end
 
-function insert!(
-    tree::ParticleTree{T}, states::Vector{T}, ancestors::AbstractVector{Int64}
-) where {T}
-    # parents of new generation
-    parents = getindex(tree.leaves, ancestors)
+## BATCH GAUSSIAN DISTRIBUTION #############################################################
 
-    # ensure there are enough dead branches
-    if (length(tree.free_indices) < length(ancestors))
-        @debug "expanding tree"
-        expand!(tree)
-    end
-
-    # find places for new states
-    @inbounds for i in eachindex(states)
-        tree.leaves[i] = pop!(tree.free_indices)
-    end
-
-    # insert new generation and update parent child relationships
-    setindex!(tree.states, states, tree.leaves)
-    setindex!(tree.parents, parents, tree.leaves)
-    return tree
+mutable struct BatchGaussianDistribution{T}
+    μs::CuArray{T,2,CUDA.DeviceMemory}
+    Σs::CuArray{T,3,CUDA.DeviceMemory}
 end
 
-function expand!(tree::ParticleTree)
-    M = length(tree)
-    resize!(tree.states, 2 * M)
-
-    # new allocations must be zero valued, this is not a perfect solution
-    tree.parents = [tree.parents; zero(tree.parents)]
-    tree.offspring = [tree.offspring; zero(tree.offspring)]
-    append!(tree.free_indices, (2 * M):-1:(M + 1))
-    return tree
+function Base.getindex(d::BatchGaussianDistribution, i)
+    return BatchGaussianDistribution(d.μs[:, [i]], d.Σs[:, :, [i]])
 end
 
-function get_offspring(a::AbstractVector{Int64})
-    offspring = zero(a)
-    for i in a
-        offspring[i] += 1
-    end
-    return offspring
+function Base.getindex(d::BatchGaussianDistribution, i::AbstractVector)
+    return BatchGaussianDistribution(d.μs[:, i], d.Σs[:, :, i])
 end
 
-function get_ancestry(tree::ParticleTree{T}) where {T}
-    paths = Vector{Vector{T}}(undef, length(tree.leaves))
-    @inbounds for (k, i) in enumerate(tree.leaves)
-        j = tree.parents[i]
-        xi = tree.states[i]
-
-        xs = [xi]
-        while j > 0
-            push!(xs, tree.states[j])
-            j = tree.parents[j]
-        end
-        paths[k] = reverse(xs)
-    end
-    return paths
+function Base.setindex!(d::BatchGaussianDistribution, value::BatchGaussianDistribution, i)
+    d.μs[:, i] = value.μs
+    d.Σs[:, :, i] = value.Σs
+    return d
 end
 
-function rand(rng::AbstractRNG, tree::ParticleTree, weights::AbstractVector{<:Real})
-    b = randcat(rng, weights)
-    leaf = tree.leaves[b]
-
-    j = tree.parents[leaf]
-    xi = tree.states[leaf]
-
-    xs = [xi]
-    while j > 0
-        push!(xs, tree.states[j])
-        j = tree.parents[j]
-    end
-    return reverse(xs)
-end
-
-## ANCESTOR STORAGE CALLBACK ###############################################################
-
-"""
-    AncestorCallback
-
-A callback for sparse ancestry storage, which preallocates and returns a populated 
-`ParticleTree` object.
-"""
-struct AncestorCallback{T}
-    tree::ParticleTree{T}
-
-    function AncestorCallback(::Type{T}, N::Integer, C::Real=1.0) where {T}
-        M = floor(Int64, C * N * log(N))
-        nodes = Vector{T}(undef, N)
-        return new{T}(ParticleTree(nodes, M))
-    end
-end
-
-function (c::AncestorCallback)(model, filter, step, states, data; kwargs...)
-    if step == 1
-        # this may be incorrect, but it is functional
-        @inbounds c.tree.states[1:(filter.N)] = deepcopy(states.filtered.particles)
-    end
-    # TODO: when using non-stack version, may be more efficient to wait until storage full
-    # to prune
-    prune!(c.tree, get_offspring(states.ancestors))
-    insert!(c.tree, states.filtered.particles, states.ancestors)
-    return nothing
-end
-
-"""
-    ResamplerCallback
-
-A callback which follows the resampling indices over the filtering algorithm. This is more
-of a debug tool and visualizer for various resapmling algorithms.
-"""
-struct ResamplerCallback
-    tree::ParticleTree
-
-    function ResamplerCallback(N::Integer, C::Real=1.0)
-        M = floor(Int64, C * N * log(N))
-        nodes = collect(1:N)
-        return new(ParticleTree(nodes, M))
-    end
-end
-
-function (c::ResamplerCallback)(model, filter, step, states, data; kwargs...)
-    if step != 1
-        prune!(c.tree, get_offspring(states.ancestors))
-        insert!(c.tree, collect(1:(filter.N)), states.ancestors)
-    end
-    return nothing
+function expand(d::BatchGaussianDistribution{T}, M::Integer) where {T}
+    new_μs = CuArray{T}(undef, size(d.μs, 1), M)
+    new_Σs = CuArray{T}(undef, size(d.Σs, 1), size(d.Σs, 2), M)
+    new_μs[:, 1:size(d.μs, 2)] = d.μs
+    new_Σs[:, :, 1:size(d.Σs, 3)] = d.Σs
+    return BatchGaussianDistribution(new_μs, new_Σs)
 end

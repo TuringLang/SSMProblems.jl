@@ -11,8 +11,8 @@
 
     rng = StableRNG(1234)
     K = 3
-    Dx = 3
-    Dy = 2
+    Dx = 4
+    Dy = 3
     μ0s = [rand(rng, Dx) for _ in 1:K]
     Σ0s = [rand(rng, Dx, Dx) for _ in 1:K]
     Σ0s .= Σ0s .* transpose.(Σ0s)
@@ -125,30 +125,6 @@
         BatchLinearGaussianDynamics(μ0s, Σ0s, As, bs, Qs),
         BatchLinearGaussianObservations(Hs, cs, Rs),
     )
-
-    # TODO: combine this into usual framework by allowing log_evidence to be a vector or
-    # defininig a specific version for batch algorithms
-    function GeneralisedFilters.filter(
-        rng::AbstractRNG,
-        model::SSMProblems.AbstractStateSpaceModel,
-        alg::BatchKalmanFilter,
-        observations::AbstractVector;
-        callback=nothing,
-        kwargs...,
-    )
-        states = GeneralisedFilters.initialise(rng, model, alg; kwargs...)
-        log_evidence = CUDA.zeros(size(observations[1], 2))
-
-        for t in eachindex(observations)
-            states, log_marginal = GeneralisedFilters.step(
-                rng, model, alg, t, states, observations[t]; callback, kwargs...
-            )
-            log_evidence += log_marginal
-            isnothing(callback) || callback(model, alg, t, states, observations; kwargs...)
-        end
-
-        return states, log_evidence
-    end
 
     Ys_batch = Vector{Matrix{Float64}}(undef, T)
     for t in 1:T
