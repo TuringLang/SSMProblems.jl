@@ -7,36 +7,27 @@ export Multinomial, Systematic, Stratified, Metropolis, Rejection
 
 abstract type AbstractResampler end
 
-function resample(
-    rng::AbstractRNG, resampler::AbstractResampler, states::ParticleDistribution{PT,WT}
-) where {PT,WT}
+function resample(rng::AbstractRNG, resampler::AbstractResampler, states)
     weights = StatsBase.weights(states)
     idxs = sample_ancestors(rng, resampler, weights)
-
-    new_state = ParticleDistribution(
-        deepcopy(states.particles[idxs]), zeros(WT, length(states))
-    )
-
+    # TODO: generalise these
+    new_state = construct_new_state(states, idxs)
     return new_state, idxs
 end
 
-# TODO: combine this with above definition
-function resample(
-    rng::AbstractRNG,
-    resampler::AbstractResampler,
-    states::RaoBlackwellisedParticleDistribution{T,M,ZT},
-) where {T,M,ZT}
-    weights = StatsBase.weights(states)
-    idxs = sample_ancestors(rng, resampler, weights)
+function construct_new_state(states::ParticleDistribution{PT,WT}, idxs) where {PT,WT}
+    return ParticleDistribution(deepcopy(states.particles[idxs]), zeros(WT, length(states)))
+end
 
-    new_state = RaoBlackwellisedParticleDistribution(
+function construct_new_state(
+    states::RaoBlackwellisedParticleDistribution{T}, idxs
+) where {T}
+    return RaoBlackwellisedParticleDistribution(
         BatchRaoBlackwellisedParticles(
             deepcopy(states.particles.xs[:, idxs]), deepcopy(states.particles.zs[idxs])
         ),
         CUDA.zeros(T, length(states)),
     )
-
-    return new_state, idxs
 end
 
 ## CONDITIONAL RESAMPLING ##################################################################
@@ -51,9 +42,7 @@ struct ESSResampler <: AbstractConditionalResampler
     end
 end
 
-function resample(
-    rng::AbstractRNG, cond_resampler::ESSResampler, state::ParticleDistribution{PT,WT}
-) where {PT,WT}
+function resample(rng::AbstractRNG, cond_resampler::ESSResampler, state)
     n = length(state)
     # TODO: computing weights twice. Should create a wrapper to avoid this
     weights = StatsBase.weights(state)
@@ -64,26 +53,6 @@ function resample(
         return resample(rng, cond_resampler.resampler, state)
     else
         return deepcopy(state), collect(1:n)
-    end
-end
-
-# HACK: Likewise this should be removed. Even more so as it's identical, but needed to avoid
-# method ambiguity
-function resample(
-    rng::AbstractRNG,
-    cond_resampler::ESSResampler,
-    state::RaoBlackwellisedParticleDistribution{T,M,ZT},
-) where {T,M,ZT}
-    n = length(state)
-    # TODO: computing weights twice. Should create a wrapper to avoid this
-    weights = StatsBase.weights(state)
-    ess = inv(sum(abs2, weights))
-    @debug "ESS: $ess"
-
-    if cond_resampler.threshold * n ≥ ess
-        return resample(rng, cond_resampler.resampler, state)
-    else
-        return deepcopy(state), CuArray(1:n)
     end
 end
 
