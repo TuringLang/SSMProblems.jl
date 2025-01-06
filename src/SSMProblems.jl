@@ -24,17 +24,32 @@ export LatentDynamics, ObservationProcess, AbstractStateSpaceModel, StateSpaceMo
     All of these methods should accept keyword arguments through `kwargs...` to facilitate
     inference-time dependencies of the dynamics as explained in [Control Variables and Keyword Arguments](@ref).
 
+    The latent states should be of type `ET` which should be a composed from `T`, the
+    arithmetic type used for the dynamics (e.g. Float32, ForwardDiff.Dual).
+
     # Parameters
-    - `T`: The type of the state of the latent dynamics.
+    - `T`: The arithmetic type of the latent dynamics.
+    - `ET`: The element type of the latent dynamics.
 """
-abstract type LatentDynamics{T} end
+abstract type LatentDynamics{T<:Real,ET} end
 
 """
+    arithmetic_type(::Type{<:LatentDynamics})
+    arithmetic_type(dyn::LatentDynamics)
+
+    Return the arithmetic type of the latent dynamics.
+"""
+arithmetic_type(::Type{<:LatentDynamics{T}}) where {T} = T
+arithmetic_type(dyn::LatentDynamics) = arithmetic_type(typeof(dyn))
+
+"""
+    eltype(::Type{<:LatentDynamics})
     eltype(dyn::LatentDynamics)
 
     Return the type of the state of the latent dynamics.
 """
-Base.eltype(::Type{<:LatentDynamics{T}}) where {T} = T
+Base.eltype(::Type{<:LatentDynamics{T,ET}}) where {T,ET} = ET
+Base.eltype(dyn::LatentDynamics) = eltype(typeof(dyn))
 
 """
     Observation process of a state space model.
@@ -49,21 +64,32 @@ Base.eltype(::Type{<:LatentDynamics{T}}) where {T} = T
     All of these methods should accept keyword arguments through `kwargs...` to facilitate
     inference-time dependencies of the observations as explained in [Control Variables and Keyword Arguments](@ref).
 
+    The observations should be of type `ET` which should be a composed from `T`, the
+    arithmetic type used for the observations (e.g. Float32, ForwardDiff.Dual).
+
     # Parameters
-    - `T`: The type of the state of the latent dynamics.
-    - `U`: The type of the observation.
+    - `T`: The arithmetic type of the observation process.
+    - `ET`: The element type of the observation process.
 """
-abstract type ObservationProcess{T} end
+abstract type ObservationProcess{T<:Real,ET} end
 
 """
+    arithmetic_type(::Type{<:ObservationProcess})
+    arithmetic_type(obs::ObservationProcess)
+
+    Return the arithmetic type of the observation process.
+"""
+arithmetic_type(::Type{<:ObservationProcess{T}}) where {T} = T
+arithmetic_type(obs::ObservationProcess) = arithmetic_type(typeof(obs))
+
+"""
+    eltype(::Type{<:ObservationProcess})
     eltype(obs::ObservationProcess)
 
-    Return a pair of types for the state and observation of the observation process.
-
-    The first type is the type of the state of the latent dynamics, and the second type is
-    the type of the observation.
+    Return the type of the observations of the observation process.
 """
-Base.eltype(::Type{<:ObservationProcess{T}}) where {T} = T
+Base.eltype(::Type{<:ObservationProcess{T,ET}}) where {T,ET} = ET
+Base.eltype(obs::ObservationProcess) = eltype(typeof(obs))
 
 """
     distribution(dyn::LatentDynamics; kwargs...)
@@ -253,26 +279,30 @@ abstract type AbstractStateSpaceModel <: AbstractMCMC.AbstractModel end
     # Fields
     - `dyn::LD`: The latent dynamics of the state space model.
     - `obs::OP`: The observation process of the state space model.
+
+    # Parameters
+    - `T`: The arithmetic type of the state space model, which the latent dynamics and
+           observation process should be consistent with.
+    - `LD`: The type of the latent dynamics.
+    - `OP`: The type of the observation process.
 """
-struct StateSpaceModel{T<:Real,LD<:LatentDynamics,OP<:ObservationProcess} <:
+struct StateSpaceModel{T<:Real,LD<:LatentDynamics{T},OP<:ObservationProcess{T}} <:
        AbstractStateSpaceModel
     dyn::LD
     obs::OP
-    function StateSpaceModel(
-        dyn::LatentDynamics{LDT}, obs::ObservationProcess{OPT}
-    ) where {OPT,LDT}
-        T = promote_type(eltype(OPT), eltype(LDT))
+    function StateSpaceModel(dyn::LatentDynamics{T}, obs::ObservationProcess{T}) where {T}
         return new{T,typeof(dyn),typeof(obs)}(dyn, obs)
     end
 end
 
 """
-    eltype(model::StateSpaceModel)
+    arithmetic_type(::Type{<:StateSpaceModel})
+    arithmetic_type(model::StateSpaceModel)
 
-    Return the element type of the model; by definition these types should be
-    consistent as to avoid unnecessary type promotion
+    Return the arithmetic type of the state space model.
 """
-Base.eltype(::Type{<:StateSpaceModel{T,LD,OP}}) where {T,LD,OP} = T
+arithmetic_type(model::StateSpaceModel) = arithmetic_type(typeof(model))
+arithmetic_type(::Type{<:StateSpaceModel{T}}) where {T} = T
 
 include("batch_methods.jl")
 include("utils/forward_simulation.jl")

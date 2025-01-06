@@ -5,9 +5,9 @@ using Test
 
 @testset "Forward Simulation" begin
     @testset "Forward simulation without control" begin
-        struct UncontrolledLatentDynamics <: LatentDynamics{Float64}
-            μ::Float64
-            σ::Float64
+        struct UncontrolledLatentDynamics{T} <: LatentDynamics{T,T}
+            μ::T
+            σ::T
         end
         SSMProblems.distribution(::UncontrolledLatentDynamics; kwargs...) = Normal(0, 1)
         function SSMProblems.distribution(
@@ -16,8 +16,8 @@ using Test
             return Normal(prev_state + dyn.μ, dyn.σ)
         end
 
-        struct UncontrolledObservationProcess <: ObservationProcess{Float64}
-            σ::Float64
+        struct UncontrolledObservationProcess{T} <: ObservationProcess{T,T}
+            σ::T
         end
         function SSMProblems.distribution(
             obs::UncontrolledObservationProcess, ::Integer, state; kwargs...
@@ -38,9 +38,9 @@ using Test
     end
 
     @testset "Forward simulation with control" begin
-        struct ControlledLatentDynamics <: LatentDynamics{Float64}
-            μ::Float64
-            σ::Float64
+        struct ControlledLatentDynamics{T} <: LatentDynamics{T,T}
+            μ::T
+            σ::T
         end
         function SSMProblems.distribution(::ControlledLatentDynamics; σ_init, kwargs...)
             return Normal(0, σ_init)
@@ -52,8 +52,8 @@ using Test
             return Normal(prev_state + dyn.μ * dt, dyn.σ * sqrt(dt))
         end
 
-        struct ControlledObservationProcess <: ObservationProcess{Float64}
-            σ::Float64
+        struct ControlledObservationProcess{T} <: ObservationProcess{T,T}
+            σ::T
         end
         function SSMProblems.distribution(
             obs::ControlledObservationProcess, ::Integer, state; kwargs...

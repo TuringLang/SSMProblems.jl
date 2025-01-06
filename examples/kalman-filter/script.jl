@@ -25,7 +25,7 @@ using SSMProblems
 #
 # We store all of these paramaters in a struct.
 
-struct LinearGaussianLatentDynamics{T<:Real} <: LatentDynamics{Vector{T}}
+struct LinearGaussianLatentDynamics{T<:Real} <: LatentDynamics{T,Vector{T}}
     z::Vector{T}
     P::Matrix{T}
     Φ::Matrix{T}
@@ -35,16 +35,17 @@ end
 
 # Note, that our specific dynamics should be subtypes of the abstract `LatentDynamics` type.
 # Importantly, consider the type parameters used. Whereas the type parameter(s) of our
-# struct can be whatever is/are most suitable, the type parameter of `LatentDynamics` should
-# reflect the type used to store a given latent state at a given time step. In this case,
-# since we are considering a multi-dimensional problem, we use `Vector{T}`.
+# struct can be whatever is/are most suitable, the type parameters of `LatentDynamics`
+# should reflect arithmetic type and the type of our latent state, respectively. In this
+# case, since we are considering a multi-dimensional problem, we use `Vector{T}` for the
+# latter.
 
 # Similarly, the observation process is defined by the following equation:
 # ```
 # y[k] = Hx[k] + v[k],          v[k] ∼ N(0, R)
 # ```
 
-struct LinearGaussianObservationProcess{T<:Real} <: ObservationProcess{Vector{T}}
+struct LinearGaussianObservationProcess{T<:Real} <: ObservationProcess{T,Vector{T}}
     H::Matrix{T}
     R::Matrix{T}
 end
