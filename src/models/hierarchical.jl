@@ -1,21 +1,28 @@
 import SSMProblems: LatentDynamics, ObservationProcess, simulate
 export HierarchicalSSM
 
-struct HierarchicalSSM{T<:Real,OD<:LatentDynamics,M<:AbstractStateSpaceModel} <:
+struct HierarchicalSSM{T<:Real,OD<:LatentDynamics{T},M<:StateSpaceModel{T}} <:
        AbstractStateSpaceModel
     outer_dyn::OD
     inner_model::M
+    function HierarchicalSSM(
+        outer_dyn::LatentDynamics{T}, inner_model::StateSpaceModel{T}
+    ) where {T}
+        return new{T,typeof(outer_dyn),typeof(inner_model)}(outer_dyn, inner_model)
+    end
 end
 
 function HierarchicalSSM(
-    outer_dyn::LatentDynamics{LDT}, inner_dyn::LatentDynamics, obs::ObservationProcess
-) where {LDT}
+    outer_dyn::LatentDynamics{T}, inner_dyn::LatentDynamics{T}, obs::ObservationProcess{T}
+) where {T}
     inner_model = StateSpaceModel(inner_dyn, obs)
-    T = promote_type(eltype(inner_model), eltype(LDT))
-    return HierarchicalSSM{T,typeof(outer_dyn),typeof(inner_model)}(outer_dyn, inner_model)
+    return HierarchicalSSM(outer_dyn, inner_model)
 end
 
-Base.eltype(::Type{<:HierarchicalSSM{T,ODT,MT}}) where {T,ODT,MT} = T
+SSMProblems.arithmetic_type(::Type{<:HierarchicalSSM{T}}) where {T} = T
+function SSMProblems.arithmetic_type(model::HierarchicalSSM)
+    return SSMProblems.arithmetic_type(model.outer_dyn)
+end
 
 function AbstractMCMC.sample(
     rng::AbstractRNG, model::HierarchicalSSM, T::Integer; kwargs...

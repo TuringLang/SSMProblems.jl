@@ -6,14 +6,14 @@ import SSMProblems: distribution
 import Distributions: Categorical
 
 abstract type DiscreteLatentDynamics{T_state<:Integer,T_prob<:Real} <:
-              SSMProblems.LatentDynamics{T_state} end
+              LatentDynamics{T_prob,T_state} end
 
 function calc_α0 end
 function calc_P end
 
-const DiscreteStateSpaceModel{LD,OD} = SSMProblems.StateSpaceModel{
+const DiscreteStateSpaceModel{T} = SSMProblems.StateSpaceModel{
     T,LD,OD
-} where {T,LD<:DiscreteLatentDynamics,OD<:ObservationProcess{T}}
+} where {T,LD<:DiscreteLatentDynamics{<:Integer,T},OD<:ObservationProcess{T}}
 
 function rb_eltype(
     ::DiscreteStateSpaceModel{LD}
@@ -31,8 +31,8 @@ function SSMProblems.distribution(dyn::DiscreteLatentDynamics; kwargs...)
 end
 
 function SSMProblems.distribution(
-    dyn::DiscreteLatentDynamics{T}, step::Integer, state::Integer; kwargs...
-) where {T}
+    dyn::DiscreteLatentDynamics, step::Integer, state::Integer; kwargs...
+)
     P = calc_P(dyn, step; kwargs...)
     return Categorical(P[state, :])
 end

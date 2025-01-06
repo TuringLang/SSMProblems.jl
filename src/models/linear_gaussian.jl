@@ -7,7 +7,7 @@ import SSMProblems: distribution
 import Distributions: MvNormal
 import LinearAlgebra: cholesky
 
-abstract type LinearGaussianLatentDynamics{T} <: SSMProblems.LatentDynamics{Vector{T}} end
+abstract type LinearGaussianLatentDynamics{T} <: SSMProblems.LatentDynamics{T,Vector{T}} end
 
 function calc_μ0 end
 function calc_Σ0 end
@@ -27,7 +27,7 @@ function calc_params(dyn::LinearGaussianLatentDynamics, step::Integer; kwargs...
 end
 
 abstract type LinearGaussianObservationProcess{T} <:
-              SSMProblems.ObservationProcess{Vector{T}} end
+              SSMProblems.ObservationProcess{T,Vector{T}} end
 
 function calc_H end
 function calc_c end
@@ -44,9 +44,6 @@ const LinearGaussianStateSpaceModel{T} = SSMProblems.StateSpaceModel{
     T,D,O
 } where {T,D<:LinearGaussianLatentDynamics{T},O<:LinearGaussianObservationProcess{T}}
 
-# TODO: this is hacky and should ideally be removed
-# Can't use `eltype` because that is used by SSMProblems for forward simulation and would be
-# used by a particle filtering.
 function rb_eltype(::LinearGaussianStateSpaceModel{T}) where {T}
     return Gaussian{Vector{T},Matrix{T}}
 end
@@ -61,18 +58,15 @@ function SSMProblems.distribution(dyn::LinearGaussianLatentDynamics; kwargs...)
 end
 
 function SSMProblems.distribution(
-    dyn::LinearGaussianLatentDynamics{T}, step::Integer, state::AbstractVector{T}; kwargs...
-) where {T}
+    dyn::LinearGaussianLatentDynamics, step::Integer, state::AbstractVector; kwargs...
+)
     A, b, Q = calc_params(dyn, step; kwargs...)
     return MvNormal(A * state + b, Q)
 end
 
 function SSMProblems.distribution(
-    obs::LinearGaussianObservationProcess{T},
-    step::Integer,
-    state::AbstractVector{T};
-    kwargs...,
-) where {T}
+    obs::LinearGaussianObservationProcess, step::Integer, state::AbstractVector; kwargs...
+)
     H, c, R = calc_params(obs, step; kwargs...)
     return MvNormal(H * state + c, R)
 end
@@ -82,7 +76,7 @@ end
 ###########################################
 
 struct HomogeneousLinearGaussianLatentDynamics{
-    T<:Real,AT<:AbstractMatrix{T},QT<:AbstractMatrix{T},ΣT<:AbstractMatrix{T}
+    T<:Real,ΣT<:AbstractMatrix{T},AT<:AbstractMatrix{T},QT<:AbstractMatrix{T}
 } <: LinearGaussianLatentDynamics{T}
     μ0::Vector{T}
     Σ0::ΣT

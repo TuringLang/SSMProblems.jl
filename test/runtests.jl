@@ -140,7 +140,7 @@ end
     P = rand(rng, 3, 3)
     P = P ./ sum(P; dims=2)
 
-    struct MixtureModelObservation{T} <: SSMProblems.ObservationProcess{T}
+    struct MixtureModelObservation{T} <: SSMProblems.ObservationProcess{T,T}
         μs::Vector{T}
     end
 

@@ -91,11 +91,11 @@ function filter(
 end
 
 function initialise_log_evidence(::AbstractFilter, model::AbstractStateSpaceModel)
-    return zero(eltype(model))
+    return zero(SSMProblems.arithmetic_type(model))
 end
 
 function initialise_log_evidence(alg::AbstractBatchFilter, model::AbstractStateSpaceModel)
-    return CUDA.zeros(eltype(model), alg.batch_size)
+    return CUDA.zeros(SSMProblems.arithmetic_type(model), alg.batch_size)
 end
 
 function filter(
