@@ -11,25 +11,25 @@ import Distributions: logpdf
 export LatentDynamics, ObservationProcess, AbstractStateSpaceModel, StateSpaceModel
 
 """
-    Latent dynamics of a state space model.
+Latent dynamics of a state space model.
 
-    Any concrete subtype of `LatentDynamics` should implement the functions `logdensity` and
-    `simulate`, by defining two methods as documented below, one for initialisation and one
-    for transitioning. Whether each of these functions need to be implemented depends on the
-    exact inference algorithm that is intended to be used.
+Any concrete subtype of `LatentDynamics` should implement the functions `logdensity` and
+`simulate`, by defining two methods as documented below, one for initialisation and one
+for transitioning. Whether each of these functions need to be implemented depends on the
+exact inference algorithm that is intended to be used.
 
-    Alternatively, you may specify methods for the function `distribution` which will be
-    used to define the above methods.
+Alternatively, you may specify methods for the function `distribution` which will be
+used to define the above methods.
 
-    All of these methods should accept keyword arguments through `kwargs...` to facilitate
-    inference-time dependencies of the dynamics as explained in [Control Variables and Keyword Arguments](@ref).
+All of these methods should accept keyword arguments through `kwargs...` to facilitate
+inference-time dependencies of the dynamics as explained in [Control Variables and Keyword Arguments](@ref).
 
-    The latent states should be of type `ET` which should be a composed from `T`, the
-    arithmetic type used for the dynamics (e.g. Float32, ForwardDiff.Dual).
+The latent states should be of type `ET` which should be a composed from `T`, the
+arithmetic type used for the dynamics (e.g. Float32, ForwardDiff.Dual).
 
-    # Parameters
-    - `T`: The arithmetic type of the latent dynamics.
-    - `ET`: The element type of the latent dynamics.
+# Parameters
+- `T`: The arithmetic type of the latent dynamics.
+- `ET`: The element type of the latent dynamics.
 """
 abstract type LatentDynamics{T<:Real,ET} end
 
@@ -37,7 +37,7 @@ abstract type LatentDynamics{T<:Real,ET} end
     arithmetic_type(::Type{<:LatentDynamics})
     arithmetic_type(dyn::LatentDynamics)
 
-    Return the arithmetic type of the latent dynamics.
+Return the arithmetic type of the latent dynamics.
 """
 arithmetic_type(::Type{<:LatentDynamics{T}}) where {T} = T
 arithmetic_type(dyn::LatentDynamics) = arithmetic_type(typeof(dyn))
@@ -46,30 +46,30 @@ arithmetic_type(dyn::LatentDynamics) = arithmetic_type(typeof(dyn))
     eltype(::Type{<:LatentDynamics})
     eltype(dyn::LatentDynamics)
 
-    Return the type of the state of the latent dynamics.
+Return the type of the state of the latent dynamics.
 """
 Base.eltype(::Type{<:LatentDynamics{T,ET}}) where {T,ET} = ET
 Base.eltype(dyn::LatentDynamics) = eltype(typeof(dyn))
 
 """
-    Observation process of a state space model.
+Observation process of a state space model.
 
-    Any concrete subtype of `ObservationProcess` must implement the `logdensity`
-    method, as defined below. Optionally, it may also implement `simulate` for use in
-    forward simulation of the state space model.
-    
-    Alternatively, you may specify a method for `distribution`, which will be used to define
-    both of the above methods.
+Any concrete subtype of `ObservationProcess` must implement the `logdensity`
+method, as defined below. Optionally, it may also implement `simulate` for use in
+forward simulation of the state space model.
 
-    All of these methods should accept keyword arguments through `kwargs...` to facilitate
-    inference-time dependencies of the observations as explained in [Control Variables and Keyword Arguments](@ref).
+Alternatively, you may specify a method for `distribution`, which will be used to define
+both of the above methods.
 
-    The observations should be of type `ET` which should be a composed from `T`, the
-    arithmetic type used for the observations (e.g. Float32, ForwardDiff.Dual).
+All of these methods should accept keyword arguments through `kwargs...` to facilitate
+inference-time dependencies of the observations as explained in [Control Variables and Keyword Arguments](@ref).
 
-    # Parameters
-    - `T`: The arithmetic type of the observation process.
-    - `ET`: The element type of the observation process.
+The observations should be of type `ET` which should be a composed from `T`, the
+arithmetic type used for the observations (e.g. Float32, ForwardDiff.Dual).
+
+# Parameters
+- `T`: The arithmetic type of the observation process.
+- `ET`: The element type of the observation process.
 """
 abstract type ObservationProcess{T<:Real,ET} end
 
@@ -77,7 +77,7 @@ abstract type ObservationProcess{T<:Real,ET} end
     arithmetic_type(::Type{<:ObservationProcess})
     arithmetic_type(obs::ObservationProcess)
 
-    Return the arithmetic type of the observation process.
+Return the arithmetic type of the observation process.
 """
 arithmetic_type(::Type{<:ObservationProcess{T}}) where {T} = T
 arithmetic_type(obs::ObservationProcess) = arithmetic_type(typeof(obs))
@@ -86,7 +86,7 @@ arithmetic_type(obs::ObservationProcess) = arithmetic_type(typeof(obs))
     eltype(::Type{<:ObservationProcess})
     eltype(obs::ObservationProcess)
 
-    Return the type of the observations of the observation process.
+Return the type of the observations of the observation process.
 """
 Base.eltype(::Type{<:ObservationProcess{T,ET}}) where {T,ET} = ET
 Base.eltype(obs::ObservationProcess) = eltype(typeof(obs))
@@ -148,15 +148,15 @@ end
 """
     simulate([rng::AbstractRNG], dyn::LatentDynamics; kwargs...)
 
-    Simulate an initial state for the latent dynamics.
+Simulate an initial state for the latent dynamics.
 
-    The method should return a random initial state for the first time step of the latent
-    dynamics.
+The method should return a random initial state for the first time step of the latent
+dynamics.
 
-    The default behaviour is generate a random sample from distribution returned by the
-    corresponding `distribution()` method.
+The default behaviour is generate a random sample from distribution returned by the
+corresponding `distribution()` method.
 
-    See also [`LatentDynamics`](@ref).
+See also [`LatentDynamics`](@ref).
 """
 function simulate(rng::AbstractRNG, dyn::LatentDynamics; kwargs...)
     return rand(rng, distribution(dyn; kwargs...))
@@ -259,32 +259,32 @@ function logdensity(obs::ObservationProcess, step::Integer, state, observation; 
 end
 
 """
-    An abstract type for state space models.
+An abstract type for state space models.
 
-    Any concrete subtype of `AbstractStateSpaceModel` should implement a method for
-    `AbstractMCMC.sample` which performs forward simulation. For an example implementation,
-    see [AbstractMCMC.sample(::StateSpaceModel)](@ref).
+Any concrete subtype of `AbstractStateSpaceModel` should implement a method for
+`AbstractMCMC.sample` which performs forward simulation. For an example implementation,
+see [AbstractMCMC.sample(::StateSpaceModel)](@ref).
 
-    For most regular use-cases, the predefined `StateSpaceModel` type, documented below,
-    should be sufficient.
+For most regular use-cases, the predefined `StateSpaceModel` type, documented below,
+should be sufficient.
 """
 abstract type AbstractStateSpaceModel <: AbstractMCMC.AbstractModel end
 
 """
-    A state space model.
+A state space model.
 
-    A vanilla implementation of a state space model, composed of a latent dynamics and an
-    observation process.
+A vanilla implementation of a state space model, composed of a latent dynamics and an
+observation process.
 
-    # Fields
-    - `dyn::LD`: The latent dynamics of the state space model.
-    - `obs::OP`: The observation process of the state space model.
+# Fields
+- `dyn::LD`: The latent dynamics of the state space model.
+- `obs::OP`: The observation process of the state space model.
 
-    # Parameters
-    - `T`: The arithmetic type of the state space model, which the latent dynamics and
-           observation process should be consistent with.
-    - `LD`: The type of the latent dynamics.
-    - `OP`: The type of the observation process.
+# Parameters
+- `T`: The arithmetic type of the state space model, which the latent dynamics and
+        observation process should be consistent with.
+- `LD`: The type of the latent dynamics.
+- `OP`: The type of the observation process.
 """
 struct StateSpaceModel{T<:Real,LD<:LatentDynamics{T},OP<:ObservationProcess{T}} <:
        AbstractStateSpaceModel
@@ -299,7 +299,7 @@ end
     arithmetic_type(::Type{<:StateSpaceModel})
     arithmetic_type(model::StateSpaceModel)
 
-    Return the arithmetic type of the state space model.
+Return the arithmetic type of the state space model.
 """
 arithmetic_type(model::StateSpaceModel) = arithmetic_type(typeof(model))
 arithmetic_type(::Type{<:StateSpaceModel{T}}) where {T} = T
