@@ -10,9 +10,9 @@
     using CUDA
 
     rng = StableRNG(1234)
-    K = 3
-    Dx = 4
-    Dy = 3
+    K = 10
+    Dx = 2
+    Dy = 2
     μ0s = [rand(rng, Dx) for _ in 1:K]
     Σ0s = [rand(rng, Dx, Dx) for _ in 1:K]
     Σ0s .= Σ0s .* transpose.(Σ0s)

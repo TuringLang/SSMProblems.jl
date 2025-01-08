@@ -236,11 +236,12 @@ end
     D_obs = 2
     T = 5
     N_particles = 10^4
+    ET = Float32
 
     rng = StableRNG(SEED)
 
     full_model, hier_model = TestModels.create_dummy_linear_gaussian_model(
-        rng, D_outer, D_inner, D_obs
+        rng, D_outer, D_inner, D_obs, ET
     )
     _, _, ys = sample(rng, full_model, T)
 
@@ -262,6 +263,7 @@ end
     @test kf_ll ≈ ll rtol = 1e-2
     @test first(kf_state.μ) ≈ sum(xs[1, :] .* weights) rtol = 1e-1
     @test last(kf_state.μ) ≈ sum(zs.μs[end, :] .* weights) rtol = 1e-2
+    @test eltype(xs) == ET
 end
 
 @testitem "RBPF ancestory test" setup = [TestModels] begin
@@ -468,7 +470,7 @@ end
     D_inner = 3
     D_obs = 2
     K = 5
-    T = Float64  # TODO: revert to Float32 once SSM type parameters are resolved
+    T = Float32
     N_particles = 1000
 
     rng = StableRNG(1234)
@@ -509,8 +511,8 @@ end
     D_inner = 3
     D_obs = 2
     K = 5
-    T = Float64
-    N_particles = 1000
+    T = Float32
+    N_particles = 10^5
 
     rng = StableRNG(1234)
 
@@ -554,8 +556,8 @@ end
     D_obs = 1
     K = 3
     t_smooth = 2
-    T = Float64
-    N_particles = 40
+    T = Float32
+    N_particles = 10000
     N_burnin = 100
     N_sample = 2000
 
@@ -572,10 +574,10 @@ end
     )
 
     particle_template = GeneralisedFilters.BatchRaoBlackwellisedParticles(
-        CuArray{Float32}(undef, D_outer, N_particles),
+        CuArray{T}(undef, D_outer, N_particles),
         GeneralisedFilters.BatchGaussianDistribution(
-            CuArray{Float32}(undef, D_inner, N_particles),
-            CuArray{Float32}(undef, D_inner, D_inner, N_particles),
+            CuArray{T}(undef, D_inner, N_particles),
+            CuArray{T}(undef, D_inner, D_inner, N_particles),
         ),
     )
     particle_type = typeof(particle_template)
@@ -595,7 +597,8 @@ end
             hier_model, rbpf, ys; ref_state=ref_traj, callback=cb
         )
         weights = softmax(rbpf_state.log_weights)
-        sampled_idx = CUDA.@allowscalar sample(1:length(weights), Weights(weights))
+        ancestors = GeneralisedFilters.sample_ancestors(rng, Multinomial(), weights)
+        sampled_idx = CUDA.@allowscalar ancestors[1]
         global ref_traj = GeneralisedFilters.get_ancestry(tree, sampled_idx, K)
         if i > N_burnin
             trajectory_samples[i - N_burnin] = ref_traj
