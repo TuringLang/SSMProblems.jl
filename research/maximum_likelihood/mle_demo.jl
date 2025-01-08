@@ -30,7 +30,7 @@ _, _, ys = sample(rng, true_model, 10000)
 function logℓ(θ, data)
     rng = MersenneTwister(1234)
     _, ll = GeneralisedFilters.filter(rng, toy_model(θ[]), KF(), data)
-    return ll
+    return -ll
 end
 
 # check type stability (important for use with Enzyme)
