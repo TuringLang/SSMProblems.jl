@@ -92,7 +92,7 @@ function sample_ancestors(
 ) where {WT}
     W = cumsum(weights)
     Wn = CUDA.@allowscalar W[n]
-    us = CUDA.rand(n) * Wn
+    us = CUDA.rand(WT, n) * Wn
     as = searchsortedfirst(W, us)
     return as
 end
