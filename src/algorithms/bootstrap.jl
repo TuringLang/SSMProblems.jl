@@ -32,7 +32,7 @@ function step(
 end
 
 struct BootstrapFilter{RS<:AbstractResampler} <: AbstractParticleFilter
-    N::Integer
+    N::Int
     resampler::RS
 end
 
