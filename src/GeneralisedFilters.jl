@@ -26,7 +26,7 @@ function instantiate end
 
 # Default method
 function instantiate(model, alg, initial; kwargs...)
-    return Intermediate(initial, deepcopy(initial))
+    return Intermediate(initial, initial)
 end
 
 """

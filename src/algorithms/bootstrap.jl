@@ -50,7 +50,7 @@ function instantiate(
     ::StateSpaceModel{T}, filter::BootstrapFilter, initial; kwargs...
 ) where {T}
     N = filter.N
-    return ParticleIntermediate(initial, deepcopy(initial), Vector{Int}(undef, N))
+    return ParticleIntermediate(initial, initial, Vector{Int}(undef, N))
 end
 
 function initialise(
@@ -78,7 +78,8 @@ function predict(
     new_particles = map(
         x -> SSMProblems.simulate(rng, model.dyn, step, x; kwargs...), collect(filtered)
     )
-    proposed = ParticleDistribution(new_particles, deepcopy(filtered.log_weights))
+    # Don't need to deepcopy weights as filtered will be overwritten in the update step
+    proposed = ParticleDistribution(new_particles, filtered.log_weights)
 
     return update_ref!(proposed, ref_state, step)
 end

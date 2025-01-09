@@ -16,7 +16,7 @@ function resample(rng::AbstractRNG, resampler::AbstractResampler, states)
 end
 
 function construct_new_state(states::ParticleDistribution{PT,WT}, idxs) where {PT,WT}
-    return ParticleDistribution(deepcopy(states.particles[idxs]), zeros(WT, length(states)))
+    return ParticleDistribution(states.particles[idxs], zeros(WT, length(states)))
 end
 
 function construct_new_state(
@@ -24,7 +24,7 @@ function construct_new_state(
 ) where {T}
     return RaoBlackwellisedParticleDistribution(
         BatchRaoBlackwellisedParticles(
-            deepcopy(states.particles.xs[:, idxs]), deepcopy(states.particles.zs[idxs])
+            states.particles.xs[:, idxs], states.particles.zs[idxs]
         ),
         CUDA.zeros(T, length(states)),
     )

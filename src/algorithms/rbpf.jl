@@ -22,7 +22,7 @@ end
 
 function instantiate(::HierarchicalSSM{T}, filter::RBPF, initial; kwargs...) where {T}
     N = filter.N
-    return ParticleIntermediate(initial, deepcopy(initial), Vector{Int}(undef, N))
+    return ParticleIntermediate(initial, initial, Vector{Int}(undef, N))
 end
 
 function initialise(
@@ -56,7 +56,8 @@ function predict(
     new_particles = map(
         x -> marginal_predict(rng, model, algo, t, x; kwargs...), filtered.particles
     )
-    proposed = ParticleDistribution(new_particles, deepcopy(filtered.log_weights))
+    # Don't need to deepcopy weights as filtered will be overwritten in the update step
+    proposed = ParticleDistribution(new_particles, filtered.log_weights)
 
     return update_ref!(proposed, ref_state, t)
 end
@@ -156,7 +157,7 @@ end
 
 function instantiate(model::HierarchicalSSM, algo::BatchRBPF, initial; kwargs...)
     N = algo.N
-    return ParticleIntermediate(initial, deepcopy(initial), CuArray{Int}(undef, N))
+    return ParticleIntermediate(initial, initial, CuArray{Int}(undef, N))
 end
 
 function initialise(
@@ -205,8 +206,9 @@ function predict(
         new_outer=new_xs,
         kwargs...,
     )
+    # Don't need to deepcopy weights as filtered will be overwritten in the update step
     proposed = RaoBlackwellisedParticleDistribution(
-        BatchRaoBlackwellisedParticles(new_xs, new_zs), deepcopy(filtered.log_weights)
+        BatchRaoBlackwellisedParticles(new_xs, new_zs), filtered.log_weights
     )
 
     # return states
@@ -232,8 +234,9 @@ function update(
     )
 
     new_weights = proposed.log_weights + inner_lls
+    # Don't need to deepcopy particles as update will be overwritten in the next step
     filtered = RaoBlackwellisedParticleDistribution(
-        BatchRaoBlackwellisedParticles(deepcopy(proposed.particles.xs), new_zs), new_weights
+        BatchRaoBlackwellisedParticles(proposed.particles.xs, new_zs), new_weights
     )
 
     step_ll = logsumexp(filtered.log_weights) - logsumexp(proposed.log_weights)
