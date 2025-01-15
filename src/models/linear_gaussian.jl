@@ -177,52 +177,52 @@ function SSMProblems.batch_simulate(
 end
 
 function batch_calc_μ0s(
-    dyn::HomogeneousLinearGaussianLatentDynamics{T}, ::Integer, N::Integer; kwargs...
+    dyn::HomogeneousLinearGaussianLatentDynamics{T}, N::Integer; kwargs...
 ) where {T}
-    μ0 = CuArray{T}(undef, length(dyn.μ0), N)
-    return μ0[:, :] .= cu(dyn.μ0)
+    μ0s = CuArray{T}(undef, length(dyn.μ0), N)
+    return μ0s[:, :] .= cu(dyn.μ0)
 end
 function batch_calc_Σ0s(
-    dyn::HomogeneousLinearGaussianLatentDynamics{T}, ::Integer, N::Integer; kwargs...
+    dyn::HomogeneousLinearGaussianLatentDynamics{T}, N::Integer; kwargs...
 ) where {T}
-    Σ0 = CuArray{T}(undef, size(dyn.Σ0)..., N)
-    return Σ0[:, :, :] .= cu(dyn.Σ0)
+    Σ0s = CuArray{T}(undef, size(dyn.Σ0)..., N)
+    return Σ0s[:, :, :] .= cu(dyn.Σ0)
 end
 function batch_calc_As(
     dyn::HomogeneousLinearGaussianLatentDynamics{T}, ::Integer, N::Integer; kwargs...
 ) where {T}
-    A = CuArray{T}(undef, size(dyn.A)..., N)
-    return A[:, :, :] .= cu(dyn.A)
+    As = CuArray{T}(undef, size(dyn.A)..., N)
+    return As[:, :, :] .= cu(dyn.A)
 end
 function batch_calc_bs(
     dyn::HomogeneousLinearGaussianLatentDynamics{T}, ::Integer, N::Integer; kwargs...
 ) where {T}
-    b = CuArray{T}(undef, size(dyn.b)..., N)
-    return b[:, :] .= cu(dyn.b)
+    bs = CuArray{T}(undef, size(dyn.b)..., N)
+    return bs[:, :] .= cu(dyn.b)
 end
 function batch_calc_Qs(
     dyn::HomogeneousLinearGaussianLatentDynamics{T}, ::Integer, N::Integer; kwargs...
 ) where {T}
-    Q = CuArray{T}(undef, size(dyn.Q)..., N)
-    return Q[:, :, :] .= cu(dyn.Q)
+    Qs = CuArray{T}(undef, size(dyn.Q)..., N)
+    return Qs[:, :, :] .= cu(dyn.Q)
 end
 
 function batch_calc_Hs(
     obs::HomogeneousLinearGaussianObservationProcess{T}, ::Integer, N::Integer; kwargs...
 ) where {T}
-    H = CuArray{T}(undef, size(obs.H)..., N)
-    return H[:, :, :] .= cu(obs.H)
+    Hs = CuArray{T}(undef, size(obs.H)..., N)
+    return Hs[:, :, :] .= cu(obs.H)
 end
 function batch_calc_cs(
     obs::HomogeneousLinearGaussianObservationProcess{T}, ::Integer, N::Integer; kwargs...
 ) where {T}
-    c = CuArray{T}(undef, size(obs.c)..., N)
-    return c[:, :] .= cu(obs.c)
+    cs = CuArray{T}(undef, size(obs.c)..., N)
+    return cs[:, :] .= cu(obs.c)
 end
 
 function batch_calc_Rs(
     obs::HomogeneousLinearGaussianObservationProcess{T}, ::Integer, N::Integer; kwargs...
 ) where {T}
-    R = CuArray{T}(undef, size(obs.R)..., N)
-    return R[:, :, :] .= cu(obs.R)
+    Rs = CuArray{T}(undef, size(obs.R)..., N)
+    return Rs[:, :, :] .= cu(obs.R)
 end

@@ -224,6 +224,7 @@ function update(
 
     y = cu(obs)
 
+    # TODO: this is y_res
     inv_term = NNlib.batched_vec(S_inv, y .- m)
     log_likes =
         -T(0.5) * NNlib.batched_vec(reshape(y .- m, 1, size(y, 1), size(S, 3)), inv_term)
