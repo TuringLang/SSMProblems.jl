@@ -3,7 +3,6 @@ name: Documentation
 on:
   push:
     branches:
-      # Build the main branch.
       - main
     tags: '*'
   pull_request:
@@ -14,21 +13,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 
+permissions:
+  contents: write
+  pull-requests: read
+
 jobs:
   docs:
-    permissions:
-      contents: write
-      statuses: write
-    name: Documentation
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
-      - uses: julia-actions/setup-julia@v1
-        with:
-          version: '1'
-      - uses: julia-actions/julia-docdeploy@v1
-        env:
-          GKSwstype: nul # GR backend issues
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
-          JULIA_DEBUG: Documenter # Print `@debug` statements (https://github.com/JuliaDocs/Documenter.jl/issues/955)
+      - name: Build and deploy Documenter.jl docs
+        uses: TuringLang/actions/DocsDocumenter@main
