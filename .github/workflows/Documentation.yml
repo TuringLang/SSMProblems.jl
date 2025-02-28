@@ -32,29 +32,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       
-      - name: Setup Julia for package development
-        uses: julia-actions/setup-julia@v2
-        with:
-          version: '1'
-      
-      - name: Develop package dependencies
-        shell: julia --color=yes {0}
-        run: |
-          using Pkg
-          # Change to the package directory
-          cd("${{ matrix.pkg.path }}")
-          # Develop the package from the current directory
-          Pkg.develop(PackageSpec(path=pwd()))
-          
-          # If there are cross-dependencies between packages, add them here
-          # For example, if SSMProblems depends on GeneralisedFilters:
-          # if "${{ matrix.pkg.name }}" == "SSMProblems"
-          #   Pkg.develop(PackageSpec(path="../GeneralisedFilters"))
-          # end
-      
       - name: Build and deploy Documenter.jl docs
         uses: TuringLang/actions/DocsDocumenter@main
         with:
+          # Specify the package subdirectory
+          subdir: ${{ matrix.pkg.path }}
+          # Adjust paths accordingly
           doc-path: ${{ matrix.pkg.path }}/docs
           doc-make-path: ${{ matrix.pkg.path }}/docs/make.jl
           doc-build-path: ${{ matrix.pkg.path }}/docs/build
