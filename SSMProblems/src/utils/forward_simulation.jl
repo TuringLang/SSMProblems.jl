@@ -3,6 +3,14 @@
 import AbstractMCMC: sample
 export sample
 
+"""
+    sample([rng::AbstractRNG], model::StateSpaceModel, T::Integer; kwargs...)
+
+Simulate a trajectory of length `T` from the state space model.
+
+Returns a tuple `(x0, xs, ys)` where `x0` is the initial state, `xs` is a vector of latent states,
+and `ys` is a vector of observations.
+"""
 function sample(
     rng::AbstractRNG, model::StateSpaceModel{<:Real,LD,OP}, T::Integer; kwargs...
 ) where {LD,OP}
@@ -21,6 +29,11 @@ function sample(
     return x0, xs, ys
 end
 
+"""
+    sample(model::AbstractStateSpaceModel, T::Integer; kwargs...)
+
+Simulate a trajectory using the default random number generator.
+"""
 function sample(model::AbstractStateSpaceModel, T::Integer; kwargs...)
     return sample(default_rng(), model, T; kwargs...)
 end
