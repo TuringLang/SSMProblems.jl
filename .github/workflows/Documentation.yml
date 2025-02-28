@@ -41,7 +41,7 @@ jobs:
           Pkg.develop(PackageSpec(path="${{ matrix.pkg.dir }}"));
           if "${{ matrix.pkg.name }}" == "GeneralisedFilters"
               Pkg.develop(PackageSpec(path="./SSMProblems"));
-          end
+          end;
           Pkg.instantiate();'
       - name: Build and deploy
         env:
