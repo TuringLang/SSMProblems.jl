@@ -4,40 +4,52 @@ on:
   push:
     branches:
       - main
-    tags: '*'
+    tags: ['*']
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 
-permissions:
-  contents: write
-  pull-requests: read
-
 jobs:
   docs:
     name: ${{ matrix.pkg.name }} Docs
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      statuses: write
     strategy:
       fail-fast: false
       matrix:
         pkg:
           - name: GeneralisedFilters
-            path: GeneralisedFilters
+            dir: './GeneralisedFilters'
           - name: SSMProblems
-            path: SSMProblems
+            dir: './SSMProblems'
     
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      
-      - name: Build and deploy Documenter.jl docs
-        uses: TuringLang/actions/DocsDocumenter@main
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
         with:
-          # Specify the package subdirectory
-          subdir: ${{ matrix.pkg.path }}
-          # Adjust paths accordingly
-          doc-path: ${{ matrix.pkg.path }}/docs
-          doc-make-path: ${{ matrix.pkg.path }}/docs/make.jl
-          doc-build-path: ${{ matrix.pkg.path }}/docs/build
+          version: '1'
+      - uses: julia-actions/cache@v1
+      - name: Install dependencies
+        run: julia --project=${{ matrix.pkg.dir }}/docs/ --color=yes -e '
+          using Pkg;
+          Pkg.Registry.update();
+          
+          # Develop the current package
+          Pkg.develop(PackageSpec(path="${{ matrix.pkg.dir }}"));
+          
+          # Handle dependency: GeneralisedFilters depends on SSMProblems
+          if "${{ matrix.pkg.name }}" == "GeneralisedFilters"
+              Pkg.develop(PackageSpec(path="./SSMProblems"));
+          end
+          
+          Pkg.instantiate();'
+      - name: Build and deploy
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
+        run: julia --project=${{ matrix.pkg.dir }}/docs/ --color=yes ${{ matrix.pkg.dir }}/docs/make.jl
