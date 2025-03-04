@@ -44,7 +44,9 @@ jobs:
           end;
           Pkg.instantiate();'
       - name: Build and deploy
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
-        run: julia --project=${{ matrix.pkg.dir }}/docs/ --color=yes ${{ matrix.pkg.dir }}/docs/make.jl
+        uses: TuringLang/actions/DocsDocumenter@main
+        with:
+          doc-path: ${{ matrix.pkg.dir }}/docs
+          doc-make-path: ${{ matrix.pkg.dir }}/docs/make.jl
+          doc-build-path: ${{ matrix.pkg.dir }}/docs/build
+          dirname: ${{ matrix.pkg.name }}
