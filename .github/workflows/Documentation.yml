@@ -1,0 +1,53 @@
+name: Documentation
+
+on:
+  push:
+    branches:
+      - main
+    tags: ['*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
+
+jobs:
+  docs:
+    name: ${{ matrix.pkg.name }} Docs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      statuses: write
+    strategy:
+      fail-fast: false
+      matrix:
+        pkg:
+          - name: GeneralisedFilters
+            dir: './GeneralisedFilters'
+          - name: SSMProblems
+            dir: './SSMProblems'
+    
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1'
+      - uses: julia-actions/cache@v1
+      - name: Install dependencies
+        run: julia --project=${{ matrix.pkg.dir }}/docs/ --color=yes -e '
+          using Pkg;
+          Pkg.Registry.update();
+          Pkg.develop(PackageSpec(path="${{ matrix.pkg.dir }}"));
+          if "${{ matrix.pkg.name }}" == "GeneralisedFilters"
+              Pkg.develop(PackageSpec(path="./SSMProblems"));
+          end;
+          Pkg.instantiate();'
+      - name: Build and deploy
+        uses: TuringLang/actions/DocsDocumenter@main
+        with:
+          pkg_path: ${{ matrix.pkg.dir }}
+          doc-path: ${{ matrix.pkg.dir }}/docs
+          doc-make-path: ${{ matrix.pkg.dir }}/docs/make.jl
+          doc-build-path: ${{ matrix.pkg.dir }}/docs/build
+          dirname: ${{ matrix.pkg.name }}
