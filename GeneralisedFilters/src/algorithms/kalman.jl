@@ -99,8 +99,8 @@ function gemm_static_shmem_element_kernel!(
     tid = threadIdx().x
     
     # Loading phase - coalesced reads down columns
-    shmem_a = @cuStaticSharedMem(Float32, (M, N, K))
-    shmem_b = @cuStaticSharedMem(Float32, (P, N, K))
+    shmem_a = CuStaticSharedArray(Float32, (M, N, K))
+    shmem_b = CuStaticSharedArray(Float32, (P, N, K))
 
     # Load A
     for i in tid:blockDim().x:M*N*K

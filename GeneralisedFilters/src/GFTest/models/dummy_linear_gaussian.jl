@@ -14,6 +14,8 @@
     dynamics, this model can be used in Rao-Blackwellised settings.
 """
 
+export InnerDynamics, create_dummy_linear_gaussian_model
+
 """
     Inner dynamics of the dummy linear Gaussian model.
 

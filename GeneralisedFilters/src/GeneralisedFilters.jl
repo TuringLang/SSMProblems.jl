@@ -147,4 +147,7 @@ include("algorithms/kalman.jl")
 include("algorithms/forward.jl")
 include("algorithms/rbpf.jl")
 
+# Unit-testing helper module
+include("GFTest/GFTest.jl")
+
 end
