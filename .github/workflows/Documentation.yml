@@ -46,7 +46,6 @@ jobs:
       - name: Build and deploy
         uses: TuringLang/actions/DocsDocumenter@main
         with:
-          pkg_path: ${{ matrix.pkg.dir }}
           doc-path: ${{ matrix.pkg.dir }}/docs
           doc-make-path: ${{ matrix.pkg.dir }}/docs/make.jl
           doc-build-path: ${{ matrix.pkg.dir }}/docs/build

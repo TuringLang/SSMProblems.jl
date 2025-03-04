@@ -38,10 +38,9 @@ function AbstractMCMC.sample(
     z0 = simulate(rng, inner_model.dyn; new_outer=x0, kwargs...)
     for t in 1:T
         prev_x = t == 1 ? x0 : xs[t - 1]
-        prev_z = t == 1 ? z0 : zs[t - 1]
         xs[t] = simulate(rng, model.outer_dyn, t, prev_x; kwargs...)
         zs[t] = simulate(
-            rng, inner_model.dyn, t, prev_z; prev_outer=prev_x, new_outer=xs[t], kwargs...
+            rng, inner_model.dyn, t, z0; prev_outer=prev_x, new_outer=xs[t], kwargs...
         )
         ys[t] = simulate(rng, inner_model.obs, t, zs[t]; new_outer=xs[t], kwargs...)
     end
