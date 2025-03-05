@@ -2,8 +2,9 @@
 
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](turinglang.org/SSMProblems.jl/SSMProblems/stable)
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](turinglang.org/SSMProblems.jl/SSMProblems/dev/)
-[![Build Status](https://github.com/TuringLang/SSMProblems.jl/workflows/CI/badge.svg?branch=master)](https://github.com/TuringLang/SSMProblems.jl/actions?query=workflow%3ACI%20branch%3Amaster)
 [![Code Style: Blue](https://img.shields.io/badge/code%20style-blue-4495d1.svg)](https://github.com/invenia/BlueStyle)
+<!--[![Build Status](https://github.com/TuringLang/SSMProblems.jl/workflows/CI/badge.svg?branch=master)](https://github.com/TuringLang/SSMProblems.jl/actions?query=workflow%3ACI%20branch%3Amaster) -->
+
 
 A minimalist framework to define state space models (SSMs) and their associated
 log-densities to feed into inference algorithms.
