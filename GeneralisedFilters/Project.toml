@@ -24,6 +24,7 @@ StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 DataStructures = "0.18.20"
 GaussianDistributions = "0.5.2"
 OffsetArrays = "1.14.1"
+SSMProblems = "0.4"
 Statistics = "1.11.1"
 StatsBase = "0.34.3"
 
