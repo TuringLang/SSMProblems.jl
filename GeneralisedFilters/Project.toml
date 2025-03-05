@@ -22,9 +22,14 @@ StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
 [compat]
 CUDA = "5"
+AbstractMCMC = "5"
 DataStructures = "0.18.20"
+Distributions = "0.25"
 GaussianDistributions = "0.5.2"
+NNlib = "0.9"
+LogExpFunctions = "0.3"
 OffsetArrays = "1.14.1"
+SSMProblems = "0.4"
 Statistics = "1.11.1"
 StatsBase = "0.34.3"
 
