@@ -1,8 +1,8 @@
 # SSMProblems.jl
 
-[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://turinglang.github.io/SSMProblems.jl/stable)
-[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://turinglang.github.io/SSMProblems.jl/dev)
-[![Build Status](https://github.com/TuringLang/AdvancedPS.jl/workflows/CI/badge.svg?branch=master)](https://github.com/TuringLang/SSMProblems.jl/actions?query=workflow%3ACI%20branch%3Amaster)
+[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](turinglang.org/SSMProblems.jl/SSMProblems/stable)
+[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](turinglang.org/SSMProblems.jl/SSMProblems/dev/)
+[![Build Status](https://github.com/TuringLang/SSMProblems.jl/workflows/CI/badge.svg?branch=master)](https://github.com/TuringLang/SSMProblems.jl/actions?query=workflow%3ACI%20branch%3Amaster)
 [![Code Style: Blue](https://img.shields.io/badge/code%20style-blue-4495d1.svg)](https://github.com/invenia/BlueStyle)
 
 A minimalist framework to define state space models (SSMs) and their associated
