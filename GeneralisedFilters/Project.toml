@@ -27,6 +27,7 @@ Distributions = "0.25"
 GaussianDistributions = "0.5.2"
 LogExpFunctions = "0.3"
 OffsetArrays = "1.14.1"
+SSMProblems = "0.4"
 Statistics = "1.11.1"
 StatsBase = "0.34.3"
 
