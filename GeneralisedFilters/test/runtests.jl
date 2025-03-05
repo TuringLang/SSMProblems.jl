@@ -6,7 +6,7 @@ using TestItemRunner
 include("batch_kalman_test.jl")
 include("resamplers.jl")
 
-@testitem "Kalman filter test" setup = [TestModels] begin
+@testitem "Kalman filter test" begin
     using GeneralisedFilters
     using Distributions
     using LinearAlgebra
@@ -18,13 +18,13 @@ include("resamplers.jl")
 
     for Dy in Dys
         rng = StableRNG(1234)
-        model = TestModels.create_linear_gaussian_model(rng, Dx, Dy)
+        model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
         _, _, ys = sample(rng, model, 1)
 
         filtered, ll = GeneralisedFilters.filter(rng, model, KalmanFilter(), ys)
 
         # Let Z = [X0, X1, Y1] be the joint state vector
-        μ_Z, Σ_Z = TestModels._compute_joint(model, 1)
+        μ_Z, Σ_Z = GeneralisedFilters.GFTest._compute_joint(model, 1)
 
         # Condition on observations using formula for MVN conditional distribution. See: 
         # https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Conditional_distributions
@@ -46,7 +46,7 @@ include("resamplers.jl")
     end
 end
 
-@testitem "Kalman smoother test" setup = [TestModels] begin
+@testitem "Kalman smoother test" begin
     using GeneralisedFilters
     using Distributions
     using LinearAlgebra
@@ -58,13 +58,13 @@ end
 
     for Dy in Dys
         rng = StableRNG(1234)
-        model = TestModels.create_linear_gaussian_model(rng, Dx, Dy)
+        model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
         _, _, ys = sample(rng, model, 2)
 
         states, ll = GeneralisedFilters.smooth(rng, model, KalmanSmoother(), ys)
 
         # Let Z = [X0, X1, X2, Y1, Y2] be the joint state vector
-        μ_Z, Σ_Z = TestModels._compute_joint(model, 2)
+        μ_Z, Σ_Z = GeneralisedFilters.GFTest._compute_joint(model, 2)
 
         # Condition on observations using formula for MVN conditional distribution. See: 
         # https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Conditional_distributions
@@ -182,9 +182,8 @@ end
     @test ll ≈ log(marginal)
 end
 
-@testitem "Kalman-RBPF test" setup = [TestModels] begin
+@testitem "Kalman-RBPF test" begin
     using LogExpFunctions: softmax
-    using SSMProblems
     using StableRNGs
     using StatsBase
 
@@ -197,7 +196,7 @@ end
 
     rng = StableRNG(SEED)
 
-    full_model, hier_model = TestModels.create_dummy_linear_gaussian_model(
+    full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, D_outer, D_inner, D_obs
     )
     _, _, ys = sample(rng, full_model, T)
@@ -223,7 +222,7 @@ end
     @test last(kf_states.μ) ≈ sum(last.(getproperty.(zs, :μ)) .* weights) rtol = 1e-2
 end
 
-@testitem "GPU Kalman-RBPF test" setup = [TestModels] begin
+@testitem "GPU Kalman-RBPF test" tags = [:gpu] begin
     using CUDA
     using LinearAlgebra
     using NNlib
@@ -240,7 +239,7 @@ end
 
     rng = StableRNG(SEED)
 
-    full_model, hier_model = TestModels.create_dummy_linear_gaussian_model(
+    full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, D_outer, D_inner, D_obs, ET
     )
     _, _, ys = sample(rng, full_model, T)
@@ -266,7 +265,7 @@ end
     @test eltype(xs) == ET
 end
 
-@testitem "RBPF ancestory test" setup = [TestModels] begin
+@testitem "RBPF ancestory test" begin
     using SSMProblems
     using StableRNGs
 
@@ -275,7 +274,9 @@ end
     N_particles = 100
 
     rng = StableRNG(SEED)
-    full_model, hier_model = TestModels.create_dummy_linear_gaussian_model(rng, 1, 1, 1)
+    full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
+        rng, 1, 1, 1
+    )
     _, _, ys = sample(rng, full_model, T)
 
     # Manually create tree to force expansion on second step
@@ -294,9 +295,8 @@ end
     paths = GeneralisedFilters.get_ancestry(tree)
 end
 
-@testitem "Dense ancestry test" setup = [TestModels] begin
+@testitem "Dense ancestry test" begin
     using GeneralisedFilters
-    using SSMProblems
     using StableRNGs
     using PDMats
     using LinearAlgebra
@@ -319,7 +319,7 @@ end
     N_particles = max(10, K + 2)
 
     rng = StableRNG(SEED)
-    model = TestModels.create_linear_gaussian_model(rng, 1, 1)
+    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, 1, 1)
     _, _, ys = sample(rng, model, K)
 
     ref_traj = OffsetVector([rand(rng, 1) for _ in 0:K], -1)
@@ -337,9 +337,8 @@ end
     @test GeneralisedFilters.get_ancestry(cb.container, 1) == ref_traj
 end
 
-@testitem "CSMC test" setup = [TestModels] begin
+@testitem "CSMC test" begin
     using GeneralisedFilters
-    using SSMProblems
     using StableRNGs
     using PDMats
     using LinearAlgebra
@@ -360,7 +359,7 @@ end
     N_sample = 10000
 
     rng = StableRNG(SEED)
-    model = TestModels.create_linear_gaussian_model(rng, Dx, Dy)
+    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
     _, _, ys = sample(rng, model, K)
 
     # Kalman smoother
@@ -390,11 +389,9 @@ end
     @test csmc_mean ≈ state.μ rtol = 1e-1
 end
 
-@testitem "RBCSMC test" setup = [TestModels] begin
+@testitem "RBCSMC test" begin
     using GeneralisedFilters
-    using SSMProblems
     using GaussianDistributions
-    using SSMProblems
     using StableRNGs
     using PDMats
     using LinearAlgebra
@@ -416,7 +413,7 @@ end
     N_sample = 500
 
     rng = StableRNG(SEED)
-    full_model, hier_model = TestModels.create_dummy_linear_gaussian_model(
+    full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, D_outer, D_inner, D_obs, T
     )
     _, _, ys = sample(rng, full_model, K)
@@ -459,7 +456,7 @@ end
     @test state.μ[2] ≈ only(mean(getproperty.(z_trajectories, :μ))) rtol = 1e-1
 end
 
-@testitem "GPU Conditional Kalman-RBPF execution test" setup = [TestModels] begin
+@testitem "GPU Conditional Kalman-RBPF execution test" tags = [:gpu] begin
     using CUDA
     using OffsetArrays
     using SSMProblems
@@ -475,7 +472,7 @@ end
 
     rng = StableRNG(1234)
 
-    full_model, hier_model = TestModels.create_dummy_linear_gaussian_model(
+    full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, D_outer, D_inner, D_obs, T
     )
     _, _, ys = sample(rng, full_model, K)
@@ -486,7 +483,9 @@ end
             CuArray(rand(rng, T, D_outer, 1)),
             GeneralisedFilters.BatchGaussianDistribution(
                 CuArray(rand(rng, T, D_inner, 1)),
-                CuArray(reshape(TestModels.rand_cov(rng, T, D_inner), Val(3))),
+                CuArray(
+                    reshape(GeneralisedFilters.GFTest.rand_cov(rng, T, D_inner), Val(3))
+                ),
             ),
         ) for _ in 0:K
     ]
@@ -499,7 +498,7 @@ end
     @test typeof(ll) == T
 end
 
-@testitem "GPU-RBPF ancestory test" setup = [TestModels] begin
+@testitem "GPU-RBPF ancestory test" tags = [:gpu] begin
     using GeneralisedFilters
     using CUDA
     using LinearAlgebra
@@ -516,7 +515,7 @@ end
 
     rng = StableRNG(1234)
 
-    full_model, hier_model = TestModels.create_dummy_linear_gaussian_model(
+    full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, D_outer, D_inner, D_obs, T
     )
     _, _, ys = sample(rng, full_model, K)
@@ -542,7 +541,7 @@ end
     ancestry = GeneralisedFilters.get_ancestry(tree, K)
 end
 
-@testitem "GPU Conditional Kalman-RBPF validity test" setup = [TestModels] begin
+@testitem "GPU Conditional Kalman-RBPF validity test" tags = [:gpu, :long] begin
     using GeneralisedFilters
     using CUDA
     using NNlib
@@ -563,7 +562,7 @@ end
 
     rng = StableRNG(1234)
 
-    full_model, hier_model = TestModels.create_dummy_linear_gaussian_model(
+    full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, D_outer, D_inner, D_obs, T
     )
     _, _, ys = sample(rng, full_model, K)

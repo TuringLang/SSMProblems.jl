@@ -97,32 +97,32 @@ function gemm_static_shmem_element_kernel!(
     C, A, B, batch_size::Int32, ::Val{M}, ::Val{N}, ::Val{P}, ::Val{K}
 ) where {M,N,P,K}
     tid = threadIdx().x
-    
+
     # Loading phase - coalesced reads down columns
-    shmem_a = @cuStaticSharedMem(Float32, (M, N, K))
-    shmem_b = @cuStaticSharedMem(Float32, (P, N, K))
+    shmem_a = CuStaticSharedArray(Float32, (M, N, K))
+    shmem_b = CuStaticSharedArray(Float32, (P, N, K))
 
     # Load A
-    for i in tid:blockDim().x:M*N*K
-        matrix = div(i - 1i32, M*N) + 1i32
-        mn_idx = mod1(i, M*N)
+    for i in tid:(blockDim().x):(M * N * K)
+        matrix = div(i - 1i32, M * N) + 1i32
+        mn_idx = mod1(i, M * N)
         m = mod1(mn_idx, M)
         n = div(mn_idx - 1i32, M) + 1i32
         matrix_idx = (blockIdx().x - 1i32) * K + matrix
-        
+
         if matrix_idx <= batch_size
             shmem_a[m, n, matrix] = A[m, n, matrix_idx]
         end
     end
 
     # Load B - separate loop with no dependency on M
-    for i in tid:blockDim().x:P*N*K
-        matrix = div(i - 1i32, P*N) + 1i32
-        pn_idx = mod1(i, P*N)
+    for i in tid:(blockDim().x):(P * N * K)
+        matrix = div(i - 1i32, P * N) + 1i32
+        pn_idx = mod1(i, P * N)
         p = mod1(pn_idx, P)
         n = div(pn_idx - 1i32, P) + 1i32
         matrix_idx = (blockIdx().x - 1i32) * K + matrix
-        
+
         if matrix_idx <= batch_size
             shmem_b[p, n, matrix] = B[p, n, matrix_idx]
         end
@@ -131,8 +131,8 @@ function gemm_static_shmem_element_kernel!(
     sync_threads()
 
     # Computing phase - each thread computes one element of C
-    local_matrix = div(tid - 1i32, M*P) + 1i32
-    matrix_thread = mod1(tid, M*P)
+    local_matrix = div(tid - 1i32, M * P) + 1i32
+    matrix_thread = mod1(tid, M * P)
     row = mod1(matrix_thread, M)
     col = div(matrix_thread - 1i32, M) + 1i32
     matrix_idx = (blockIdx().x - 1i32) * K + local_matrix

@@ -1,4 +1,4 @@
-@testitem "Batch Kalman test" begin
+@testitem "Batch Kalman test" tags = [:gpu] begin
     using GeneralisedFilters
     using Distributions
     using LinearAlgebra
