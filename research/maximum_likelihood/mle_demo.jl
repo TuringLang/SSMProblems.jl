@@ -36,10 +36,10 @@ end
 # check type stability (important for use with Enzyme)
 @code_warntype logℓ([1.0], ys)
 
-## MLE #####################################################################################
+## NEWTONS METHOD ##########################################################################
 
 using DifferentiationInterface
-using ForwardDiff
+import ForwardDiff
 using Optimisers
 
 # initial value
