@@ -104,3 +104,19 @@ function update(
 
     return filtered, ll_increment
 end
+
+# Application of bootstrap filter to hierarchical models
+function filter(
+    rng::AbstractRNG,
+    model::HierarchicalSSM,
+    alg::BootstrapFilter,
+    observations::AbstractVector;
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+    kwargs...,
+)
+    ssm = StateSpaceModel(
+        HierarchicalDynamics(model.outer_dyn, model.inner_model.dyn),
+        HierarchicalObservations(model.inner_model.obs),
+    )
+    return filter(rng, ssm, alg, observations; ref_state=ref_state, kwargs...)
+end

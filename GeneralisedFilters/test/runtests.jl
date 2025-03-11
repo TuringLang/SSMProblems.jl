@@ -295,6 +295,46 @@ end
     paths = GeneralisedFilters.get_ancestry(tree)
 end
 
+@testitem "BF on hierarchical model test" begin
+    using LogExpFunctions: softmax
+    using StableRNGs
+    using StatsBase
+
+    SEED = 1234
+    D_outer = 1
+    D_inner = 1
+    D_obs = 1
+    T = 5
+    N_particles = 10^4
+
+    rng = StableRNG(SEED)
+
+    full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
+        rng, D_outer, D_inner, D_obs
+    )
+    _, _, ys = sample(rng, full_model, T)
+
+    # Ground truth Kalman filtering
+    kf_states, kf_ll = GeneralisedFilters.filter(rng, full_model, KalmanFilter(), ys)
+
+    # Rao-Blackwellised particle filtering
+    bf = BF(N_particles)
+    states, ll = GeneralisedFilters.filter(rng, hier_model, bf, ys)
+
+    # Extract final filtered states
+    xs = map(p -> getproperty(p, :x), states.particles)
+    zs = map(p -> getproperty(p, :z), states.particles)
+    log_ws = states.log_weights
+
+    @test kf_ll ≈ ll rtol = 1e-2
+
+    weights = Weights(softmax(log_ws))
+
+    # Higher tolerance for outer state since variance is higher
+    @test first(kf_states.μ) ≈ sum(only.(xs) .* weights) rtol = 1e-1
+    @test last(kf_states.μ) ≈ sum(only.(zs) .* weights) rtol = 1e-1
+end
+
 @testitem "Dense ancestry test" begin
     using GeneralisedFilters
     using StableRNGs
