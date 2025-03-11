@@ -2,13 +2,14 @@ using GeneralisedFilters
 using SSMProblems
 using LinearAlgebra
 using Random
+using DistributionsAD
 
 ## TOY MODEL ###############################################################################
 
 # this is taken from an example in Kalman.jl
 function toy_model(θ::T) where {T<:Real}
     μ0 = T[1.0, 0.0]
-    Σ0 = Diagonal(ones(T, 2))
+    Σ0 = diagm(ones(T, 2))
 
     A = T[0.8 θ/2; -0.1 0.8]
     Q = Diagonal(T[0.2, 1.0])
@@ -24,12 +25,11 @@ end
 # data generation process
 rng = MersenneTwister(1234)
 true_model = toy_model(1.0)
-_, _, ys = sample(rng, true_model, 10000)
+_, _, ys = sample(rng, true_model, 1000)
 
 # evaluate and return the log evidence
 function logℓ(θ, data)
-    rng = MersenneTwister(1234)
-    _, ll = GeneralisedFilters.filter(rng, toy_model(θ[]), KF(), data)
+    _, ll = GeneralisedFilters.filter(toy_model(θ[]), KF(), data)
     return -ll
 end
 
@@ -39,34 +39,45 @@ end
 ## NEWTONS METHOD ##########################################################################
 
 using DifferentiationInterface
-import ForwardDiff
+import ForwardDiff, Zygote, Mooncake, Enzyme
 using Optimisers
 
-# initial value
-θ = [0.7]
+# Zygote will fail due to the model constructor, not because of the filtering algorithm
+backends = [
+    AutoZygote(), AutoForwardDiff(), AutoMooncake(;config=nothing), AutoEnzyme()
+]
 
-# setup optimiser (feel free to use other backends)
-state = Optimisers.setup(Optimisers.Descent(0.5), θ)
-backend = AutoForwardDiff()
-num_epochs = 1000
+function gradient_descent(backend, θ_init, num_epochs=1000)
+    θ = deepcopy(θ_init)
+    state = Optimisers.setup(Optimisers.Descent(1/length(ys)), θ)
+    grad_prep = prepare_gradient(logℓ, backend, θ, Constant(ys))
 
-# prepare gradients for faster AD
-grad_prep = prepare_gradient(logℓ, backend, θ, Constant(ys))
-hess_prep = prepare_hessian(logℓ, backend, θ, Constant(ys))
+    for epoch in 1:num_epochs
+        val, ∇logℓ = DifferentiationInterface.value_and_gradient(
+            logℓ, grad_prep, backend, θ, Constant(ys)
+        )
+        Optimisers.update!(state, θ, ∇logℓ)
 
-for epoch in 1:num_epochs
-    # calculate gradients
-    val, ∇logℓ = DifferentiationInterface.value_and_gradient(
-        logℓ, grad_prep, backend, θ, Constant(ys)
-    )
+        (epoch % 5) == 1 && println("$(epoch-1):\t -$(val)")
+        if (∇logℓ'*∇logℓ) < 1e-12
+            break
+        end
+    end
 
-    # adjust the learning rate for a hacky Newton's method
-    H = DifferentiationInterface.hessian(logℓ, hess_prep, backend, θ, Constant(ys))
-    Optimisers.update!(state, θ, inv(H)*∇logℓ)
+    return θ
+end
 
-    # stopping condition and printer
-    (epoch % 5) == 1 && println("$(epoch-1):\t $(θ[])")
-    if (∇logℓ'*∇logℓ) < 1e-12
-        break
+θ_init = rand(rng, 1)
+for backend in backends
+    println("\n",backend)
+    local θ_mle
+    try
+        θ_mle = gradient_descent(backend, θ_init)
+    catch err
+        # TODO: more sophistocated exception handling
+        @warn "automatic differentiation failed!" exception = (err)
+    else
+        # check that the solution converged to the correct value
+        @assert isapprox(θ_mle, [1.0]; rtol=1e-1)
     end
 end
