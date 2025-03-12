@@ -208,6 +208,7 @@ function update(
 ) where {T}
     μs, Σs = state.μs, state.Σs
     Hs, cs, Rs = batch_calc_params(model.obs, step, algo.batch_size; kwargs...)
+    D = size(obs, 1)
 
     m = NNlib.batched_vec(Hs, μs) .+ cs
     y_res = cu(obs) .- m
@@ -222,13 +223,8 @@ function update(
     μ_filt = μs .+ NNlib.batched_vec(K, y_res)
     Σ_filt = Σs .- NNlib.batched_mul(K, NNlib.batched_mul(Hs, Σs))
 
-    y = cu(obs)
-
-    # TODO: this is y_res
-    inv_term = NNlib.batched_vec(S_inv, y .- m)
-    log_likes =
-        -T(0.5) * NNlib.batched_vec(reshape(y .- m, 1, size(y, 1), size(S, 3)), inv_term)
-    D = size(y, 1)
+    inv_term = NNlib.batched_vec(S_inv, y_res)
+    log_likes = -T(0.5) * NNlib.batched_vec(reshape(y_res, 1, D, size(S, 3)), inv_term)
     log_likes = log_likes .- T(0.5) * (log_dets .+ D * log(T(2π)))
 
     # HACK: only errors seems to be from numerical stability so will just overwrite
