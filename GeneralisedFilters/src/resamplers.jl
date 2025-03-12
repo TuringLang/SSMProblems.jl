@@ -11,12 +11,11 @@ function resample(rng::AbstractRNG, resampler::AbstractResampler, states)
     weights = StatsBase.weights(states)
     idxs = sample_ancestors(rng, resampler, weights)
     # TODO: generalise these
-    new_state = construct_new_state(states, idxs)
-    return new_state, idxs
+    return construct_new_state(states, idxs)
 end
 
 function construct_new_state(states::ParticleDistribution{PT,WT}, idxs) where {PT,WT}
-    return ParticleDistribution(states.particles[idxs], zeros(WT, length(states)))
+    return ParticleDistribution(states.particles[idxs], idxs, zeros(WT, length(states)))
 end
 
 function construct_new_state(
@@ -26,6 +25,7 @@ function construct_new_state(
         BatchRaoBlackwellisedParticles(
             states.particles.xs[:, idxs], states.particles.zs[idxs]
         ),
+        idxs,
         CUDA.zeros(T, length(states)),
     )
 end
@@ -52,7 +52,8 @@ function resample(rng::AbstractRNG, cond_resampler::ESSResampler, state)
     if cond_resampler.threshold * n ≥ ess
         return resample(rng, cond_resampler.resampler, state)
     else
-        return deepcopy(state), collect(1:n)
+        state.ancestors = collect(1:n)
+        return state
     end
 end
 

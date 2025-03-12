@@ -1,18 +1,5 @@
 """Containers used for storing representations of the filtering distribution."""
 
-## INTERMEDIATES ###########################################################################
-
-mutable struct ParticleIntermediate{DT,AT}
-    proposed::DT
-    filtered::DT
-    ancestors::AT
-end
-
-mutable struct Intermediate{DT}
-    proposed::DT
-    filtered::DT
-end
-
 ## PARTICLES ###############################################################################
 
 """
@@ -23,7 +10,12 @@ object, with the states (or particles) distributed accoring to their log-weights
 """
 mutable struct ParticleDistribution{PT,WT<:Real}
     particles::Vector{PT}
+    ancestors::Vector{Int}
     log_weights::Vector{WT}
+end
+function ParticleDistribution(particles::Vector{PT}, log_weights::Vector{WT}) where {PT,WT}
+    N = length(particles)
+    return ParticleDistribution(particles, Vector{Int}(1:N), log_weights)
 end
 
 StatsBase.weights(state::ParticleDistribution) = softmax(state.log_weights)
@@ -76,7 +68,14 @@ mutable struct RaoBlackwellisedParticleDistribution{
     T,M<:CUDA.AbstractMemory,PT<:BatchRaoBlackwellisedParticles
 }
     particles::PT
-    log_weights::CuArray{T,1,M}
+    ancestors::CuVector{Int,M}
+    log_weights::CuVector{T,M}
+end
+function RaoBlackwellisedParticleDistribution(
+    particles::PT, log_weights::CuVector{T,M}
+) where {T,M,PT}
+    N = length(particles)
+    return RaoBlackwellisedParticleDistribution(particles, CuVector{Int}(1:N), log_weights)
 end
 
 function StatsBase.weights(state::RaoBlackwellisedParticleDistribution)
