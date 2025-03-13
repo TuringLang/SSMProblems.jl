@@ -7,28 +7,31 @@ function step(
     model::AbstractStateSpaceModel,
     alg::AbstractParticleFilter,
     iter::Integer,
-    intermediate,
+    state,
     observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
+    callback::Union{AbstractCallback,Nothing}=nothing,
     kwargs...,
 )
-    intermediate.proposed, intermediate.ancestors = resample(
-        rng, alg.resampler, intermediate.filtered
-    )
+    state = resample(rng, alg.resampler, state)
+    isnothing(callback) ||
+        callback(model, alg, iter, state, observation, PostResample; kwargs...)
 
-    intermediate.proposed = predict(
-        rng, model, alg, iter, intermediate.proposed; ref_state=ref_state, kwargs...
-    )
-    # TODO: this is quite inelegant and should be refactored
+    state = predict(rng, model, alg, iter, state; ref_state=ref_state, kwargs...)
+
+    # TODO: this is quite inelegant and should be refactored. It also might introduce bugs
+    # with callbacks that track the ancestry (and use PostResample)
     if !isnothing(ref_state)
-        CUDA.@allowscalar intermediate.ancestors[1] = 1
+        CUDA.@allowscalar state.ancestors[1] = 1
     end
+    isnothing(callback) ||
+        callback(model, alg, iter, state, observation, PostPredict; kwargs...)
 
-    intermediate.filtered, ll_increment = update(
-        model, alg, iter, intermediate.proposed, observation; kwargs...
-    )
+    state, ll_increment = update(model, alg, iter, state, observation; kwargs...)
+    isnothing(callback) ||
+        callback(model, alg, iter, state, observation, PostUpdate; kwargs...)
 
-    return intermediate, ll_increment
+    return state, ll_increment
 end
 
 struct BootstrapFilter{RS<:AbstractResampler} <: AbstractParticleFilter
@@ -44,13 +47,6 @@ function BootstrapFilter(
 )
     conditional_resampler = ESSResampler(threshold, resampler)
     return BootstrapFilter{ESSResampler}(N, conditional_resampler)
-end
-
-function instantiate(
-    ::StateSpaceModel{T}, filter::BootstrapFilter, initial; kwargs...
-) where {T}
-    N = filter.N
-    return ParticleIntermediate(initial, initial, Vector{Int}(undef, N))
 end
 
 function initialise(
@@ -71,38 +67,37 @@ function predict(
     model::StateSpaceModel,
     filter::BootstrapFilter,
     step::Integer,
-    filtered::ParticleDistribution;
+    state::ParticleDistribution;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    new_particles = map(
-        x -> SSMProblems.simulate(rng, model.dyn, step, x; kwargs...), collect(filtered)
+    state.particles = map(
+        x -> SSMProblems.simulate(rng, model.dyn, step, x; kwargs...), collect(state)
     )
-    # Don't need to deep copy weights as filtered will be overwritten in the update step
-    proposed = ParticleDistribution(new_particles, filtered.log_weights)
 
-    return update_ref!(proposed, ref_state, step)
+    return update_ref!(state, ref_state, step)
 end
 
 function update(
     model::StateSpaceModel{T},
     filter::BootstrapFilter,
     step::Integer,
-    proposed::ParticleDistribution,
+    state::ParticleDistribution,
     observation;
     kwargs...,
 ) where {T}
+    old_ll = logsumexp(state.log_weights)
+
     log_increments = map(
         x -> SSMProblems.logdensity(model.obs, step, x, observation; kwargs...),
-        collect(proposed),
+        collect(state),
     )
 
-    new_weights = proposed.log_weights + log_increments
-    filtered = ParticleDistribution(deepcopy(proposed.particles), new_weights)
+    state.log_weights += log_increments
 
-    ll_increment = logsumexp(filtered.log_weights) - logsumexp(proposed.log_weights)
+    ll_increment = logsumexp(state.log_weights) - old_ll
 
-    return filtered, ll_increment
+    return state, ll_increment
 end
 
 # Application of bootstrap filter to hierarchical models

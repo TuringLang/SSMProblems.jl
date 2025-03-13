@@ -239,7 +239,7 @@ struct KalmanSmoother <: AbstractSmoother end
 
 const KS = KalmanSmoother()
 
-struct StateCallback{T}
+struct StateCallback{T} <: AbstractCallback
     proposed_states::Vector{Gaussian{Vector{T},Matrix{T}}}
     filtered_states::Vector{Gaussian{Vector{T},Matrix{T}}}
 end
@@ -251,8 +251,15 @@ function StateCallback(N::Integer, T::Type)
 end
 
 function (callback::StateCallback)(
-    model::LinearGaussianStateSpaceModel, algo::KalmanFilter, states, obs; kwargs...
+    model::LinearGaussianStateSpaceModel,
+    algo::KalmanFilter,
+    iter::Integer,
+    state,
+    obs,
+    ::PostPredictCallback;
+    kwargs...,
 )
+    callback.proposed_states[iter] = deepcopy(state)
     return nothing
 end
 
@@ -260,12 +267,12 @@ function (callback::StateCallback)(
     model::LinearGaussianStateSpaceModel,
     algo::KalmanFilter,
     iter::Integer,
-    states,
-    obs;
+    state,
+    obs,
+    ::PostUpdateCallback;
     kwargs...,
 )
-    callback.proposed_states[iter] = states.proposed
-    callback.filtered_states[iter] = states.filtered
+    callback.filtered_states[iter] = deepcopy(state)
     return nothing
 end
 

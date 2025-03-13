@@ -12,22 +12,15 @@ using StatsBase
 using CUDA
 using NNlib
 
+# Filtering utilities
+include("callbacks.jl")
+include("containers.jl")
+include("resamplers.jl")
+
 ## FILTERING BASE ##########################################################################
 
 abstract type AbstractFilter <: AbstractSampler end
 abstract type AbstractBatchFilter <: AbstractFilter end
-
-"""
-    instantiate(model, alg, initial; kwargs...)
-
-Create an intermediate storage object to store the proposed/filtered states at each step.
-"""
-function instantiate end
-
-# Default method
-function instantiate(model, alg, initial; kwargs...)
-    return Intermediate(initial, initial)
-end
 
 """
     initialise([rng,] model, alg; kwargs...)
@@ -37,9 +30,9 @@ Propose an initial state distribution.
 function initialise end
 
 """
-    step([rng,] model, alg, iter, intermediate, observation; kwargs...)
+    step([rng,] model, alg, iter, state, observation; kwargs...)
 
-Perform a combined predict and update call of the filtering on the intermediate storage.
+Perform a combined predict and update call of the filtering on the state.
 """
 function step end
 
@@ -70,24 +63,22 @@ function filter(
     model::AbstractStateSpaceModel,
     alg::AbstractFilter,
     observations::AbstractVector;
-    callback=nothing,
+    callback::Union{AbstractCallback,Nothing}=nothing,
     kwargs...,
 )
-    initial = initialise(rng, model, alg; kwargs...)
-    intermediate = instantiate(model, alg, initial; kwargs...)
-    isnothing(callback) || callback(model, alg, intermediate, observations; kwargs...)
+    state = initialise(rng, model, alg; kwargs...)
+    isnothing(callback) || callback(model, alg, state, observations, PostInit; kwargs...)
+
     log_evidence = initialise_log_evidence(alg, model)
 
     for t in eachindex(observations)
-        intermediate, ll_increment = step(
-            rng, model, alg, t, intermediate, observations[t]; callback, kwargs...
+        state, ll_increment = step(
+            rng, model, alg, t, state, observations[t]; callback, kwargs...
         )
         log_evidence += ll_increment
-        isnothing(callback) ||
-            callback(model, alg, t, intermediate, observations; kwargs...)
     end
 
-    return intermediate.filtered, log_evidence
+    return state, log_evidence
 end
 
 function initialise_log_evidence(::AbstractFilter, model::AbstractStateSpaceModel)
@@ -112,16 +103,20 @@ function step(
     model::AbstractStateSpaceModel,
     alg::AbstractFilter,
     iter::Integer,
-    intermediate,
+    state,
     observation;
+    callback::Union{AbstractCallback,Nothing}=nothing,
     kwargs...,
 )
-    intermediate.proposed = predict(rng, model, alg, iter, intermediate.filtered; kwargs...)
-    intermediate.filtered, ll_increment = update(
-        model, alg, iter, intermediate.proposed, observation; kwargs...
-    )
+    state = predict(rng, model, alg, iter, state; kwargs...)
+    isnothing(callback) ||
+        callback(model, alg, iter, state, observation, PostPredict; kwargs...)
 
-    return intermediate, ll_increment
+    state, ll_increment = update(model, alg, iter, state, observation; kwargs...)
+    isnothing(callback) ||
+        callback(model, alg, iter, state, observation, PostUpdate; kwargs...)
+
+    return state, ll_increment
 end
 
 ## SMOOTHING BASE ##########################################################################
@@ -130,11 +125,6 @@ abstract type AbstractSmoother <: AbstractSampler end
 
 # function smooth end
 # function backward end
-
-# Filtering utilities
-include("callbacks.jl")
-include("containers.jl")
-include("resamplers.jl")
 
 # Model types
 include("models/linear_gaussian.jl")
