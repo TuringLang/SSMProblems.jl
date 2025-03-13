@@ -4,6 +4,12 @@ using AcceleratedKernels
 using DataStructures: Stack
 using Random: rand
 
+export AbstractCallback, CallbackTrigger
+export PostInit, PostResample, PostPredict, PostUpdate
+export PostInitCallback, PostResampleCallback, PostPredictCallback, PostUpdateCallback
+export DenseParticleContainer, ParticleTree, ParallelParticleTree
+export DenseAncestorCallback, AncestorCallback, ParallelAncestorCallback
+
 ## ABSTRACT CALLBACK SYSTEM ################################################################
 
 abstract type AbstractCallback end
