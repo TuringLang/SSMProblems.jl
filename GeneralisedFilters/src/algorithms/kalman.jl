@@ -56,100 +56,6 @@ function update(
     return filtered, ll
 end
 
-function batch_matmul_nt(A, B)
-    matrices_per_block = div(1024, size(A, 1) * size(B, 1))
-    shmem = (
-        (size(A, 1) * size(A, 2) + size(B, 2) * size(B, 1)) *
-        sizeof(eltype(A)) *
-        matrices_per_block
-    )
-    if shmem < attribute(device(), CUDA.DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK)
-        # Perform checks
-        if size(A, 2) != size(B, 2)
-            throw(ArgumentError("Matrix dimensions must agree"))
-        end
-        if size(A, 3) != size(B, 3)
-            throw(ArgumentError("Batch dimensions must agree"))
-        end
-        if eltype(A) != eltype(B)
-            throw(ArgumentError("Matrix types must agree"))
-        end
-        C = similar(A, size(A, 1), size(B, 1), size(A, 3))
-        threads = matrices_per_block * size(A, 1) * size(B, 1)
-        blocks = ceil(Int, size(A, 3) / matrices_per_block)
-        @cuda blocks = blocks threads = threads gemm_static_shmem_element_kernel!(
-            C,
-            A,
-            B,
-            Int32(size(A, 3)),
-            Val(Int32(size(A, 1))),
-            Val(Int32(size(A, 2))),
-            Val(Int32(size(B, 1))),
-            Val(Int32(matrices_per_block)),
-        )
-        return C
-    else
-        return NNlib.batched_mul(A, NNlib.batched_transpose(B))
-    end
-end
-
-function gemm_static_shmem_element_kernel!(
-    C, A, B, batch_size::Int32, ::Val{M}, ::Val{N}, ::Val{P}, ::Val{K}
-) where {M,N,P,K}
-    tid = threadIdx().x
-
-    # Loading phase - coalesced reads down columns
-    shmem_a = CuStaticSharedArray(Float32, (M, N, K))
-    shmem_b = CuStaticSharedArray(Float32, (P, N, K))
-
-    # Load A
-    for i in tid:(blockDim().x):(M * N * K)
-        matrix = div(i - 1i32, M * N) + 1i32
-        mn_idx = mod1(i, M * N)
-        m = mod1(mn_idx, M)
-        n = div(mn_idx - 1i32, M) + 1i32
-        matrix_idx = (blockIdx().x - 1i32) * K + matrix
-
-        if matrix_idx <= batch_size
-            shmem_a[m, n, matrix] = A[m, n, matrix_idx]
-        end
-    end
-
-    # Load B - separate loop with no dependency on M
-    for i in tid:(blockDim().x):(P * N * K)
-        matrix = div(i - 1i32, P * N) + 1i32
-        pn_idx = mod1(i, P * N)
-        p = mod1(pn_idx, P)
-        n = div(pn_idx - 1i32, P) + 1i32
-        matrix_idx = (blockIdx().x - 1i32) * K + matrix
-
-        if matrix_idx <= batch_size
-            shmem_b[p, n, matrix] = B[p, n, matrix_idx]
-        end
-    end
-
-    sync_threads()
-
-    # Computing phase - each thread computes one element of C
-    local_matrix = div(tid - 1i32, M * P) + 1i32
-    matrix_thread = mod1(tid, M * P)
-    row = mod1(matrix_thread, M)
-    col = div(matrix_thread - 1i32, M) + 1i32
-    matrix_idx = (blockIdx().x - 1i32) * K + local_matrix
-
-    if matrix_idx <= batch_size && row <= M && col <= P
-        @inbounds begin
-            result = 0.0f0
-            for k in 1:N
-                result += shmem_a[row, k, local_matrix] * shmem_b[col, k, local_matrix]
-            end
-            C[row, col, matrix_idx] = result
-        end
-    end
-
-    return nothing
-end
-
 struct BatchKalmanFilter <: AbstractBatchFilter
     batch_size::Int
 end
@@ -175,27 +81,8 @@ function predict(
     μs, Σs = state.μs, state.Σs
     As, bs, Qs = batch_calc_params(model.dyn, step, algo.batch_size; kwargs...)
     μ̂s = NNlib.batched_vec(As, μs) .+ bs
-    Σ̂s = batch_matmul_nt(NNlib.batched_mul(As, Σs), As) .+ Qs
+    Σ̂s = NNlib.batched_mul(NNlib.batched_mul(As, Σs), NNlib.batched_transpose(As)) .+ Qs
     return BatchGaussianDistribution(μ̂s, Σ̂s)
-end
-
-function invert_innovation(S)
-    # LU decomposition to compute S^{-1}
-    # TODO: Replace with custom fast Cholesky kernel
-    d_ipiv, _, d_S = CUDA.CUBLAS.getrf_strided_batched(S, true)
-    S_inv = CUDA.similar(S)
-    # TODO: This fails when D_obs > D_inner since S is not invertible
-    CUDA.CUBLAS.getri_strided_batched!(d_S, S_inv, d_ipiv)
-
-    diags = CuArray{eltype(S)}(undef, size(S, 1), size(S, 3))
-    for i in 1:size(S, 1)
-        diags[i, :] .= d_S[i, i, :]
-    end
-    # L has ones on the diagonal so we can just multiply the diagonals of U
-    # Since we're using pivoting, diagonal entries may be negative, so we take the absolute value
-    log_dets = sum(log ∘ abs, diags; dims=1)
-
-    return S_inv, log_dets
 end
 
 function update(
@@ -212,11 +99,20 @@ function update(
 
     m = NNlib.batched_vec(Hs, μs) .+ cs
     y_res = cu(obs) .- m
-    S = batch_matmul_nt(NNlib.batched_mul(Hs, Σs), Hs) .+ Rs
+    S = NNlib.batched_mul(Hs, NNlib.batched_mul(Σs, NNlib.batched_transpose(Hs))) .+ Rs
 
-    ΣH_T = batch_matmul_nt(Σs, Hs)
+    ΣH_T = NNlib.batched_mul(Σs, NNlib.batched_transpose(Hs))
 
-    S_inv, log_dets = invert_innovation(S)
+    S_inv = CUDA.similar(S)
+    d_ipiv, _, d_S = CUDA.CUBLAS.getrf_strided_batched(S, true)
+    CUDA.CUBLAS.getri_strided_batched!(d_S, S_inv, d_ipiv)
+
+    diags = CuArray{eltype(S)}(undef, size(S, 1), size(S, 3))
+    for i in 1:size(S, 1)
+        diags[i, :] .= d_S[i, i, :]
+    end
+
+    log_dets = sum(log ∘ abs, diags; dims=1)
 
     K = NNlib.batched_mul(ΣH_T, S_inv)
 
