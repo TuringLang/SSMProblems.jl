@@ -74,7 +74,7 @@ end
 function RaoBlackwellisedParticleDistribution(
     particles::PT, log_weights::CuVector{T,M}
 ) where {T,M,PT}
-    N = length(particles)
+    N = length(log_weights)
     return RaoBlackwellisedParticleDistribution(particles, CuVector{Int}(1:N), log_weights)
 end
 
