@@ -13,11 +13,13 @@ function step(
     callback::Union{AbstractCallback,Nothing}=nothing,
     kwargs...,
 )
+    # capture the marginalized log-likelihood
     state = resample(rng, alg.resampler, state)
+    marginalization_term = logsumexp(state.log_weights)
     isnothing(callback) ||
         callback(model, alg, iter, state, observation, PostResample; kwargs...)
 
-    state = predict(rng, model, alg, iter, state; ref_state=ref_state, kwargs...)
+    state = predict(rng, model, alg, iter, state, observation; ref_state=ref_state, kwargs...)
 
     # TODO: this is quite inelegant and should be refactored. It also might introduce bugs
     # with callbacks that track the ancestry (and use PostResample)
@@ -31,7 +33,7 @@ function step(
     isnothing(callback) ||
         callback(model, alg, iter, state, observation, PostUpdate; kwargs...)
 
-    return state, ll_increment
+    return state, (ll_increment - marginalization_term)
 end
 
 struct BootstrapFilter{RS<:AbstractResampler} <: AbstractParticleFilter
@@ -67,7 +69,8 @@ function predict(
     model::StateSpaceModel,
     filter::BootstrapFilter,
     step::Integer,
-    state::ParticleDistribution;
+    state::ParticleDistribution,
+    observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
@@ -86,8 +89,6 @@ function update(
     observation;
     kwargs...,
 ) where {T}
-    old_ll = logsumexp(state.log_weights)
-
     log_increments = map(
         x -> SSMProblems.logdensity(model.obs, step, x, observation; kwargs...),
         collect(state),
@@ -95,9 +96,7 @@ function update(
 
     state.log_weights += log_increments
 
-    ll_increment = logsumexp(state.log_weights) - old_ll
-
-    return state, ll_increment
+    return state, logsumexp(state.log_weights)
 end
 
 # Application of bootstrap filter to hierarchical models

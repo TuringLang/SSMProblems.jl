@@ -78,8 +78,6 @@ end
 function update(
     model::HierarchicalSSM{T}, algo::RBPF, t::Integer, state, obs; kwargs...
 ) where {T}
-    old_ll = logsumexp(state.log_weights)
-
     for i in 1:(algo.N)
         state.particles[i].z, log_increments = update(
             model.inner_model,
@@ -93,9 +91,7 @@ function update(
         state.log_weights[i] += log_increments
     end
 
-    ll_increment = logsumexp(state.log_weights) - old_ll
-
-    return state, ll_increment
+    return state, logsumexp(state.log_weights)
 end
 
 function marginal_update(
@@ -199,8 +195,6 @@ function update(
     obs;
     kwargs...,
 )
-    old_ll = logsumexp(state.log_weights)
-
     new_zs, inner_lls = update(
         model.inner_model,
         filter.inner_algo,
@@ -214,6 +208,5 @@ function update(
     state.log_weights += inner_lls
     state.particles.zs = new_zs
 
-    step_ll = logsumexp(state.log_weights) - old_ll
-    return state, step_ll
+    return state, logsumexp(state.log_weights)
 end
