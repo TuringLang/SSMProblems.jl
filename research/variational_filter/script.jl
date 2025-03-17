@@ -107,24 +107,20 @@ true_model = toy_model(Float32, 10, 10)
 _, _, ys = sample(rng, true_model, 100)
 
 function logℓ(θ, data)
-    # algo = GPF(4, LinearGaussianProposal(θ); threshold=1.0)
-    algo = GPF(4, θ; threshold=1.0)
+    algo = GPF(4, LinearGaussianProposal(θ); threshold=1.0)
+    # algo = GPF(4, θ; threshold=1.0)
     _, ll = GeneralisedFilters.filter(true_model, algo, data)
     return -ll
 end
 
 num_epochs = 500
-# θ = rand(rng, Float64, 20) .+ 1.0
-θ = DeepGaussianProposal((10,10), (16,16))
+θ = rand(rng, Float64, 20) .+ 1.0
+# θ = DeepGaussianProposal((10,10), (16,16))
 opt = Optimisers.setup(Adam(0.01), θ)
 
-backend = AutoMooncake(;config=nothing)
+backend = AutoForwardDiff()
 grad_prep = prepare_gradient(
     logℓ, backend, θ, Constant(ys)
-)
-
-DifferentiationInterface.value_and_gradient(
-    logℓ, AutoMooncake(;config=nothing), θ, Constant(ys)
 )
 
 @time for epoch in 1:num_epochs
