@@ -1,7 +1,6 @@
 export GuidedFilter, GPF, AbstractProposal
 # import SSMProblems: distribution, simulate, logdensity
 
-
 """
     AbstractProposal
 """
@@ -91,14 +90,17 @@ function predict(
         collect(state),
     )
 
-    log_increments = map(zip(proposed_particles, state.particles)) do (new_state, prev_state)
-        log_f = SSMProblems.logdensity(model.dyn, step, prev_state, new_state; kwargs...)
-        log_q = logdensity(
-            model, filter.proposal, step, prev_state, new_state, observation; kwargs...
-        )
+    log_increments =
+        map(zip(proposed_particles, state.particles)) do (new_state, prev_state)
+            log_f = SSMProblems.logdensity(
+                model.dyn, step, prev_state, new_state; kwargs...
+            )
+            log_q = logdensity(
+                model, filter.proposal, step, prev_state, new_state, observation; kwargs...
+            )
 
-        (log_f - log_q)
-    end
+            (log_f - log_q)
+        end
 
     proposed_state = ParticleDistribution(
         proposed_particles, state.log_weights + log_increments

@@ -19,7 +19,9 @@ function step(
     isnothing(callback) ||
         callback(model, alg, iter, state, observation, PostResample; kwargs...)
 
-    state = predict(rng, model, alg, iter, state, observation; ref_state=ref_state, kwargs...)
+    state = predict(
+        rng, model, alg, iter, state, observation; ref_state=ref_state, kwargs...
+    )
 
     # TODO: this is quite inelegant and should be refactored. It also might introduce bugs
     # with callbacks that track the ancestry (and use PostResample)
