@@ -40,12 +40,8 @@ function partition(A::AbstractMatrix, n::Int)
 end
 
 """
-Consider structural models of endogenous variables `y[t]` casted in the following form:
-```
-Γ0 * y[t] = Γ1 * y[t-1] + Ψ * ε[t] + Π * η[t]
-```
-with noise `η[t]` for forward looking one-step-ahead expectations and `ε[t]` for exogenous
-disturbances.
+this is an algorithm proposed by (Sims, 1995) which restructures linear rational expectation
+models such that the noise generated from impact is no longer a function of expectations.
 """
 function gensys(dsge::LinearRationalExpectation{T}; ϵ::T=1e-6) where {T<:Real}
     Π, Ψ, C = dsge.Π, dsge.Ψ, dsge.C
