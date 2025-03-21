@@ -3,97 +3,54 @@ using SSMProblems
 using LinearAlgebra
 using MatrixEquations
 
-# adaoted from QuantEcon.jl
-include("gensys.jl")
+include("linear_dsge.jl")
 
-abstract type DSGE end
+#=
+# RANK Model
 
-"""
-A log linearized DSGE model which fits into the following form:
-```
-Γ0 * y[t] = Γ1 * y[t-1] + c + Ψ * z[t] + Π * η[t]
-```
-where z is a vector of exogenous shocks and η is a vector of noise from one-step-ahead forward
-looking expectations.
-"""
-struct LogLinearizedModel{
-    T <: Real,
-    Γ0T <: AbstractMatrix{T},
-    Γ1T <: AbstractMatrix{T},
-    ΨT  <: AbstractMatrix{T},
-    ΠT  <: AbstractMatrix{T},
-    CT  <: AbstractVector{T}
-} <: DSGE
-    Γ0::Γ0T
-    Γ1::Γ1T
-    Ψ::ΨT
-    Π::ΠT
-    C::CT
-end
+Suppose we observe 3 variables: $y_{t}$ deviation from domestic output, $\pi_{t}$ rate of
+inflation, and $i_{t}$ the interest rate.
+$$
+y_{t} = E\left[y_{t+1}\right] - \frac{1}{\gamma} (i_{t} - E\left[\pi_{t+1}\right]) + \omega^{d}_{t}
+$$
+is the log form of the Euler equation (in terms of goods produced $y_{t})$ for intertemporal
+choice with risk aversion parameter $\gamma$.
+$$
+\pi_{t} = \beta E\left[\pi_{t+1}\right] + \kappa y_{t} - \omega^{s}_{t}
+$$
+represents the new Keynesian Phillips curve given discount factor $\beta$ and the slope of
+the NKPC $\kappa = \frac{(1-\theta)(1 - \theta \beta)}{\theta} (\gamma + \varphi)$, which
+itself is an expression in terms of reactive firms $\theta$ and labor preferences $\varphi$.
+$$
+i_{t} = \phi^{i} i_{t-1} + (1-\phi^{i}) (\phi^{\pi} \pi_{t} + \phi^{y} y_{t}) + \omega^{m}_{t}
+$$
+defines the monetary policy rule with persistence $\phi^{i}$ and coefficients $\phi^{\pi}$
+and $\phi^{y}$.
 
-function state_space(dsge::LogLinearizedModel; kwargs...)
-    policy, drift, impact, eu = gensys(dsge.Γ0, dsge.Γ1, dsge.C, dsge.Ψ, dsge.Π; kwargs...)
+**New Keynesian** models allow for a property called *sticky prices* in which case only a
+fraction of the goods producing firms properly react to changes in inflation.
 
-    latent_states = Int64[]
-    for (i, col) in enumerate(eachcol(policy))
-        any(abs.(col) .> 1e-12) && push!(latent_states, i)
-    end
+More information can be found in ([Leeper & Leith, 2016](https://www.sciencedirect.com/science/article/pii/S1574004816000136))
+who explain the basic setup in section 3.1, but this specific variation of the model comes
+from ([Wolf, 2020](https://www.aeaweb.org/articles?id=10.1257/mac.20180328))
 
-    state_perm = permutation_matrix(policy, latent_states)
-    obs_perm = permutation_matrix(policy, [1,2,3])
+### Why is this useful?
+ - aren't meant for forecasting since aggregate trends are rarely reflective of heterogeneous economies (this raises a new class of HANK models).
+ - good for capturing narrative elements to structural models
+ - allows us to perform *structural identification* using impulse response analysis
 
-    # latent dynamics
-    A = state_perm * policy * state_perm'
-    B = state_perm * impact
-    Q = B * B'
-    b = state_perm * drift
+# Shocks
 
-    # observation process
-    H = obs_perm * policy * state_perm'
-    D = obs_perm * impact
-    R = D * D'
-    c = obs_perm * drift
-
-    # initial state (assuming process is stationary)
-    X0 = zero(b)
-    Σ0 = lyapd(A, Q)
-
-    return create_homogeneous_linear_gaussian_model(X0, Σ0, A, b, Q, H, c, R)
-end
-
-function submatrix(A, perm)
-    P = permutation_matrix(A, perm)
-    return P*A*P'
-end
-
-function submatrix(A, row_perm, col_perm)
-    P1 = permutation_matrix(A, row_perm)
-    P2 = permutation_matrix(A, col_perm)
-    return P1*A*P2'
-end
-
-function permutation_matrix(A::Matrix{T}, perm::AbstractVector) where {T<:Number}
-    P = zeros(T, (length(perm), size(A, 1)))
-    for (i, p) in enumerate(perm)
-        P[i, p] = one(T)
-    end
-    return P
-end
-
-#= model equations
+terms $\omega^{z}_{t}$ represent shocks to demand $d$, supply $s$, and interest rates $m$. In my version of the model, these are modeled as endogenous $AR(1)$ processes with persistence $\rho_{z}$ and shock variance $\sigma_{z}^2$
+$$
 \begin{align*}
-    y_{t} &= y_{t+1} - 1 / \gamma (i_{t} - \pi_{t+1}) + \omega^{d}_{t} \\
-    \pi_{t} &= \beta \pi_{t+1} + (1-\theta)*(1 - \theta \beta) / \theta * (\gamma + \varphi) y_{t} - \omega^{s}_{t} \\
-    i_{t} &= \phi^{i} i_{t-1} + (1-\phi^{i})*(\phi^{\pi} \pi_{t} + \phi^{y} y_{t}) + \omega^{m}_{t}
+    \omega^{d}_{t} &= \rho^{d} \omega^{d}_{t-1} + \sigma^{d} \varepsilon^{d}_{t} \\
+    \omega^{s}_{t} &= \rho^{s} \omega^{s}_{t-1} + \sigma^{s} \varepsilon^{s}_{t} \\
+    \omega^{m}_{t} &= \rho^{m} \omega^{m}_{t-1} + \sigma^{m} \varepsilon^{m}_{t}
 \end{align*}
-=#
+$$
 
-#= shocks
-\begin{align*}
-    \omega^{d}_{t} &= \rho^{d} * \omega^{d}_{t-1} + \sigma^{d} \varepsilon^{d}_{t} \\
-    \omega^{s}_{t} &= \rho^{s} * \omega^{s}_{t-1} + \sigma^{s} \varepsilon^{s}_{t} \\
-    \omega^{m}_{t} &= \rho^{m} * \omega^{m}_{t-1} + \sigma^{m} \varepsilon^{m}_{t}
-\end{align*}
+we have the freedom to pick any kind of behavior, this is really more of an art than a science.
 =#
 
 function new_keynesian_model(
@@ -126,7 +83,7 @@ function new_keynesian_model(
     Γ1[6:end,6:end] = diagm([ρd, ρs, ρm])
     Ψ[6:end,:]  = diagm([σd, σs, σm])
 
-    return LogLinearizedModel(Γ0, Γ1, Ψ, Π, C)
+    return LinearRationalExpectation(Γ0, Γ1, Ψ, Π, C)
 end
 
 # create the DSGE model
@@ -135,6 +92,4 @@ dsge = new_keynesian_model(
 )
 
 # generate the state space form
-model = state_space(dsge)
-
-# query some FRED data and let it rip...
+model = StateSpaceModel(dsge)
