@@ -29,7 +29,7 @@ function initialise(
 ) where {T}
     particles = map(
         x -> RaoBlackwellisedParticle(
-            simulate(rng, model.outer_dyn; kwargs...),
+            SSMProblems.simulate(rng, model.outer_dyn; kwargs...),
             initialise(model.inner_model, algo.inner_algo; new_outer=x, kwargs...),
         ),
         1:(algo.N),
@@ -43,30 +43,39 @@ function predict(
     rng::AbstractRNG,
     model::HierarchicalSSM,
     algo::RBPF,
-    t::Integer,
-    filtered;
+    step::Integer,
+    state,
+    observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
     new_particles = map(
-        x -> marginal_predict(rng, model, algo, t, x; kwargs...), filtered.particles
+        x -> marginal_predict(rng, model, algo, step, x, observation; kwargs...),
+        collect(state),
     )
     # Don't need to deep copy weights as filtered will be overwritten in the update step
-    proposed = ParticleDistribution(new_particles, filtered.log_weights)
+    proposed = ParticleDistribution(new_particles, state.log_weights)
 
-    return update_ref!(proposed, ref_state, t)
+    return update_ref!(proposed, ref_state, step)
 end
 
 function marginal_predict(
-    rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, t::Integer, state; kwargs...
+    rng::AbstractRNG,
+    model::HierarchicalSSM,
+    algo::RBPF,
+    step::Integer,
+    state,
+    observation;
+    kwargs...,
 )
-    proposed_x = simulate(rng, model.outer_dyn, t, state.x; kwargs...)
+    proposed_x = SSMProblems.simulate(rng, model.outer_dyn, step, state.x; kwargs...)
     proposed_z = predict(
         rng,
         model.inner_model,
         algo.inner_algo,
-        t,
-        state.z;
+        step,
+        state.z,
+        observation;
         prev_outer=state.x,
         new_outer=proposed_x,
         kwargs...,
@@ -76,15 +85,15 @@ function marginal_predict(
 end
 
 function update(
-    model::HierarchicalSSM{T}, algo::RBPF, t::Integer, state, obs; kwargs...
+    model::HierarchicalSSM{T}, algo::RBPF, step::Integer, state, observation; kwargs...
 ) where {T}
     for i in 1:(algo.N)
         state.particles[i].z, log_increments = update(
             model.inner_model,
             algo.inner_algo,
-            t,
+            step,
             state.particles[i].z,
-            obs;
+            observation;
             new_outer=state.particles[i].x,
             kwargs...,
         )
@@ -95,10 +104,16 @@ function update(
 end
 
 function marginal_update(
-    model::HierarchicalSSM, algo::RBPF, t::Integer, state, obs; kwargs...
+    model::HierarchicalSSM, algo::RBPF, step::Integer, state, observation; kwargs...
 )
     filtered_z, log_increment = update(
-        model.inner_model, algo.inner_algo, t, state.z, obs; new_outer=state.x, kwargs...
+        model.inner_model,
+        algo.inner_algo,
+        step,
+        state.z,
+        observation;
+        new_outer=state.x,
+        kwargs...,
     )
 
     return RaoBlackwellisedParticle(state.x, filtered_z), log_increment
@@ -164,9 +179,10 @@ end
 function predict(
     rng::AbstractRNG,
     model::HierarchicalSSM,
-    filter::BatchRBPF,
+    algo::BatchRBPF,
     step::Integer,
-    state::RaoBlackwellisedParticleDistribution;
+    state::RaoBlackwellisedParticleDistribution,
+    observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
@@ -175,9 +191,10 @@ function predict(
     new_xs = SSMProblems.batch_simulate(rng, outer_dyn, step, state.particles.xs; kwargs...)
     new_zs = predict(
         inner_model,
-        filter.inner_algo,
+        algo.inner_algo,
         step,
-        state.particles.zs;
+        state.particles.zs,
+        observation;
         prev_outer=state.particles.xs,
         new_outer=new_xs,
         kwargs...,
@@ -189,7 +206,7 @@ end
 
 function update(
     model::HierarchicalSSM,
-    filter::BatchRBPF,
+    algo::BatchRBPF,
     step::Integer,
     state::RaoBlackwellisedParticleDistribution,
     obs;
@@ -197,7 +214,7 @@ function update(
 )
     new_zs, inner_lls = update(
         model.inner_model,
-        filter.inner_algo,
+        algo.inner_algo,
         step,
         state.particles.zs,
         obs;

@@ -19,9 +19,10 @@ end
 function predict(
     rng::AbstractRNG,
     model::LinearGaussianStateSpaceModel,
-    filter::KalmanFilter,
+    algo::KalmanFilter,
     step::Integer,
-    filtered::Gaussian;
+    filtered::Gaussian,
+    observation=nothing;
     kwargs...,
 )
     μ, Σ = GaussianDistributions.pair(filtered)
@@ -31,7 +32,7 @@ end
 
 function update(
     model::LinearGaussianStateSpaceModel,
-    filter::KalmanFilter,
+    algo::KalmanFilter,
     step::Integer,
     proposed::Gaussian,
     obs::AbstractVector;
@@ -73,7 +74,8 @@ function predict(
     model::LinearGaussianStateSpaceModel{T},
     algo::BatchKalmanFilter,
     step::Integer,
-    state::BatchGaussianDistribution;
+    state::BatchGaussianDistribution,
+    observation;
     kwargs...,
 ) where {T}
     μs, Σs = state.μs, state.Σs
@@ -173,7 +175,7 @@ end
 function smooth(
     rng::AbstractRNG,
     model::LinearGaussianStateSpaceModel{T},
-    alg::KalmanSmoother,
+    algo::KalmanSmoother,
     observations::AbstractVector;
     t_smooth=1,
     callback=nothing,
@@ -188,7 +190,7 @@ function smooth(
     back_state = filtered
     for t in (length(observations) - 1):-1:t_smooth
         back_state = backward(
-            rng, model, alg, t, back_state, observations[t]; states_cache=cache, kwargs...
+            rng, model, algo, t, back_state, observations[t]; states_cache=cache, kwargs...
         )
     end
 
@@ -198,7 +200,7 @@ end
 function backward(
     rng::AbstractRNG,
     model::LinearGaussianStateSpaceModel{T},
-    alg::KalmanSmoother,
+    algo::KalmanSmoother,
     iter::Integer,
     back_state,
     obs;
