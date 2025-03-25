@@ -85,7 +85,7 @@ function Optimisers.update!(opt_state, params, grad::Mooncake.Tangent)
 end
 
 function logℓ(φ, data)
-    algo = GPF(4, φ; threshold=0.8)
+    algo = PF(4, φ; threshold=0.8)
     _, ll = GeneralisedFilters.filter(true_model, algo, data)
     return -ll
 end
@@ -102,7 +102,7 @@ grad_prep = prepare_gradient(logℓ, backend, φ, Constant(ys))
     ∇logℓ = DifferentiationInterface.gradient(logℓ, grad_prep, backend, φ, Constant(ys))
 
     Optimisers.update!(opt, φ, ∇logℓ)
-    _, val = GeneralisedFilters.filter(true_model, GPF(25, φ; threshold=0.8), ys)
+    _, val = GeneralisedFilters.filter(true_model, PF(25, φ; threshold=0.8), ys)
     vsmc_ll[epoch] = val
 
     if (epoch % 25 == 0)
