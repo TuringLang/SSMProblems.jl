@@ -58,30 +58,30 @@ function new_keynesian_model(
 ) where {T<:Real}
     Γ0 = zeros(T, (8, 8))
     Γ1 = zeros(T, (8, 8))
-    Ψ  = zeros(T, (8, 3))
-    Π  = zeros(T, (8, 2))
-    C  = zeros(T, 8)
+    Ψ = zeros(T, (8, 3))
+    Π = zeros(T, (8, 2))
+    C = zeros(T, 8)
 
     # endogenous model equations
-    Γ0[1,:] = [1 0 (1/γ) -1 -(1/γ) -1 0 0]
-    Γ0[2,:] = [-(1-θ)*(1-θ*β)/θ*(γ+φ) 1 0 0 -β 0 1 0]
-    Γ0[3,:] = [-(1-ϕi)*ϕy -(1-ϕi)*ϕπ 1 0 0 0 0 -1]
+    Γ0[1, :] = [1 0 (1 / γ) -1 -(1 / γ) -1 0 0]
+    Γ0[2, :] = [-(1 - θ) * (1 - θ * β) / θ * (γ + φ) 1 0 0 -β 0 1 0]
+    Γ0[3, :] = [-(1 - ϕi) * ϕy -(1 - ϕi) * ϕπ 1 0 0 0 0 -1]
 
-    Γ1[3,3] = ϕi
+    Γ1[3, 3] = ϕi
 
     # forward lookers
-    Γ0[4,1] = one(T)
-    Γ0[5,2] = one(T)
+    Γ0[4, 1] = one(T)
+    Γ0[5, 2] = one(T)
 
-    Γ1[4,4] = one(T)
-    Γ1[5,5] = one(T)
+    Γ1[4, 4] = one(T)
+    Γ1[5, 5] = one(T)
 
-    Π[4:5,:] = I(2)
+    Π[4:5, :] = I(2)
 
     # shock processes
-    Γ0[6:end,6:end] = I(3)
-    Γ1[6:end,6:end] = diagm([ρd, ρs, ρm])
-    Ψ[6:end,:]  = diagm([σd, σs, σm])
+    Γ0[6:end, 6:end] = I(3)
+    Γ1[6:end, 6:end] = diagm([ρd, ρs, ρm])
+    Ψ[6:end, :] = diagm([σd, σs, σm])
 
     return LinearRationalExpectation(Γ0, Γ1, Ψ, Π, C)
 end

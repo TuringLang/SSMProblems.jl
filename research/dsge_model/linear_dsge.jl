@@ -11,12 +11,12 @@ where z is a vector of exogenous shocks and η is a vector of noise from one-ste
 looking expectations.
 """
 struct LinearRationalExpectation{
-    T <: Real,
-    Γ0T <: AbstractMatrix{T},
-    Γ1T <: AbstractMatrix{T},
-    ΨT  <: AbstractMatrix{T},
-    ΠT  <: AbstractMatrix{T},
-    CT  <: AbstractVector{T}
+    T<:Real,
+    Γ0T<:AbstractMatrix{T},
+    Γ1T<:AbstractMatrix{T},
+    ΨT<:AbstractMatrix{T},
+    ΠT<:AbstractMatrix{T},
+    CT<:AbstractVector{T},
 } <: DSGE
     Γ0::Γ0T
     Γ1::Γ1T
@@ -27,15 +27,15 @@ end
 
 # takes advantage of upper triangular form of the QZ decomposition
 function partition(A::UpperTriangular, n::Int)
-    A11 = UpperTriangular(A[1:n,1:n])
-    A12 = A[1:n,(n+1):end]
-    A22 = UpperTriangular(A[(n+1):end,(n+1):end])
+    A11 = UpperTriangular(A[1:n, 1:n])
+    A12 = A[1:n, (n + 1):end]
+    A22 = UpperTriangular(A[(n + 1):end, (n + 1):end])
     return A11, A12, A22
 end
 
 function partition(A::AbstractMatrix, n::Int)
-    A1 = A[1:n,:]
-    A2 = A[(n+1):end,:]
+    A1 = A[1:n, :]
+    A2 = A[(n + 1):end, :]
     return A1, A2
 end
 
@@ -45,7 +45,7 @@ models such that the noise generated from impact is no longer a function of expe
 """
 function gensys(dsge::LinearRationalExpectation{T}; ϵ::T=1e-6) where {T<:Real}
     Π, Ψ, C = dsge.Π, dsge.Ψ, dsge.C
-    F = schur(dsge.Γ0, dsge.Γ1)    
+    F = schur(dsge.Γ0, dsge.Γ1)
     eigenvalues = F.β ./ F.α
 
     stable_flag = abs.(eigenvalues) .< 1 + ϵ
@@ -71,7 +71,7 @@ function gensys(dsge::LinearRationalExpectation{T}; ϵ::T=1e-6) where {T<:Real}
     # premultiply according to (Sims, 1995)
     Λinv = inv(Λ11)
     n = length(stable_flag)
-    H = Z *[Λinv (Λinv * (Λ12 - Φ * Λ22)); zeros(n-nstable, nstable) I]
+    H = Z * [Λinv (Λinv*(Λ12 - Φ * Λ22)); zeros(n - nstable, nstable) I]
 
     # solve via back substitution
     impact = H * [Q1 - Φ * Q2; zero(Π)'] * Ψ
@@ -90,7 +90,7 @@ function SSMProblems.StateSpaceModel(model::LinearRationalExpectation; kwargs...
     end
 
     state_perm = permutation_matrix(policy, latent_states)
-    obs_perm = permutation_matrix(policy, [1,2,3])
+    obs_perm = permutation_matrix(policy, [1, 2, 3])
 
     # latent dynamics
     A = state_perm * policy * state_perm'
@@ -113,13 +113,13 @@ end
 
 function submatrix(A, perm)
     P = permutation_matrix(A, perm)
-    return P*A*P'
+    return P * A * P'
 end
 
 function submatrix(A, row_perm, col_perm)
     P1 = permutation_matrix(A, row_perm)
     P2 = permutation_matrix(A, col_perm)
-    return P1*A*P2'
+    return P1 * A * P2'
 end
 
 function permutation_matrix(A::Matrix{T}, perm::AbstractVector) where {T<:Number}
