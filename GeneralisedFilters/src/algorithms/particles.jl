@@ -1,11 +1,11 @@
 export BootstrapFilter, BF
 export ParticleFilter, PF, AbstractProposal
 
-import SSMProblems: distribution, simulate, logdensity
+# import SSMProblems: distribution, simulate, logdensity
 
 abstract type AbstractProposal end
 
-function SSMProblems.distribution(
+function distribution(
     model::AbstractStateSpaceModel,
     prop::AbstractProposal,
     step::Integer,
@@ -15,12 +15,12 @@ function SSMProblems.distribution(
 )
     return throw(
         MethodError(
-            SSMProblems.distribution, (model, prop, step, state, observation, kwargs...)
+            distribution, (model, prop, step, state, observation, kwargs...)
         ),
     )
 end
 
-function SSMProblems.simulate(
+function simulate(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
     prop::AbstractProposal,
@@ -30,11 +30,11 @@ function SSMProblems.simulate(
     kwargs...,
 )
     return rand(
-        rng, SSMProblems.distribution(model, prop, step, state, observation; kwargs...)
+        rng, distribution(model, prop, step, state, observation; kwargs...)
     )
 end
 
-function SSMProblems.logdensity(
+function logdensity(
     model::AbstractStateSpaceModel,
     prop::AbstractProposal,
     step::Integer,
@@ -44,7 +44,7 @@ function SSMProblems.logdensity(
     kwargs...,
 )
     return logpdf(
-        SSMProblems.distribution(model, prop, step, prev_state, observation; kwargs...),
+        distribution(model, prop, step, prev_state, observation; kwargs...),
         new_state,
     )
 end
@@ -126,7 +126,7 @@ function predict(
     kwargs...,
 )
     proposed_particles = map(
-        x -> SSMProblems.simulate(
+        x -> simulate(
             rng, model, filter.proposal, step, x, observation; kwargs...
         ),
         collect(state),
@@ -137,7 +137,7 @@ function predict(
             log_f = SSMProblems.logdensity(
                 model.dyn, step, prev_state, new_state; kwargs...
             )
-            log_q = SSMProblems.logdensity(
+            log_q = logdensity(
                 model, filter.proposal, step, prev_state, new_state, observation; kwargs...
             )
 
@@ -179,7 +179,7 @@ BootstrapFilter(N::Integer; kwargs...) = ParticleFilter(N, LatentProposal(); kwa
 function simulate(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
-    prop::AbstractProposal,
+    prop::LatentProposal,
     step::Integer,
     state,
     observation;
@@ -190,7 +190,7 @@ end
 
 function logdensity(
     model::AbstractStateSpaceModel,
-    prop::AbstractProposal,
+    prop::LatentProposal,
     step::Integer,
     prev_state,
     new_state,
