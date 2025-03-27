@@ -83,7 +83,7 @@ function new_keynesian_model(
     Γ1[6:end, 6:end] = diagm([ρd, ρs, ρm])
     Ψ[6:end, :] = diagm([σd, σs, σm])
 
-    return LinearRationalExpectation(Γ0, Γ1, Ψ, Π, C)
+    return LinearRationalExpectation(Γ0, Γ1, Ψ, Π, C, [1, 2, 3])
 end
 
 # create the DSGE model

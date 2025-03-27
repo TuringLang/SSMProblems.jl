@@ -23,6 +23,7 @@ struct LinearRationalExpectation{
     Ψ::ΨT
     Π::ΠT
     C::CT
+    obs::Vector{Int}
 end
 
 # takes advantage of upper triangular form of the QZ decomposition
@@ -90,7 +91,7 @@ function SSMProblems.StateSpaceModel(model::LinearRationalExpectation; kwargs...
     end
 
     state_perm = permutation_matrix(policy, latent_states)
-    obs_perm = permutation_matrix(policy, [1, 2, 3])
+    obs_perm = permutation_matrix(policy, model.obs)
 
     # latent dynamics
     A = state_perm * policy * state_perm'
