@@ -438,6 +438,7 @@ end
     using LogExpFunctions: softmax
     using Random: randexp
     using StatsBase
+    using StaticArrays
 
     using OffsetArrays
 
@@ -448,13 +449,13 @@ end
     K = 5
     t_smooth = 2
     T = Float64
-    N_particles = 20
+    N_particles = 100
     N_burnin = 100
     N_sample = 500
 
     rng = StableRNG(SEED)
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
-        rng, D_outer, D_inner, D_obs, T
+        rng, D_outer, D_inner, D_obs, T; static_arrays=true
     )
     _, _, ys = sample(rng, full_model, K)
 
@@ -464,11 +465,11 @@ end
     )
 
     particle_type = GeneralisedFilters.RaoBlackwellisedParticle{
-        Vector{T},Gaussian{Vector{T},Matrix{T}}
+        Vector{T},Gaussian{SVector{D_inner,T},SMatrix{D_inner,D_inner,T,D_inner^2}}
     }
 
     N_steps = N_burnin + N_sample
-    rbpf = RBPF(KalmanFilter(), N_particles; threshold=1.0)  # always resample until issue #24 is fixed
+    rbpf = RBPF(KalmanFilter(), N_particles)
     ref_traj = nothing
     trajectory_samples = Vector{OffsetVector{particle_type,Vector{particle_type}}}(
         undef, N_sample
@@ -483,8 +484,10 @@ end
         sampled_idx = sample(rng, 1:length(weights), Weights(weights))
         global ref_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
         if i > N_burnin
-            trajectory_samples[i - N_burnin] = ref_traj
+            trajectory_samples[i - N_burnin] = deepcopy(ref_traj)
         end
+        # Reference trajectory should only be nonlinear state for RBPF
+        ref_traj = getproperty.(ref_traj, :x)
     end
 
     # Extract inner and outer trajectories
@@ -518,17 +521,7 @@ end
     _, _, ys = sample(rng, full_model, K)
 
     # Generate random reference trajectory
-    ref_trajectory = [
-        GeneralisedFilters.BatchRaoBlackwellisedParticles(
-            CuArray(rand(rng, T, D_outer, 1)),
-            GeneralisedFilters.BatchGaussianDistribution(
-                CuArray(rand(rng, T, D_inner, 1)),
-                CuArray(
-                    reshape(GeneralisedFilters.GFTest.rand_cov(rng, T, D_inner), Val(3))
-                ),
-            ),
-        ) for _ in 0:K
-    ]
+    ref_trajectory = [CuArray(rand(rng, T, D_outer, 1)) for _ in 0:K]
     ref_trajectory = OffsetVector(ref_trajectory, -1)
 
     rbpf = BatchRBPF(BatchKalmanFilter(N_particles), N_particles)
@@ -642,6 +635,8 @@ end
         if i > N_burnin
             trajectory_samples[i - N_burnin] = ref_traj
         end
+        # Reference trajectory should only be nonlinear state for RBPF
+        ref_traj = getproperty.(ref_traj, :xs)
     end
 
     # Extract inner and outer trajectories

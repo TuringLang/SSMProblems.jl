@@ -22,13 +22,15 @@ export InnerDynamics, create_dummy_linear_gaussian_model
     Linear Gaussian dynamics conditonal on the (previous) outer state (u_t), defined by:
     x_{t+1} = A x_t + b + C u_t + w_t
 """
-struct InnerDynamics{T} <: LinearGaussianLatentDynamics{T}
-    μ0::Vector{T}
-    Σ0::Matrix{T}
-    A::Matrix{T}
-    b::Vector{T}
-    C::Matrix{T}
-    Q::Matrix{T}
+struct InnerDynamics{
+    T,TMat<:AbstractMatrix{T},TVec<:AbstractVector{T},TCov<:AbstractMatrix{T}
+} <: LinearGaussianLatentDynamics{T}
+    μ0::TVec
+    Σ0::TCov
+    A::TMat
+    b::TVec
+    C::TMat
+    Q::TCov
 end
 
 # CPU methods
@@ -81,7 +83,8 @@ function create_dummy_linear_gaussian_model(
     D_outer::Integer,
     D_inner::Integer,
     Dy::Integer,
-    T::Type{<:Real}=Float64,
+    T::Type{<:Real}=Float64;
+    static_arrays::Bool=false,
 )
     # Generate model matrices/vectors
     μ0 = rand(rng, T, D_outer + D_inner)
@@ -113,14 +116,25 @@ function create_dummy_linear_gaussian_model(
         b[1:D_outer],
         Q[1:D_outer, 1:D_outer],
     )
-    inner_dyn = InnerDynamics(
-        μ0[(D_outer + 1):end],
-        Σ0s[(D_outer + 1):end, (D_outer + 1):end],
-        A[(D_outer + 1):end, (D_outer + 1):end],
-        b[(D_outer + 1):end],
-        A[(D_outer + 1):end, 1:D_outer],
-        Q[(D_outer + 1):end, (D_outer + 1):end],
-    )
+    inner_dyn = if static_arrays
+        InnerDynamics(
+            SVector{D_inner,T}(μ0[(D_outer + 1):end]),
+            SMatrix{D_inner,D_inner,T}(Σ0s[(D_outer + 1):end, (D_outer + 1):end]),
+            SMatrix{D_inner,D_outer,T}(A[(D_outer + 1):end, (D_outer + 1):end]),
+            SVector{D_inner,T}(b[(D_outer + 1):end]),
+            SMatrix{D_inner,D_outer,T}(A[(D_outer + 1):end, 1:D_outer]),
+            SMatrix{D_inner,D_inner,T}(Q[(D_outer + 1):end, (D_outer + 1):end]),
+        )
+    else
+        InnerDynamics(
+            μ0[(D_outer + 1):end],
+            Σ0s[(D_outer + 1):end, (D_outer + 1):end],
+            A[(D_outer + 1):end, (D_outer + 1):end],
+            b[(D_outer + 1):end],
+            A[(D_outer + 1):end, 1:D_outer],
+            Q[(D_outer + 1):end, (D_outer + 1):end],
+        )
+    end
     obs = GeneralisedFilters.HomogeneousLinearGaussianObservationProcess(
         H[:, (D_outer + 1):end], c, R
     )

@@ -7,10 +7,18 @@ export Multinomial, Systematic, Stratified, Metropolis, Rejection
 
 abstract type AbstractResampler end
 
-function resample(rng::AbstractRNG, resampler::AbstractResampler, states)
+function resample(
+    rng::AbstractRNG,
+    resampler::AbstractResampler,
+    states;
+    ref_state::Union{Nothing,AbstractVector},
+)
     weights = StatsBase.weights(states)
     idxs = sample_ancestors(rng, resampler, weights)
-    # TODO: generalise these
+    # Set reference trajectory indices
+    if !isnothing(ref_state)
+        CUDA.@allowscalar idxs[1] = 1
+    end
     return construct_new_state(states, idxs)
 end
 
@@ -42,7 +50,12 @@ struct ESSResampler <: AbstractConditionalResampler
     end
 end
 
-function resample(rng::AbstractRNG, cond_resampler::ESSResampler, state)
+function resample(
+    rng::AbstractRNG,
+    cond_resampler::ESSResampler,
+    state;
+    ref_state::Union{Nothing,AbstractVector},
+)
     n = length(state)
     # TODO: computing weights twice. Should create a wrapper to avoid this
     weights = StatsBase.weights(state)
@@ -50,7 +63,7 @@ function resample(rng::AbstractRNG, cond_resampler::ESSResampler, state)
     @debug "ESS: $ess"
 
     if cond_resampler.threshold * n ≥ ess
-        return resample(rng, cond_resampler.resampler, state)
+        return resample(rng, cond_resampler.resampler, state; ref_state)
     else
         state.ancestors = collect(1:n)
         return state
