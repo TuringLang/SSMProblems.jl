@@ -14,9 +14,7 @@ function distribution(
     kwargs...,
 )
     return throw(
-        MethodError(
-            distribution, (model, prop, step, state, observation, kwargs...)
-        ),
+        MethodError(distribution, (model, prop, step, state, observation, kwargs...))
     )
 end
 
@@ -29,9 +27,7 @@ function simulate(
     observation;
     kwargs...,
 )
-    return rand(
-        rng, distribution(model, prop, step, state, observation; kwargs...)
-    )
+    return rand(rng, distribution(model, prop, step, state, observation; kwargs...))
 end
 
 function logdensity(
@@ -44,8 +40,7 @@ function logdensity(
     kwargs...,
 )
     return logpdf(
-        distribution(model, prop, step, prev_state, observation; kwargs...),
-        new_state,
+        distribution(model, prop, step, prev_state, observation; kwargs...), new_state
     )
 end
 
@@ -126,9 +121,7 @@ function predict(
     kwargs...,
 )
     proposed_particles = map(
-        x -> simulate(
-            rng, model, filter.proposal, step, x, observation; kwargs...
-        ),
+        x -> simulate(rng, model, filter.proposal, step, x, observation; kwargs...),
         collect(state),
     )
 
