@@ -62,14 +62,14 @@ function predict(
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    particles = map(
+    state.particles = map(
         i -> predict_particle(
             rng, i, model, algo, t, state.particles[i]; ref_state, kwargs...
         ),
         1:(algo.N),
     )
 
-    return ParticleDistribution(particles, state.log_weights)
+    return state
 end
 
 function predict_particle(
