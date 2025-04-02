@@ -34,12 +34,11 @@ function reset_weights!(state::ParticleDistribution{T,WT}) where {T,WT<:Real}
 end
 
 function update_ref!(
-    proposed::ParticleDistribution,
-    ref_state::Union{Nothing,AbstractVector},
-    step::Integer=0,
+    state::ParticleDistribution, ref_state::Union{Nothing,AbstractVector}, step::Integer=0
 )
     if !isnothing(ref_state)
-        proposed.particles[1] = ref_state[step]
+        state.particles[1] = ref_state[step]
+        state.ancestors[1] = 1
     end
     return proposed
 end
@@ -115,14 +114,15 @@ function expand(p::BatchRaoBlackwellisedParticles, M::Integer)
 end
 
 function update_ref!(
-    proposed::RaoBlackwellisedParticleDistribution,
+    state::RaoBlackwellisedParticleDistribution,
     ref_state::Union{Nothing,AbstractVector},
     step::Integer=0,
 )
     if !isnothing(ref_state)
         CUDA.@allowscalar begin
-            proposed.particles.xs[:, 1] = ref_state[step].xs
-            proposed.particles.zs[1] = ref_state[step].zs
+            state.particles.xs[:, 1] = ref_state[step].xs
+            state.particles.zs[1] = ref_state[step].zs
+            state.ancestors[1] = 1
         end
     end
     return proposed

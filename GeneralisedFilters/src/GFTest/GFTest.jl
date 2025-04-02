@@ -4,6 +4,7 @@ using CUDA
 using LinearAlgebra
 using NNlib
 using Random
+using StaticArrays
 
 using GeneralisedFilters
 using SSMProblems
