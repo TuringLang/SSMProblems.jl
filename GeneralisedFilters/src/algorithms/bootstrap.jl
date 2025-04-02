@@ -50,29 +50,17 @@ function initialise(
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 ) where {T}
-    particles = map(
-        i -> initialise_particle(rng, i, model, filter; ref_state, kwargs...), 1:(filter.N)
-    )
+    particles = map(1:(filter.N)) do i
+        x = if !isnothing(ref_state) && i == 1
+            ref_state[0]
+        else
+            SSMProblems.simulate(rng, model.dyn; kwargs...)
+        end
+        x
+    end
     log_ws = zeros(T, filter.N)
 
     return ParticleDistribution(particles, log_ws)
-end
-
-function initialise_particle(
-    rng::AbstractRNG,
-    idx::Integer,
-    model::StateSpaceModel{T},
-    filter::BootstrapFilter;
-    ref_state::Union{Nothing,AbstractVector}=nothing,
-    kwargs...,
-) where {T}
-    x = if !isnothing(ref_state) && idx == 1
-        ref_state[0]
-    else
-        SSMProblems.simulate(rng, model.dyn; kwargs...)
-    end
-
-    return x
 end
 
 function predict(

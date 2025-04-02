@@ -27,30 +27,19 @@ function initialise(
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 ) where {T}
-    particles = map(
-        i -> initialise_particle(rng, i, model, algo; ref_state, kwargs...), 1:(algo.N)
-    )
+    particles = map(1:(algo.N)) do i
+        x = if !isnothing(ref_state) && i == 1
+            ref_state[0]
+        else
+            SSMProblems.simulate(rng, model.outer_dyn; kwargs...)
+        end
+        z = initialise(rng, model.inner_model, algo.inner_algo; new_outer=x, kwargs...)
+
+        RaoBlackwellisedParticle(x, z)
+    end
     log_ws = zeros(T, algo.N)
 
     return ParticleDistribution(particles, log_ws)
-end
-
-function initialise_particle(
-    rng,
-    idx::Integer,
-    model::HierarchicalSSM,
-    algo::RBPF;
-    ref_state::Union{Nothing,AbstractVector}=nothing,
-    kwargs...,
-)
-    x = if !isnothing(ref_state) && idx == 1
-        ref_state[0]
-    else
-        SSMProblems.simulate(rng, model.outer_dyn; kwargs...)
-    end
-    z = initialise(rng, model.inner_model, algo.inner_algo; new_outer=x, kwargs...)
-
-    return RaoBlackwellisedParticle(x, z)
 end
 
 function predict(
@@ -62,43 +51,35 @@ function predict(
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    state.particles = map(
-        i -> predict_particle(
-            rng, i, model, algo, t, state.particles[i]; ref_state, kwargs...
-        ),
-        1:(algo.N),
-    )
+    # state.particles = map(
+    #     i -> predict_particle(
+    #         rng, i, model, algo, t, state.particles[i]; ref_state, kwargs...
+    #     ),
+    #     1:(algo.N),
+    # )
+
+    # return state
+    state.particles = map(1:(algo.N)) do i
+        new_x = if !isnothing(ref_state) && i == 1
+            ref_state[t]
+        else
+            SSMProblems.simulate(rng, model.outer_dyn, t, state.particles[i].x; kwargs...)
+        end
+        new_z = predict(
+            rng,
+            model.inner_model,
+            algo.inner_algo,
+            t,
+            state.particles[i].z;
+            prev_outer=state.particles[i].x,
+            new_outer=new_x,
+            kwargs...,
+        )
+
+        RaoBlackwellisedParticle(new_x, new_z)
+    end
 
     return state
-end
-
-function predict_particle(
-    rng::AbstractRNG,
-    idx::Integer,
-    model::HierarchicalSSM,
-    algo::RBPF,
-    t::Integer,
-    particle::RaoBlackwellisedParticle;
-    ref_state::Union{Nothing,AbstractVector}=nothing,
-    kwargs...,
-)
-    new_x = if !isnothing(ref_state) && idx == 1
-        ref_state[t]
-    else
-        SSMProblems.simulate(rng, model.outer_dyn, t, particle.x; kwargs...)
-    end
-    new_z = predict(
-        rng,
-        model.inner_model,
-        algo.inner_algo,
-        t,
-        particle.z;
-        prev_outer=particle.x,
-        new_outer=new_x,
-        kwargs...,
-    )
-
-    return RaoBlackwellisedParticle(new_x, new_z)
 end
 
 function update(
