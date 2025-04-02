@@ -408,7 +408,7 @@ end
     )
 
     N_steps = N_burnin + N_sample
-    bf = BF(N_particles)
+    bf = BF(N_particles; threshold=0.6)
     ref_traj = nothing
     trajectory_samples = Vector{OffsetVector{Vector{T},Vector{Vector{T}}}}(undef, N_sample)
     lls = Vector{T}(undef, N_sample)
@@ -476,7 +476,7 @@ end
     }
 
     N_steps = N_burnin + N_sample
-    rbpf = RBPF(KalmanFilter(), N_particles)
+    rbpf = RBPF(KalmanFilter(), N_particles; threshold=0.6)
     ref_traj = nothing
     trajectory_samples = Vector{OffsetVector{particle_type,Vector{particle_type}}}(
         undef, N_sample
