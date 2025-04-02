@@ -11,7 +11,7 @@ function resample(
     rng::AbstractRNG,
     resampler::AbstractResampler,
     states;
-    ref_state::Union{Nothing,AbstractVector},
+    ref_state::Union{Nothing,AbstractVector}=nothing,
 )
     weights = StatsBase.weights(states)
     idxs = sample_ancestors(rng, resampler, weights)
@@ -54,7 +54,7 @@ function resample(
     rng::AbstractRNG,
     cond_resampler::ESSResampler,
     state;
-    ref_state::Union{Nothing,AbstractVector},
+    ref_state::Union{Nothing,AbstractVector}=nothing,
 )
     n = length(state)
     # TODO: computing weights twice. Should create a wrapper to avoid this
