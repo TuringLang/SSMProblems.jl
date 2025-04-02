@@ -51,27 +51,19 @@ function predict(
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    # state.particles = map(
-    #     i -> predict_particle(
-    #         rng, i, model, algo, t, state.particles[i]; ref_state, kwargs...
-    #     ),
-    #     1:(algo.N),
-    # )
-
-    # return state
-    state.particles = map(1:(algo.N)) do i
+    state.particles = map(enumerate(state.particles)) do (i, particle)
         new_x = if !isnothing(ref_state) && i == 1
             ref_state[t]
         else
-            SSMProblems.simulate(rng, model.outer_dyn, t, state.particles[i].x; kwargs...)
+            SSMProblems.simulate(rng, model.outer_dyn, t, particle.x; kwargs...)
         end
         new_z = predict(
             rng,
             model.inner_model,
             algo.inner_algo,
             t,
-            state.particles[i].z;
-            prev_outer=state.particles[i].x,
+            particle.z;
+            prev_outer=particle.x,
             new_outer=new_x,
             kwargs...,
         )
