@@ -51,12 +51,11 @@ function initialise(
     kwargs...,
 ) where {T}
     particles = map(1:(filter.N)) do i
-        x = if !isnothing(ref_state) && i == 1
+        if !isnothing(ref_state) && i == 1
             ref_state[0]
         else
             SSMProblems.simulate(rng, model.dyn; kwargs...)
         end
-        x
     end
     log_ws = zeros(T, filter.N)
 
@@ -72,13 +71,12 @@ function predict(
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    for n in 1:(filter.N)
-        new_x = if !isnothing(ref_state) && n == 1
+    state.particles = map(enumerate(state.particles)) do (i, particle)
+        if !isnothing(ref_state) && i == 1
             ref_state[step]
         else
-            SSMProblems.simulate(rng, model.dyn, step, state.particles[n]; kwargs...)
+            SSMProblems.simulate(rng, model.dyn, step, particle; kwargs...)
         end
-        state.particles[n] = new_x
     end
 
     return state
