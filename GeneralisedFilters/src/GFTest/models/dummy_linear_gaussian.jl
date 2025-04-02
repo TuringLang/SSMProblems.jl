@@ -85,6 +85,8 @@ function create_dummy_linear_gaussian_model(
     Dy::Integer,
     T::Type{<:Real}=Float64;
     static_arrays::Bool=false,
+    process_noise_scale=T(0.1),
+    obs_noise_scale=T(1.0),
 )
     # Generate model matrices/vectors
     μ0 = rand(rng, T, D_outer + D_inner)
@@ -97,13 +99,15 @@ function create_dummy_linear_gaussian_model(
         rand(rng, T, D_inner, D_outer) rand(rng, T, D_inner, D_inner)
     ]
     b = rand(rng, T, D_outer + D_inner)
+    Q11 = rand_cov(rng, T, D_outer; scale=process_noise_scale)
+    Q22 = rand_cov(rng, T, D_inner; scale=process_noise_scale)
     Q = [
-        rand_cov(rng, T, D_outer) zeros(T, D_outer, D_inner)
-        zeros(T, D_inner, D_outer) rand_cov(rng, T, D_inner)
+        Q11 zeros(T, D_outer, D_inner)
+        zeros(T, D_inner, D_outer) Q22
     ]
     H = [zeros(T, Dy, D_outer) rand(rng, T, Dy, D_inner)]
     c = rand(rng, T, Dy)
-    R = rand_cov(rng, T, Dy)
+    R = rand_cov(rng, T, Dy; scale=obs_noise_scale)
 
     # Create full model
     full_model = create_homogeneous_linear_gaussian_model(μ0, Σ0s, A, b, Q, H, c, R)

@@ -457,8 +457,11 @@ end
     t_smooth = 2
     T = Float64
     N_particles = 100
-    N_burnin = 100
-    N_sample = 500
+    N_burnin = 1000
+    N_sample = 10000
+
+    # 1.7503891256772903 ≈ 1.8093979270656988
+    # 1.7503891256772903 ≈ 1.8087606106635246
 
     rng = StableRNG(SEED)
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
@@ -489,6 +492,7 @@ end
         )
         weights = softmax(bf_state.log_weights)
         sampled_idx = sample(rng, 1:length(weights), Weights(weights))
+
         global ref_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
         if i > N_burnin
             trajectory_samples[i - N_burnin] = deepcopy(ref_traj)
@@ -502,8 +506,8 @@ end
     z_trajectories = getproperty.(getindex.(trajectory_samples, t_smooth), :z)
 
     # Compare to ground truth
-    @test state.μ[1] ≈ only(mean(x_trajectories)) rtol = 1e-1
-    @test state.μ[2] ≈ only(mean(getproperty.(z_trajectories, :μ))) rtol = 1e-1
+    @test state.μ[1] ≈ only(mean(x_trajectories)) rtol = 1e-2
+    @test state.μ[2] ≈ only(mean(getproperty.(z_trajectories, :μ))) rtol = 1e-2
 end
 
 @testitem "GPU Conditional Kalman-RBPF execution test" tags = [:gpu] begin
