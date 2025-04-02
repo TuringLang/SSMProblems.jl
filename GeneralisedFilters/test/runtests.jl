@@ -457,11 +457,8 @@ end
     t_smooth = 2
     T = Float64
     N_particles = 100
-    N_burnin = 1000
-    N_sample = 10000
-
-    # 1.7503891256772903 ≈ 1.8093979270656988
-    # 1.7503891256772903 ≈ 1.8087606106635246
+    N_burnin = 200
+    N_sample = 2000
 
     rng = StableRNG(SEED)
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
@@ -503,11 +500,34 @@ end
 
     # Extract inner and outer trajectories
     x_trajectories = getproperty.(getindex.(trajectory_samples, t_smooth), :x)
-    z_trajectories = getproperty.(getindex.(trajectory_samples, t_smooth), :z)
+
+    # Manually perform smoothing until we have a cleaner interface
+    A = hier_model.inner_model.dyn.A
+    b = hier_model.inner_model.dyn.b
+    C = hier_model.inner_model.dyn.C
+    Q = hier_model.inner_model.dyn.Q
+    z_smoothed_means = Vector{T}(undef, N_sample)
+    for i in 1:N_sample
+        μ = trajectory_samples[i][K].z.μ
+        Σ = trajectory_samples[i][K].z.Σ
+
+        for t in (K - 1):-1:t_smooth
+            μ_filt = trajectory_samples[i][t].z.μ
+            Σ_filt = trajectory_samples[i][t].z.Σ
+            μ_pred = A * μ_filt + b + C * trajectory_samples[i][t].x
+            Σ_pred = A * Σ_filt * A' + Q
+
+            G = Σ_filt * A' * inv(Σ_pred)
+            μ = μ_filt .+ G * (μ .- μ_pred)
+            Σ = Σ_filt .+ G * (Σ .- Σ_pred) * G'
+        end
+
+        z_smoothed_means[i] = only(μ)
+    end
 
     # Compare to ground truth
     @test state.μ[1] ≈ only(mean(x_trajectories)) rtol = 1e-2
-    @test state.μ[2] ≈ only(mean(getproperty.(z_trajectories, :μ))) rtol = 1e-2
+    @test state.μ[2] ≈ mean(z_smoothed_means) rtol = 1e-3
 end
 
 @testitem "GPU Conditional Kalman-RBPF execution test" tags = [:gpu] begin
