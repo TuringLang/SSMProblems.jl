@@ -382,7 +382,7 @@ end
     using StableRNGs
     using PDMats
     using LinearAlgebra
-    using LogExpFunctions: softmax
+    using LogExpFunctions: softmax, logsumexp
     using Random: randexp
     using StatsBase: sample, Weights
 
@@ -391,11 +391,11 @@ end
     SEED = 1234
     Dx = 1
     Dy = 1
-    K = 5
+    K = 10
     t_smooth = 2
     T = Float64
     N_particles = 10
-    N_burnin = 100
+    N_burnin = 1000
     N_sample = 10000
 
     rng = StableRNG(SEED)
@@ -403,18 +403,19 @@ end
     _, _, ys = sample(rng, model, K)
 
     # Kalman smoother
-    state, _ = GeneralisedFilters.smooth(
+    state, ks_ll = GeneralisedFilters.smooth(
         rng, model, KalmanSmoother(), ys; t_smooth=t_smooth
     )
 
     N_steps = N_burnin + N_sample
-    bf = BF(N_particles; threshold=1.0)  # always resample until issue #24 is fixed
+    bf = BF(N_particles)
     ref_traj = nothing
     trajectory_samples = Vector{OffsetVector{Vector{T},Vector{Vector{T}}}}(undef, N_sample)
+    lls = Vector{T}(undef, N_sample)
 
     for i in 1:N_steps
         cb = GeneralisedFilters.DenseAncestorCallback(Vector{T})
-        bf_state, _ = GeneralisedFilters.filter(
+        bf_state, ll = GeneralisedFilters.filter(
             rng, model, bf, ys; ref_state=ref_traj, callback=cb
         )
         weights = softmax(bf_state.log_weights)
@@ -422,11 +423,17 @@ end
         global ref_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
         if i > N_burnin
             trajectory_samples[i - N_burnin] = ref_traj
+            lls[i - N_burnin] = ll
         end
     end
 
+    # The CSMC estimate of the evidence Z = p(y_{1:T}) is biased but 1 / ̂Z is actually an
+    # unbiased estimate of 1 / Z. See Elements of Sequential Monte Carlo (Section 5.2)
+    log_recip_likelihood_estimate = logsumexp(-lls) - log(length(lls))
+
     csmc_mean = sum(getindex.(trajectory_samples, t_smooth)) / N_sample
-    @test csmc_mean ≈ state.μ rtol = 1e-1
+    @test csmc_mean ≈ state.μ rtol = 1e-2
+    @test log_recip_likelihood_estimate ≈ -ks_ll rtol = 1e-2
 end
 
 @testitem "RBCSMC test" begin
