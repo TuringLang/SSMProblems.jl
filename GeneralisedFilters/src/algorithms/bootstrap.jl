@@ -60,10 +60,16 @@ function initialise(
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 ) where {T}
-    particles = map(x -> SSMProblems.simulate(rng, model.dyn; kwargs...), 1:(filter.N))
-    weights = zeros(T, filter.N)
+    particles = map(1:(filter.N)) do i
+        if !isnothing(ref_state) && i == 1
+            ref_state[0]
+        else
+            SSMProblems.simulate(rng, model.dyn; kwargs...)
+        end
+    end
+    log_ws = zeros(T, filter.N)
 
-    return update_ref!(ParticleDistribution(particles, weights), ref_state)
+    return ParticleDistribution(particles, log_ws)
 end
 
 function predict(
@@ -76,11 +82,15 @@ function predict(
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    state.particles = map(
-        x -> SSMProblems.simulate(rng, model.dyn, step, x; kwargs...), collect(state)
-    )
+    state.particles = map(enumerate(state.particles)) do (i, particle)
+        if !isnothing(ref_state) && i == 1
+            ref_state[step]
+        else
+            SSMProblems.simulate(rng, model.dyn, step, particle; kwargs...)
+        end
+    end
 
-    return update_ref!(state, ref_state, step)
+    return state
 end
 
 function update(

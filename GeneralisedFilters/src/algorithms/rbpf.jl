@@ -27,61 +27,53 @@ function initialise(
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 ) where {T}
-    particles = map(
-        x -> RaoBlackwellisedParticle(
-            SSMProblems.simulate(rng, model.outer_dyn; kwargs...),
-            initialise(model.inner_model, algo.inner_algo; new_outer=x, kwargs...),
-        ),
-        1:(algo.N),
-    )
+    particles = map(1:(algo.N)) do i
+        x = if !isnothing(ref_state) && i == 1
+            ref_state[0]
+        else
+            SSMProblems.simulate(rng, model.outer_dyn; kwargs...)
+        end
+        z = initialise(rng, model.inner_model, algo.inner_algo; new_outer=x, kwargs...)
+
+        RaoBlackwellisedParticle(x, z)
+    end
     log_ws = zeros(T, algo.N)
 
-    return update_ref!(ParticleDistribution(particles, log_ws), ref_state)
+    return ParticleDistribution(particles, log_ws)
 end
 
 function predict(
     rng::AbstractRNG,
     model::HierarchicalSSM,
     algo::RBPF,
-    step::Integer,
+    t::Integer,
     state,
     observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    new_particles = map(
-        x -> marginal_predict(rng, model, algo, step, x, observation; kwargs...),
-        collect(state),
-    )
-    # Don't need to deep copy weights as filtered will be overwritten in the update step
-    proposed = ParticleDistribution(new_particles, state.log_weights)
+    state.particles = map(enumerate(state.particles)) do (i, particle)
+        new_x = if !isnothing(ref_state) && i == 1
+            ref_state[t]
+        else
+            SSMProblems.simulate(rng, model.outer_dyn, t, particle.x; kwargs...)
+        end
+        new_z = predict(
+            rng,
+            model.inner_model,
+            algo.inner_algo,
+            t,
+            particle.z,
+            observation;
+            prev_outer=particle.x,
+            new_outer=new_x,
+            kwargs...,
+        )
 
-    return update_ref!(proposed, ref_state, step)
-end
+        RaoBlackwellisedParticle(new_x, new_z)
+    end
 
-function marginal_predict(
-    rng::AbstractRNG,
-    model::HierarchicalSSM,
-    algo::RBPF,
-    step::Integer,
-    state,
-    observation;
-    kwargs...,
-)
-    proposed_x = SSMProblems.simulate(rng, model.outer_dyn, step, state.x; kwargs...)
-    proposed_z = predict(
-        rng,
-        model.inner_model,
-        algo.inner_algo,
-        step,
-        state.z,
-        observation;
-        prev_outer=state.x,
-        new_outer=proposed_x,
-        kwargs...,
-    )
-
-    return RaoBlackwellisedParticle(proposed_x, proposed_z)
+    return state
 end
 
 function update(
@@ -101,22 +93,6 @@ function update(
     end
 
     return state, logsumexp(state.log_weights)
-end
-
-function marginal_update(
-    model::HierarchicalSSM, algo::RBPF, step::Integer, state, observation; kwargs...
-)
-    filtered_z, log_increment = update(
-        model.inner_model,
-        algo.inner_algo,
-        step,
-        state.z,
-        observation;
-        new_outer=state.x,
-        kwargs...,
-    )
-
-    return RaoBlackwellisedParticle(state.x, filtered_z), log_increment
 end
 
 #################################
@@ -163,19 +139,21 @@ function initialise(
     N = algo.N
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
-    xs = SSMProblems.batch_simulate(rng, outer_dyn, N; kwargs...)
-    zs = initialise(inner_model, algo.inner_algo; new_outer=xs, kwargs...)
+    xs = SSMProblems.batch_simulate(rng, outer_dyn, N; ref_state, kwargs...)
+
+    # Set reference trajectory
+    if ref_state !== nothing
+        xs[:, 1] = ref_state[0]
+    end
+
+    zs = initialise(rng, inner_model, algo.inner_algo; new_outer=xs, kwargs...)
     log_ws = CUDA.zeros(T, N)
 
-    return update_ref!(
-        RaoBlackwellisedParticleDistribution(
-            BatchRaoBlackwellisedParticles(xs, zs), log_ws
-        ),
-        ref_state,
+    return RaoBlackwellisedParticleDistribution(
+        BatchRaoBlackwellisedParticles(xs, zs), log_ws
     )
 end
 
-# TODO: use RNG
 function predict(
     rng::AbstractRNG,
     model::HierarchicalSSM,
@@ -188,8 +166,17 @@ function predict(
 )
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
-    new_xs = SSMProblems.batch_simulate(rng, outer_dyn, step, state.particles.xs; kwargs...)
+    new_xs = SSMProblems.batch_simulate(
+        rng, outer_dyn, step, state.particles.xs; ref_state, kwargs...
+    )
+
+    # Set reference trajectory
+    if ref_state !== nothing
+        new_xs[:, [1]] = ref_state[step]
+    end
+
     new_zs = predict(
+        rng,
         inner_model,
         algo.inner_algo,
         step,
@@ -201,7 +188,7 @@ function predict(
     )
     state.particles = BatchRaoBlackwellisedParticles(new_xs, new_zs)
 
-    return update_ref!(state, ref_state, step)
+    return state
 end
 
 function update(
