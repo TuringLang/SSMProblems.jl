@@ -43,7 +43,7 @@ jobs:
           if "${{ matrix.pkg.name }}" == "GeneralisedFilters"
               println("Condition matched: will develop SSMProblems");
               println("Current directory: $(pwd())");
-              println("SSMProblems directory exists: $(isdir(\"./SSMProblems\"))");
+              println("SSMProblems directory exists: ", isdir("./SSMProblems"));
               Pkg.develop(PackageSpec(path="./SSMProblems"));
               println("After developing SSMProblems, status:");
               Pkg.status();
