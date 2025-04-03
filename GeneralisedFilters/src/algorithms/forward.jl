@@ -14,7 +14,8 @@ function predict(
     model::DiscreteStateSpaceModel{T},
     filter::ForwardAlgorithm,
     step::Integer,
-    states::AbstractVector;
+    states::AbstractVector,
+    observation;
     kwargs...,
 ) where {T}
     P = calc_P(model.dyn, step; kwargs...)
