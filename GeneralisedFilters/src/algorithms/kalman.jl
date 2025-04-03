@@ -13,7 +13,7 @@ function initialise(
     rng::AbstractRNG, model::LinearGaussianStateSpaceModel, filter::KalmanFilter; kwargs...
 )
     μ0, Σ0 = calc_initial(model.dyn; kwargs...)
-    return Gaussian(μ0, Matrix(Σ0))
+    return Gaussian(μ0, Σ0)
 end
 
 function predict(

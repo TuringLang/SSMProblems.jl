@@ -14,20 +14,12 @@ function step(
     kwargs...,
 )
     # capture the marginalized log-likelihood
-    state = resample(rng, alg.resampler, state)
+    state = resample(rng, alg.resampler, state; ref_state)
     marginalization_term = logsumexp(state.log_weights)
     isnothing(callback) ||
         callback(model, alg, iter, state, observation, PostResample; kwargs...)
 
-    state = predict(
-        rng, model, alg, iter, state, observation; ref_state=ref_state, kwargs...
-    )
-
-    # TODO: this is quite inelegant and should be refactored. It also might introduce bugs
-    # with callbacks that track the ancestry (and use PostResample)
-    if !isnothing(ref_state)
-        CUDA.@allowscalar state.ancestors[1] = 1
-    end
+    state = predict(rng, model, alg, iter, state, observation; ref_state, kwargs...)
     isnothing(callback) ||
         callback(model, alg, iter, state, observation, PostPredict; kwargs...)
 
