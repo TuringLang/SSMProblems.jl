@@ -54,7 +54,7 @@ function initialise(model, alg; kwargs...)
     return initialise(default_rng(), model, alg; kwargs...)
 end
 
-function predict(model, alg, step, filtered; kwargs...)
+function predict(model, alg, step, filtered, observation; kwargs...)
     return predict(default_rng(), model, alg, step, filtered; kwargs...)
 end
 
@@ -108,7 +108,7 @@ function step(
     callback::Union{AbstractCallback,Nothing}=nothing,
     kwargs...,
 )
-    state = predict(rng, model, alg, iter, state; kwargs...)
+    state = predict(rng, model, alg, iter, state, observation; kwargs...)
     isnothing(callback) ||
         callback(model, alg, iter, state, observation, PostPredict; kwargs...)
 
@@ -132,7 +132,7 @@ include("models/discrete.jl")
 include("models/hierarchical.jl")
 
 # Filtering/smoothing algorithms
-include("algorithms/bootstrap.jl")
+include("algorithms/particles.jl")
 include("algorithms/kalman.jl")
 include("algorithms/forward.jl")
 include("algorithms/rbpf.jl")
