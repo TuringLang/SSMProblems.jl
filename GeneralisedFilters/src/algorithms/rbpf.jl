@@ -46,7 +46,7 @@ function predict(
     rng::AbstractRNG,
     model::HierarchicalSSM,
     algo::RBPF,
-    t::Integer,
+    iter::Integer,
     state,
     observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
@@ -54,15 +54,15 @@ function predict(
 )
     state.particles = map(enumerate(state.particles)) do (i, particle)
         new_x = if !isnothing(ref_state) && i == 1
-            ref_state[t]
+            ref_state[iter]
         else
-            SSMProblems.simulate(rng, model.outer_dyn, t, particle.x; kwargs...)
+            SSMProblems.simulate(rng, model.outer_dyn, iter, particle.x; kwargs...)
         end
         new_z = predict(
             rng,
             model.inner_model,
             algo.inner_algo,
-            t,
+            iter,
             particle.z,
             observation;
             prev_outer=particle.x,
@@ -77,13 +77,13 @@ function predict(
 end
 
 function update(
-    model::HierarchicalSSM{T}, algo::RBPF, step::Integer, state, observation; kwargs...
+    model::HierarchicalSSM{T}, algo::RBPF, iter::Integer, state, observation; kwargs...
 ) where {T}
     for i in 1:(algo.N)
         state.particles[i].z, log_increments = update(
             model.inner_model,
             algo.inner_algo,
-            step,
+            iter,
             state.particles[i].z,
             observation;
             new_outer=state.particles[i].x,
@@ -158,7 +158,7 @@ function predict(
     rng::AbstractRNG,
     model::HierarchicalSSM,
     algo::BatchRBPF,
-    step::Integer,
+    iter::Integer,
     state::RaoBlackwellisedParticleDistribution,
     observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
@@ -167,19 +167,19 @@ function predict(
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
     new_xs = SSMProblems.batch_simulate(
-        rng, outer_dyn, step, state.particles.xs; ref_state, kwargs...
+        rng, outer_dyn, iter, state.particles.xs; ref_state, kwargs...
     )
 
     # Set reference trajectory
     if ref_state !== nothing
-        new_xs[:, [1]] = ref_state[step]
+        new_xs[:, [1]] = ref_state[iter]
     end
 
     new_zs = predict(
         rng,
         inner_model,
         algo.inner_algo,
-        step,
+        iter,
         state.particles.zs,
         observation;
         prev_outer=state.particles.xs,
@@ -194,7 +194,7 @@ end
 function update(
     model::HierarchicalSSM,
     algo::BatchRBPF,
-    step::Integer,
+    iter::Integer,
     state::RaoBlackwellisedParticleDistribution,
     obs;
     kwargs...,
@@ -202,7 +202,7 @@ function update(
     new_zs, inner_lls = update(
         model.inner_model,
         algo.inner_algo,
-        step,
+        iter,
         state.particles.zs,
         obs;
         new_outer=state.particles.xs,

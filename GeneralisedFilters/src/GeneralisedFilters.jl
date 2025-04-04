@@ -133,11 +133,9 @@ include("models/hierarchical.jl")
 
 # Filtering/smoothing algorithms
 include("algorithms/particles.jl")
-# include("algorithms/bootstrap.jl")
 include("algorithms/kalman.jl")
 include("algorithms/forward.jl")
 include("algorithms/rbpf.jl")
-# include("algorithms/guided.jl")
 
 # Unit-testing helper module
 include("GFTest/GFTest.jl")

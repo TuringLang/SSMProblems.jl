@@ -39,17 +39,18 @@ end
 ## NEWTONS METHOD ##########################################################################
 
 using DifferentiationInterface
-import ForwardDiff, Zygote, Mooncake, Enzyme
+using ForwardDiff: ForwardDiff
+using Zygote: Zygote
+using Mooncake: Mooncake
+using Enzyme: Enzyme
 using Optimisers
 
 # Zygote will fail due to the model constructor, not because of the filtering algorithm
-backends = [
-    AutoZygote(), AutoForwardDiff(), AutoMooncake(;config=nothing), AutoEnzyme()
-]
+backends = [AutoZygote(), AutoForwardDiff(), AutoMooncake(; config=nothing), AutoEnzyme()]
 
 function gradient_descent(backend, θ_init, num_epochs=1000)
     θ = deepcopy(θ_init)
-    state = Optimisers.setup(Optimisers.Descent(1/length(ys)), θ)
+    state = Optimisers.setup(Optimisers.Descent(1 / length(ys)), θ)
     grad_prep = prepare_gradient(logℓ, backend, θ, Constant(ys))
 
     for epoch in 1:num_epochs
@@ -59,7 +60,7 @@ function gradient_descent(backend, θ_init, num_epochs=1000)
         Optimisers.update!(state, θ, ∇logℓ)
 
         (epoch % 5) == 1 && println("$(epoch-1):\t -$(val)")
-        if (∇logℓ'*∇logℓ) < 1e-12
+        if (∇logℓ' * ∇logℓ) < 1e-12
             break
         end
     end
@@ -69,7 +70,7 @@ end
 
 θ_init = rand(rng, 1)
 for backend in backends
-    println("\n",backend)
+    println("\n", backend)
     local θ_mle
     try
         θ_mle = gradient_descent(backend, θ_init)

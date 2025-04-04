@@ -1,46 +1,49 @@
 export BootstrapFilter, BF
 export ParticleFilter, PF, AbstractProposal
 
-# import SSMProblems: distribution, simulate, logdensity
+import SSMProblems: distribution, simulate, logdensity
 
 abstract type AbstractProposal end
 
-function distribution(
+function SSMProblems.distribution(
     model::AbstractStateSpaceModel,
     prop::AbstractProposal,
-    step::Integer,
+    iter::Integer,
     state,
     observation;
     kwargs...,
 )
     return throw(
-        MethodError(distribution, (model, prop, step, state, observation, kwargs...))
+        MethodError(distribution, (model, prop, iter, state, observation, kwargs...))
     )
 end
 
-function simulate(
+function SSMProblems.simulate(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
     prop::AbstractProposal,
-    step::Integer,
+    iter::Integer,
     state,
     observation;
     kwargs...,
 )
-    return rand(rng, distribution(model, prop, step, state, observation; kwargs...))
+    return rand(
+        rng, SSMProblems.distribution(model, prop, iter, state, observation; kwargs...)
+    )
 end
 
-function logdensity(
+function SSMProblems.logdensity(
     model::AbstractStateSpaceModel,
     prop::AbstractProposal,
-    step::Integer,
+    iter::Integer,
     prev_state,
     new_state,
     observation;
     kwargs...,
 )
     return logpdf(
-        distribution(model, prop, step, prev_state, observation; kwargs...), new_state
+        SSMProblems.distribution(model, prop, iter, prev_state, observation; kwargs...),
+        new_state,
     )
 end
 
@@ -64,7 +67,7 @@ end
 function step(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
-    alg::AbstractParticleFilter,
+    algo::AbstractParticleFilter,
     iter::Integer,
     state,
     observation;
@@ -73,18 +76,19 @@ function step(
     kwargs...,
 )
     # capture the marginalized log-likelihood
-    state = resample(rng, alg.resampler, state; ref_state)
+    state = resample(rng, algo.resampler, state; ref_state)
     marginalization_term = logsumexp(state.log_weights)
     isnothing(callback) ||
-        callback(model, alg, iter, state, observation, PostResample; kwargs...)
+        callback(model, algo, iter, state, observation, PostResample; kwargs...)
 
-    state = predict(rng, model, alg, iter, state, observation; ref_state, kwargs...)
+    state = predict(rng, model, algo, iter, state, observation; ref_state, kwargs...)
     isnothing(callback) ||
-        callback(model, alg, iter, state, observation, PostPredict; kwargs...)
+        callback(model, algo, iter, state, observation, PostPredict; kwargs...)
 
-    state, ll_increment = update(model, alg, iter, state, observation; kwargs...)
+    # TODO: ll_increment is no longer consistent with the Kalman filter
+    state, ll_increment = update(model, algo, iter, state, observation; kwargs...)
     isnothing(callback) ||
-        callback(model, alg, iter, state, observation, PostUpdate; kwargs...)
+        callback(model, algo, iter, state, observation, PostUpdate; kwargs...)
 
     return state, (ll_increment - marginalization_term)
 end
@@ -112,7 +116,7 @@ function predict(
     rng::AbstractRNG,
     model::StateSpaceModel,
     filter::ParticleFilter,
-    step::Integer,
+    iter::Integer,
     state::ParticleDistribution,
     observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
@@ -120,20 +124,20 @@ function predict(
 )
     proposed_particles = map(enumerate(state.particles)) do (i, particle)
         if !isnothing(ref_state) && i == 1
-            ref_state[step]
+            ref_state[iter]
         else
-            simulate(rng, model, filter.proposal, step, particle, observation; kwargs...)
+            simulate(rng, model, filter.proposal, iter, particle, observation; kwargs...)
         end
     end
 
     state.log_weights +=
         map(zip(proposed_particles, state.particles)) do (new_state, prev_state)
             log_f = SSMProblems.logdensity(
-                model.dyn, step, prev_state, new_state; kwargs...
+                model.dyn, iter, prev_state, new_state; kwargs...
             )
 
-            log_q = logdensity(
-                model, filter.proposal, step, prev_state, new_state, observation; kwargs...
+            log_q = SSMProblems.logdensity(
+                model, filter.proposal, iter, prev_state, new_state, observation; kwargs...
             )
 
             (log_f - log_q)
@@ -147,14 +151,14 @@ end
 function update(
     model::StateSpaceModel{T},
     filter::ParticleFilter,
-    step::Integer,
+    iter::Integer,
     state::ParticleDistribution,
     observation;
     kwargs...,
 ) where {T}
     log_increments = map(
-        x -> SSMProblems.logdensity(model.obs, step, x, observation; kwargs...),
-        collect(state),
+        x -> SSMProblems.logdensity(model.obs, iter, x, observation; kwargs...),
+        state.particles,
     )
 
     state.log_weights += log_increments
@@ -162,7 +166,6 @@ function update(
     return state, logsumexp(state.log_weights)
 end
 
-# Default to latent dynamics
 struct LatentProposal <: AbstractProposal end
 
 const BootstrapFilter{RS} = ParticleFilter{RS,LatentProposal}
@@ -173,24 +176,24 @@ function simulate(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
     prop::LatentProposal,
-    step::Integer,
+    iter::Integer,
     state,
     observation;
     kwargs...,
 )
-    return SSMProblems.simulate(rng, model.dyn, step, state; kwargs...)
+    return SSMProblems.simulate(rng, model.dyn, iter, state; kwargs...)
 end
 
 function logdensity(
     model::AbstractStateSpaceModel,
     prop::LatentProposal,
-    step::Integer,
+    iter::Integer,
     prev_state,
     new_state,
     observation;
     kwargs...,
 )
-    return SSMProblems.logdensity(model.dyn, step, prev_state, new_state; kwargs...)
+    return SSMProblems.logdensity(model.dyn, iter, prev_state, new_state; kwargs...)
 end
 
 # overwrite predict for the bootstrap filter to remove redundant computation
@@ -198,28 +201,28 @@ function predict(
     rng::AbstractRNG,
     model::StateSpaceModel,
     filter::BootstrapFilter,
-    step::Integer,
+    iter::Integer,
     state::ParticleDistribution,
-    observation;
+    observation=nothing;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
     state.particles = map(enumerate(state.particles)) do (i, particle)
         if !isnothing(ref_state) && i == 1
-            ref_state[step]
+            ref_state[iter]
         else
-            SSMProblems.simulate(rng, model.dyn, step, particle; kwargs...)
+            SSMProblems.simulate(rng, model.dyn, iter, particle; kwargs...)
         end
     end
 
     return state
 end
 
-# Application of bootstrap filter to hierarchical models
+# Application of particle filter to hierarchical models
 function filter(
     rng::AbstractRNG,
     model::HierarchicalSSM,
-    alg::BootstrapFilter,
+    algo::ParticleFilter,
     observations::AbstractVector;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
@@ -228,5 +231,5 @@ function filter(
         HierarchicalDynamics(model.outer_dyn, model.inner_model.dyn),
         HierarchicalObservations(model.inner_model.obs),
     )
-    return filter(rng, ssm, alg, observations; ref_state=ref_state, kwargs...)
+    return filter(rng, ssm, algo, observations; ref_state=ref_state, kwargs...)
 end

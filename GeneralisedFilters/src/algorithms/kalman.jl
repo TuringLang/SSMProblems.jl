@@ -1,7 +1,7 @@
 export KalmanFilter, filter, BatchKalmanFilter
 using GaussianDistributions
 using CUDA: i32
-import LinearAlgebra: Symmetric
+import LinearAlgebra: hermitianpart
 
 export KalmanFilter, KF, KalmanSmoother, KS
 
@@ -20,39 +20,39 @@ function predict(
     rng::AbstractRNG,
     model::LinearGaussianStateSpaceModel,
     algo::KalmanFilter,
-    step::Integer,
-    filtered::Gaussian,
+    iter::Integer,
+    state::Gaussian,
     observation=nothing;
     kwargs...,
 )
-    μ, Σ = GaussianDistributions.pair(filtered)
-    A, b, Q = calc_params(model.dyn, step; kwargs...)
+    μ, Σ = GaussianDistributions.pair(state)
+    A, b, Q = calc_params(model.dyn, iter; kwargs...)
     return Gaussian(A * μ + b, A * Σ * A' + Q)
 end
 
 function update(
     model::LinearGaussianStateSpaceModel,
     algo::KalmanFilter,
-    step::Integer,
-    proposed::Gaussian,
-    obs::AbstractVector;
+    iter::Integer,
+    state::Gaussian,
+    observation::AbstractVector;
     kwargs...,
 )
-    μ, Σ = GaussianDistributions.pair(proposed)
-    H, c, R = calc_params(model.obs, step; kwargs...)
+    μ, Σ = GaussianDistributions.pair(state)
+    H, c, R = calc_params(model.obs, iter; kwargs...)
 
     # Update state
     m = H * μ + c
-    y = obs - m
-    S = Symmetric(H * Σ * H' + R)
+    y = observation - m
+    S = hermitianpart(H * Σ * H' + R)
     K = Σ * H' / S
 
-    filtered = Gaussian(μ + K * y, Σ - K * H * Σ)
+    state = Gaussian(μ + K * y, Σ - K * H * Σ)
 
     # Compute log-likelihood
-    ll = logpdf(MvNormal(m, S), obs)
+    ll = logpdf(MvNormal(m, S), observation)
 
-    return filtered, ll
+    return state, ll
 end
 
 struct BatchKalmanFilter <: AbstractBatchFilter
@@ -73,13 +73,13 @@ function predict(
     rng::AbstractRNG,
     model::LinearGaussianStateSpaceModel{T},
     algo::BatchKalmanFilter,
-    step::Integer,
+    iter::Integer,
     state::BatchGaussianDistribution,
     observation;
     kwargs...,
 ) where {T}
     μs, Σs = state.μs, state.Σs
-    As, bs, Qs = batch_calc_params(model.dyn, step, algo.batch_size; kwargs...)
+    As, bs, Qs = batch_calc_params(model.dyn, iter, algo.batch_size; kwargs...)
     μ̂s = NNlib.batched_vec(As, μs) .+ bs
     Σ̂s = NNlib.batched_mul(NNlib.batched_mul(As, Σs), NNlib.batched_transpose(As)) .+ Qs
     return BatchGaussianDistribution(μ̂s, Σ̂s)
@@ -88,17 +88,17 @@ end
 function update(
     model::LinearGaussianStateSpaceModel{T},
     algo::BatchKalmanFilter,
-    step::Integer,
+    iter::Integer,
     state::BatchGaussianDistribution,
-    obs;
+    observation;
     kwargs...,
 ) where {T}
     μs, Σs = state.μs, state.Σs
-    Hs, cs, Rs = batch_calc_params(model.obs, step, algo.batch_size; kwargs...)
-    D = size(obs, 1)
+    Hs, cs, Rs = batch_calc_params(model.obs, iter, algo.batch_size; kwargs...)
+    D = size(observation, 1)
 
     m = NNlib.batched_vec(Hs, μs) .+ cs
-    y_res = cu(obs) .- m
+    y_res = cu(observation) .- m
     S = NNlib.batched_mul(Hs, NNlib.batched_mul(Σs, NNlib.batched_transpose(Hs))) .+ Rs
 
     ΣH_T = NNlib.batched_mul(Σs, NNlib.batched_transpose(Hs))
@@ -151,7 +151,7 @@ function (callback::StateCallback)(
     algo::KalmanFilter,
     iter::Integer,
     state,
-    obs,
+    observation,
     ::PostPredictCallback;
     kwargs...,
 )
@@ -164,7 +164,7 @@ function (callback::StateCallback)(
     algo::KalmanFilter,
     iter::Integer,
     state,
-    obs,
+    observation,
     ::PostUpdateCallback;
     kwargs...,
 )
