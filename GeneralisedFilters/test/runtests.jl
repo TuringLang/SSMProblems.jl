@@ -120,9 +120,7 @@ end
     )
         A, b, Q = GeneralisedFilters.calc_params(model.dyn, iter; kwargs...)
         pred = Gaussian(A * state + b, Q)
-        prop, _ = GeneralisedFilters.update(
-            model, KF(), iter, pred, observation; kwargs...
-        )
+        prop, _ = GeneralisedFilters.update(model, KF(), iter, pred, observation; kwargs...)
         return MvNormal(prop.μ, hermitianpart(prop.Σ))
     end
 
@@ -133,7 +131,6 @@ end
     algo = PF(2^10, LinearGaussianProposal(); threshold=0.6)
     kf_states, kf_ll = GeneralisedFilters.filter(rng, model, KalmanFilter(), ys)
     pf_states, pf_ll = GeneralisedFilters.filter(rng, model, algo, ys)
-    
     xs = pf_states.particles
     ws = softmax(pf_states.log_weights)
 
