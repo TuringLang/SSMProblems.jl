@@ -64,7 +64,7 @@ function (kernel::DeepGaussianProposal)(x)
     return kernel.μ_net(x), kernel.Σ_net(x)
 end
 
-function GeneralisedFilters.distribution(
+function SSMProblems.distribution(
     model::AbstractStateSpaceModel,
     kernel::DeepGaussianProposal,
     step::Integer,
