@@ -46,23 +46,25 @@ function predict(
     rng::AbstractRNG,
     model::HierarchicalSSM,
     algo::RBPF,
-    t::Integer,
-    state;
+    iter::Integer,
+    state,
+    observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
     state.particles = map(enumerate(state.particles)) do (i, particle)
         new_x = if !isnothing(ref_state) && i == 1
-            ref_state[t]
+            ref_state[iter]
         else
-            SSMProblems.simulate(rng, model.outer_dyn, t, particle.x; kwargs...)
+            SSMProblems.simulate(rng, model.outer_dyn, iter, particle.x; kwargs...)
         end
         new_z = predict(
             rng,
             model.inner_model,
             algo.inner_algo,
-            t,
-            particle.z;
+            iter,
+            particle.z,
+            observation;
             prev_outer=particle.x,
             new_outer=new_x,
             kwargs...,
@@ -75,26 +77,22 @@ function predict(
 end
 
 function update(
-    model::HierarchicalSSM{T}, algo::RBPF, t::Integer, state, obs; kwargs...
+    model::HierarchicalSSM{T}, algo::RBPF, iter::Integer, state, observation; kwargs...
 ) where {T}
-    old_ll = logsumexp(state.log_weights)
-
     for i in 1:(algo.N)
         state.particles[i].z, log_increments = update(
             model.inner_model,
             algo.inner_algo,
-            t,
+            iter,
             state.particles[i].z,
-            obs;
+            observation;
             new_outer=state.particles[i].x,
             kwargs...,
         )
         state.log_weights[i] += log_increments
     end
 
-    ll_increment = logsumexp(state.log_weights) - old_ll
-
-    return state, ll_increment
+    return state, logsumexp(state.log_weights)
 end
 
 #################################
@@ -159,29 +157,31 @@ end
 function predict(
     rng::AbstractRNG,
     model::HierarchicalSSM,
-    filter::BatchRBPF,
-    step::Integer,
-    state::RaoBlackwellisedParticleDistribution;
+    algo::BatchRBPF,
+    iter::Integer,
+    state::RaoBlackwellisedParticleDistribution,
+    observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
     new_xs = SSMProblems.batch_simulate(
-        rng, outer_dyn, step, state.particles.xs; ref_state, kwargs...
+        rng, outer_dyn, iter, state.particles.xs; ref_state, kwargs...
     )
 
     # Set reference trajectory
     if ref_state !== nothing
-        new_xs[:, [1]] = ref_state[step]
+        new_xs[:, [1]] = ref_state[iter]
     end
 
     new_zs = predict(
         rng,
         inner_model,
-        filter.inner_algo,
-        step,
-        state.particles.zs;
+        algo.inner_algo,
+        iter,
+        state.particles.zs,
+        observation;
         prev_outer=state.particles.xs,
         new_outer=new_xs,
         kwargs...,
@@ -193,18 +193,16 @@ end
 
 function update(
     model::HierarchicalSSM,
-    filter::BatchRBPF,
-    step::Integer,
+    algo::BatchRBPF,
+    iter::Integer,
     state::RaoBlackwellisedParticleDistribution,
     obs;
     kwargs...,
 )
-    old_ll = logsumexp(state.log_weights)
-
     new_zs, inner_lls = update(
         model.inner_model,
-        filter.inner_algo,
-        step,
+        algo.inner_algo,
+        iter,
         state.particles.zs,
         obs;
         new_outer=state.particles.xs,
@@ -214,6 +212,5 @@ function update(
     state.log_weights += inner_lls
     state.particles.zs = new_zs
 
-    step_ll = logsumexp(state.log_weights) - old_ll
-    return state, step_ll
+    return state, logsumexp(state.log_weights)
 end

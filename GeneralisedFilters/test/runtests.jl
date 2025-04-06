@@ -80,52 +80,63 @@ end
 end
 
 @testitem "Bootstrap filter test" begin
-    using GeneralisedFilters
     using SSMProblems
     using StableRNGs
-    using PDMats
-    using LinearAlgebra
     using LogExpFunctions: softmax
-    using Random: randexp
 
-    T = Float64
     rng = StableRNG(1234)
-    σx², σy² = randexp(rng, T, 2)
+    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, 1, 1)
+    _, _, ys = sample(rng, model, 10)
 
-    # initial state distribution
-    μ0 = zeros(T, 2)
-    Σ0 = PDMat(T[1 0; 0 1])
-
-    # state transition equation
-    A = T[1 1; 0 1]
-    b = T[0; 0]
-    Q = PDiagMat([σx²; 0])
-
-    # observation equation
-    H = T[1 0]
-    c = T[0;]
-    R = [σy²;;]
-
-    # when working with PDMats, the Kalman filter doesn't play nicely without this
-    function Base.convert(::Type{PDMat{T,MT}}, mat::MT) where {MT<:AbstractMatrix,T<:Real}
-        return PDMat(Symmetric(mat))
-    end
-
-    model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
-    _, _, data = sample(rng, model, 10)
-
-    bf = BF(2^16; threshold=0.8)
-    bf_state, llbf = GeneralisedFilters.filter(rng, model, bf, data)
-    kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), data)
+    bf = BF(2^12; threshold=0.8)
+    bf_state, llbf = GeneralisedFilters.filter(rng, model, bf, ys)
+    kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
 
     xs = bf_state.particles
     ws = softmax(bf_state.log_weights)
 
-    # Compare filtered states
+    # Compare log-likelihood and states
     @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
+    @test llkf ≈ llbf atol = 1e-1
+end
 
-    # since this is log valued, we can up the tolerance
-    @test llkf ≈ llbf atol = 0.1
+@testitem "Guided filter test" begin
+    using SSMProblems
+    using LogExpFunctions: softmax
+    using StableRNGs
+    using Distributions
+    using GaussianDistributions
+    using LinearAlgebra
+
+    struct LinearGaussianProposal <: GeneralisedFilters.AbstractProposal end
+
+    function SSMProblems.distribution(
+        model::AbstractStateSpaceModel,
+        kernel::LinearGaussianProposal,
+        iter::Integer,
+        state,
+        observation;
+        kwargs...,
+    )
+        A, b, Q = GeneralisedFilters.calc_params(model.dyn, iter; kwargs...)
+        pred = Gaussian(A * state + b, Q)
+        prop, _ = GeneralisedFilters.update(model, KF(), iter, pred, observation; kwargs...)
+        return MvNormal(prop.μ, hermitianpart(prop.Σ))
+    end
+
+    rng = StableRNG(1234)
+    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, 1, 1)
+    _, _, ys = sample(rng, model, 10)
+
+    algo = PF(2^10, LinearGaussianProposal(); threshold=0.6)
+    kf_states, kf_ll = GeneralisedFilters.filter(rng, model, KalmanFilter(), ys)
+    pf_states, pf_ll = GeneralisedFilters.filter(rng, model, algo, ys)
+    xs = pf_states.particles
+    ws = softmax(pf_states.log_weights)
+
+    # Compare log-likelihood and states
+    @test first(kf_states.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
+    @test kf_ll ≈ pf_ll rtol = 1e-1
 end
 
 @testitem "Forward algorithm test" begin
