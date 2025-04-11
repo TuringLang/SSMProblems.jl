@@ -25,8 +25,10 @@ jobs:
         pkg:
           - name: GeneralisedFilters
             dir: './GeneralisedFilters'
+            additional_paths: "./SSMProblems"
           - name: SSMProblems
             dir: './SSMProblems'
+            additional_paths: ""
     
     steps:
       - uses: actions/checkout@v4
@@ -41,20 +43,14 @@ jobs:
           Pkg.Registry.update();
           Pkg.develop(PackageSpec(path="${{ matrix.pkg.dir }}"));
           if "${{ matrix.pkg.name }}" == "GeneralisedFilters"
-              println("Condition matched: will develop SSMProblems");
-              println("Current directory: $(pwd())");
-              println("SSMProblems directory exists: ", isdir("./SSMProblems"));
               Pkg.develop(PackageSpec(path="./SSMProblems"));
-              println("After developing SSMProblems, status:");
-              Pkg.status();
-          else
-              println("Condition not matched, skipping SSMProblems development");
           end;
           Pkg.instantiate();'
       - name: Build and deploy
         uses: TuringLang/actions/DocsDocumenter@main
         with:
           pkg_path: ${{ matrix.pkg.dir }}
+          additional_pkg_paths: ${{ matrix.pkg.additional_paths }}
           doc-path: ${{ matrix.pkg.dir }}/docs
           doc-make-path: ${{ matrix.pkg.dir }}/docs/make.jl
           doc-build-path: ${{ matrix.pkg.dir }}/docs/build
