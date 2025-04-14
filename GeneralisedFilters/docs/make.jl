@@ -13,7 +13,7 @@ mkpath(EXAMPLES_OUT)
 # Workaround for https://github.com/JuliaLang/Pkg.jl/issues/2219
 examples = filter!(isdir, readdir(joinpath(@__DIR__, "..", "examples"); join=true))
 above = joinpath(@__DIR__, "..")
-ssmproblems_path = joinpath(above, "..", "..", "..", "SSMProblems")
+ssmproblems_path = joinpath(above, "..", "SSMProblems")
 let script = "using Pkg; Pkg.activate(ARGS[1]); Pkg.develop(path=\"$(above)\"); Pkg.develop(path=\"$(ssmproblems_path)\"); Pkg.instantiate()"
     for example in examples
         if !success(`$(Base.julia_cmd()) -e $script $example`)
