@@ -20,6 +20,6 @@ design goals.
 
 ### Interface
 ```@autodocs
-Modules = [SSMProblems]
+Modules = [GeneralisedFilters]
 Order   = [:type, :function, :module]
 ```
