@@ -47,7 +47,9 @@ isempty(processes) || success(processes) || error("some examples were not run su
 using Documenter
 using GeneralisedFilters
 
-DocMeta.setdocmeta!(SSMProblems, :DocTestSetup, :(using SSMProblems); recursive=true)
+DocMeta.setdocmeta!(
+    GeneralisedFilters, :DocTestSetup, :(using GeneralisedFilters); recursive=true
+)
 
 makedocs(;
     sitename="GeneralisedFilters",
