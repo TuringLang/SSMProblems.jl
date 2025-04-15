@@ -1,0 +1,50 @@
+steps:
+  - label: ":julia: Test SSMProblems on Julia v{{matrix.version}}"
+    matrix:
+      setup:
+        version:
+          - "1"
+          - "1.9"
+    plugins:
+      - JuliaCI/julia#v1:
+          version: "{{matrix.version}}"
+    commands:
+      - cd SSMProblems
+      - julia --project -e '
+          import Pkg
+          println("+++ :julia: Running SSMProblems tests")
+          Pkg.instantiate()
+          Pkg.test(coverage=false)'
+    agents:
+      queue: "juliagpu"
+    timeout_in_minutes: 60
+    # Don't run Buildkite if the commit message includes the text [skip tests]
+    if: build.message !~ /\[skip tests\]/
+
+  - label: ":julia: :nvidia: Test GeneralisedFilters on Julia v{{matrix.version}}"
+    matrix:
+      setup:
+        version:
+          - "1"
+          - "1.9"
+    env:
+      GROUP: CUDA
+      JULIA_CUDA_USE_BINARYBUILDER: "false"
+    plugins:
+      - JuliaCI/julia#v1:
+          version: "{{matrix.version}}"
+    commands:
+      - cd GeneralisedFilters
+      - julia --project -e '
+          import Pkg
+          println("+++ :julia: Dev-ing SSMProblems")
+          Pkg.develop(path="../SSMProblems")
+          println("+++ :julia: Running GeneralisedFilters tests")
+          Pkg.instantiate()
+          Pkg.test(coverage=false)'
+    agents:
+      queue: "juliagpu"
+      cuda: "*"
+    timeout_in_minutes: 120
+    # Don't run Buildkite if the commit message includes the text [skip tests]
+    if: build.message !~ /\[skip tests\]/
