@@ -10,7 +10,8 @@ steps:
           version: "{{matrix.version}}"
     commands:
       - cd SSMProblems
-      - julia --project -e '
+      - |
+        julia --project -e '
           import Pkg
           println("+++ :julia: Running SSMProblems tests")
           Pkg.instantiate()
@@ -35,7 +36,8 @@ steps:
           version: "{{matrix.version}}"
     commands:
       - cd GeneralisedFilters
-      - julia --project -e '
+      - |
+        julia --project -e '
           import Pkg
           println("+++ :julia: Dev-ing SSMProblems")
           Pkg.develop(path="../SSMProblems")
