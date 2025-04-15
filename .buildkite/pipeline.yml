@@ -4,7 +4,6 @@ steps:
       setup:
         version:
           - "1"
-          - "1.9"
     plugins:
       - JuliaCI/julia#v1:
           version: "{{matrix.version}}"
@@ -27,7 +26,6 @@ steps:
       setup:
         version:
           - "1"
-          - "1.9"
     env:
       GROUP: CUDA
       JULIA_CUDA_USE_BINARYBUILDER: "false"
