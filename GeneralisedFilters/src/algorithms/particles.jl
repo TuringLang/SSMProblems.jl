@@ -1,5 +1,7 @@
 export BootstrapFilter, BF
 export ParticleFilter, PF, AbstractProposal
+export AuxiliaryParticleFilter, APF
+export logeta
 
 import SSMProblems: distribution, simulate, logdensity
 
@@ -47,6 +49,8 @@ function SSMProblems.logdensity(
     )
 end
 
+function logeta end
+
 abstract type AbstractParticleFilter <: AbstractFilter end
 
 struct ParticleFilter{RS,PT} <: AbstractParticleFilter
@@ -76,7 +80,12 @@ function step(
     kwargs...,
 )
     # capture the marginalized log-likelihood
+    # TODO: Add a presampling step for the auxiliary particle filter
+    println(typeof(algo))
+    update_weights!(state, model, algo, iter, observation; kwargs...)
     state = resample(rng, algo.resampler, state; ref_state)
+    reset_weights!(state, algo) # Reset weights if needed
+
     marginalization_term = logsumexp(state.log_weights)
     isnothing(callback) ||
         callback(model, algo, iter, state, observation, PostResample; kwargs...)
@@ -96,7 +105,7 @@ end
 function initialise(
     rng::AbstractRNG,
     model::StateSpaceModel{T},
-    filter::ParticleFilter;
+    filter::AbstractParticleFilter;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 ) where {T}
@@ -115,7 +124,7 @@ end
 function predict(
     rng::AbstractRNG,
     model::StateSpaceModel,
-    filter::ParticleFilter,
+    filter::AbstractParticleFilter,
     iter::Integer,
     state::ParticleDistribution,
     observation;
@@ -150,7 +159,7 @@ end
 
 function update(
     model::StateSpaceModel{T},
-    filter::ParticleFilter,
+    filter::AbstractParticleFilter,
     iter::Integer,
     state::ParticleDistribution,
     observation;
@@ -233,3 +242,47 @@ function filter(
     )
     return filter(rng, ssm, algo, observations; ref_state=ref_state, kwargs...)
 end
+
+### AuxiliaryParticleFilter
+mutable struct AuxiliaryParticleFilter{RS,P,WT} <: AbstractParticleFilter
+    const N::Int
+    const resampler::RS
+    proposal::P
+    aux::Array{WT}
+end
+
+const APF = AuxiliaryParticleFilter
+
+# TODO Need to think more about that
+function AuxiliaryParticleFilter(
+    N::Integer, proposal::PT; threshold::Real=1.0, resampler::AbstractResampler=Systematic()
+) where {PT<:AbstractProposal}
+    conditional_resampler = ESSResampler(threshold, resampler)
+    aux = zeros(Float64, N)
+    return AuxiliaryParticleFilter{ESSResampler,PT,Float64}(N, conditional_resampler, proposal, aux)
+end
+
+APF(N::Int; kwargs...) = AuxiliaryParticleFilter(N, LatentProposal(); kwargs...)
+
+update_weights!(state, model, algo, iter, observation; kwargs...) = state
+
+function update_weights!(
+    state::ParticleDistribution,
+    model::StateSpaceModel,
+    algo::AuxiliaryParticleFilter,
+    step::Int,
+    observation;
+    kwargs...,
+)
+    # TODO: Can we dispatch on model capabilities maybe ?
+    auxiliary_log_weights = map(enumerate(state.particles)) do (i, particle)
+        logeta(particle, model, step, observation; kwargs...)
+    end
+    algo.aux = auxiliary_log_weights
+    state.log_weights += auxiliary_log_weights
+end
+
+function reset_weights!(state::ParticleDistribution, algo::AuxiliaryParticleFilter)
+    state.log_weights = state.log_weights[state.ancestors] - algo.aux[state.ancestors]
+end
+reset_weights!(state::ParticleDistribution, algo::ParticleFilter) = state # Wonky, construction of ParticleDistribution
