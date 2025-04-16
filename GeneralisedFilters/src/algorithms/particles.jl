@@ -249,6 +249,7 @@ end
 
 const APF = AuxiliaryParticleFilter
 
+# TODO Need to think more about that
 function AuxiliaryParticleFilter(
     N::Integer, proposal::PT; threshold::Real=1.0, resampler::AbstractResampler=Systematic()
 ) where {PT<:AbstractProposal}
@@ -279,4 +280,5 @@ end
 function reset_weights!(state::ParticleDistribution, algo::AuxiliaryParticleFilter)
     state.log_weights = state.log_weights[state.ancestors] - algo.aux[state.ancestors]
 end
+reset_weights!(state::ParticleDistribution, algo::ParticleFilter) = state # Wonky, construction of ParticleDistribution
 reset_weights!(state::ParticleDistribution, algo::ParticleFilter) = state # Wonky, construction of ParticleDistribution
