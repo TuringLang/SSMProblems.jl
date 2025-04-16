@@ -1,7 +1,9 @@
 export BootstrapFilter, BF
 export ParticleFilter, PF, AbstractProposal
+export AuxiliaryParticleFilter, APF
 
 import SSMProblems: distribution, simulate, logdensity
+
 
 abstract type AbstractProposal end
 
@@ -76,7 +78,11 @@ function step(
     kwargs...,
 )
     # capture the marginalized log-likelihood
+    # TODO: Add a presampling step for the auxiliary particle filter
+    update_weights!(state, model, algo, iter, observation; kwargs...) 
     state = resample(rng, algo.resampler, state; ref_state)
+    reset_weights!(state, algo) # Reset weights if needed
+    
     marginalization_term = logsumexp(state.log_weights)
     isnothing(callback) ||
         callback(model, algo, iter, state, observation, PostResample; kwargs...)
@@ -233,3 +239,43 @@ function filter(
     )
     return filter(rng, ssm, algo, observations; ref_state=ref_state, kwargs...)
 end
+
+### AuxiliaryParticleFilter
+struct AuxiliaryParticleFilter{RS,P,WT} <: AbstractParticleFilter
+    N::Int
+    aux::Array{WT}
+    resampler::RS
+    proposal::P
+end
+
+const APF = AuxiliaryParticleFilter
+
+function AuxiliaryParticleFilter(
+    N::Integer, proposal::PT; threshold::Real=1.0, resampler::AbstractResampler=Systematic()
+) where {PT<:AbstractProposal}
+    conditional_resampler = ESSResampler(threshold, resampler)
+    return ParticleFilter{ESSResampler,PT}(N, conditional_resampler, proposal)
+end
+
+APF(N::Int; kwargs...) = AuxiliaryParticleFilter(N, LatentProposal(); kwargs...)
+
+update_weights!(state, model, algo, iter, observation; kwargs...) = state
+
+function update_weights!(
+    state::ParticleDistribution,
+    model::StateSpaceModel,
+    algo::AuxiliaryParticleFilter,
+    observation,
+    step::Int;
+    kwargs...
+)
+    # TODO: Can we dispatch on model capabilities maybe ?
+    auxiliary_log_weights = map(enumerate(state.particles)) do (i, particle)
+        logeta(particle, model, step, observation; kwargs...)
+    end
+    algo.aux = auxiliary_log_weights
+    state.log_weights += auxiliary_log_weights
+end
+
+reset_weights!(state::ParticleDistribution, algo::AuxiliaryParticleFilter) = state.log_weights = state.log_weights[state.ancestors] - algo.aux[state.ancestors]
+reset_weights!(state::ParticleDistribution, algo::ParticleFilter) = state # Wonky, construction of ParticleDistribution

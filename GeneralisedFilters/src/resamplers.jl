@@ -245,9 +245,9 @@ function _offspring_to_ancestors_kernel!(ancestors, offspring, N)
     stride = blockDim().x * gridDim().x
 
     @inbounds for i in index:stride:N
-        start = i == 1 ? 0 : offspring[i - 1]
+        start = i == 1 ? 0 : offspring[i-1]
         finish = offspring[i]
-        for j in (start + 1):finish
+        for j in (start+1):finish
             ancestors[j] = i
         end
     end
