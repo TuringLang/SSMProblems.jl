@@ -4,7 +4,6 @@ export AuxiliaryParticleFilter, APF
 
 import SSMProblems: distribution, simulate, logdensity
 
-
 abstract type AbstractProposal end
 
 function SSMProblems.distribution(
@@ -79,10 +78,10 @@ function step(
 )
     # capture the marginalized log-likelihood
     # TODO: Add a presampling step for the auxiliary particle filter
-    update_weights!(state, model, algo, iter, observation; kwargs...) 
+    update_weights!(state, model, algo, iter, observation; kwargs...)
     state = resample(rng, algo.resampler, state; ref_state)
     reset_weights!(state, algo) # Reset weights if needed
-    
+
     marginalization_term = logsumexp(state.log_weights)
     isnothing(callback) ||
         callback(model, algo, iter, state, observation, PostResample; kwargs...)
@@ -267,7 +266,7 @@ function update_weights!(
     algo::AuxiliaryParticleFilter,
     observation,
     step::Int;
-    kwargs...
+    kwargs...,
 )
     # TODO: Can we dispatch on model capabilities maybe ?
     auxiliary_log_weights = map(enumerate(state.particles)) do (i, particle)
@@ -277,5 +276,7 @@ function update_weights!(
     state.log_weights += auxiliary_log_weights
 end
 
-reset_weights!(state::ParticleDistribution, algo::AuxiliaryParticleFilter) = state.log_weights = state.log_weights[state.ancestors] - algo.aux[state.ancestors]
+function reset_weights!(state::ParticleDistribution, algo::AuxiliaryParticleFilter)
+    state.log_weights = state.log_weights[state.ancestors] - algo.aux[state.ancestors]
+end
 reset_weights!(state::ParticleDistribution, algo::ParticleFilter) = state # Wonky, construction of ParticleDistribution
