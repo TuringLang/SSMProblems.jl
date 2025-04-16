@@ -281,4 +281,3 @@ function reset_weights!(state::ParticleDistribution, algo::AuxiliaryParticleFilt
     state.log_weights = state.log_weights[state.ancestors] - algo.aux[state.ancestors]
 end
 reset_weights!(state::ParticleDistribution, algo::ParticleFilter) = state # Wonky, construction of ParticleDistribution
-reset_weights!(state::ParticleDistribution, algo::ParticleFilter) = state # Wonky, construction of ParticleDistribution
