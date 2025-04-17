@@ -53,20 +53,31 @@ function logeta end
 
 abstract type AbstractParticleFilter <: AbstractFilter end
 
-struct ParticleFilter{RS,PT} <: AbstractParticleFilter
-    N::Int
-    resampler::RS
-    proposal::PT
+mutable struct ParticleFilter{RS,PT,WT} <: AbstractParticleFilter
+    const N::Int
+    const resampler::RS
+    const proposal::PT
+    aux::Union{Nothing,WT}
 end
 
 const PF = ParticleFilter
 
 function ParticleFilter(
-    N::Integer, proposal::PT; threshold::Real=1.0, resampler::AbstractResampler=Systematic()
+    N::Integer,
+    proposal::PT;
+    threshold::Real=1.0,
+    resampler::AbstractResampler=Systematic(),
+    WT::Type=Float64,
 ) where {PT<:AbstractProposal}
     conditional_resampler = ESSResampler(threshold, resampler)
-    return ParticleFilter{ESSResampler,PT}(N, conditional_resampler, proposal)
+    aux = zeros(WT, N)
+    return ParticleFilter{ESSResampler,PT,typeof(aux)}(
+        N, conditional_resampler, proposal, aux
+    )
 end
+
+update_weights!(state, model, algo, iter, observation; kwargs...) = state
+reset_weights!(state::ParticleDistribution, algo::ParticleFilter) = state # Wonky ... by construction of ParticleDistribution
 
 function step(
     rng::AbstractRNG,
@@ -81,10 +92,9 @@ function step(
 )
     # capture the marginalized log-likelihood
     # TODO: Add a presampling step for the auxiliary particle filter
-    println(typeof(algo))
-    update_weights!(state, model, algo, iter, observation; kwargs...)
+    state = update_weights!(state, model, algo, iter, observation; kwargs...)
     state = resample(rng, algo.resampler, state; ref_state)
-    reset_weights!(state, algo) # Reset weights if needed
+    state = reset_weights!(state, algo) # Reset weights if needed
 
     marginalization_term = logsumexp(state.log_weights)
     isnothing(callback) ||
@@ -243,28 +253,11 @@ function filter(
     return filter(rng, ssm, algo, observations; ref_state=ref_state, kwargs...)
 end
 
-### AuxiliaryParticleFilter
-mutable struct AuxiliaryParticleFilter{RS,P,WT} <: AbstractParticleFilter
-    const N::Int
-    const resampler::RS
-    proposal::P
-    aux::Array{WT}
-end
-
+### Auxiliary particle filter
+const AuxiliaryParticleFilter{RS,P,WT} = ParticleFilter{RS,P,Array{WT}}
 const APF = AuxiliaryParticleFilter
 
-# TODO Need to think more about that
-function AuxiliaryParticleFilter(
-    N::Integer, proposal::PT; threshold::Real=1.0, resampler::AbstractResampler=Systematic()
-) where {PT<:AbstractProposal}
-    conditional_resampler = ESSResampler(threshold, resampler)
-    aux = zeros(Float64, N)
-    return AuxiliaryParticleFilter{ESSResampler,PT,Float64}(N, conditional_resampler, proposal, aux)
-end
-
-APF(N::Int; kwargs...) = AuxiliaryParticleFilter(N, LatentProposal(); kwargs...)
-
-update_weights!(state, model, algo, iter, observation; kwargs...) = state
+APF(N::Int; kwargs...) = ParticleFilter(N, LatentProposal(); kwargs...)
 
 function update_weights!(
     state::ParticleDistribution,
@@ -280,9 +273,10 @@ function update_weights!(
     end
     algo.aux = auxiliary_log_weights
     state.log_weights += auxiliary_log_weights
+    return state
 end
 
 function reset_weights!(state::ParticleDistribution, algo::AuxiliaryParticleFilter)
-    state.log_weights = state.log_weights[state.ancestors] - algo.aux[state.ancestors]
+    state.log_weights = state.log_weights - algo.aux[state.ancestors]
+    return state
 end
-reset_weights!(state::ParticleDistribution, algo::ParticleFilter) = state # Wonky, construction of ParticleDistribution
