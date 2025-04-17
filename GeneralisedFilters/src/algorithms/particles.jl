@@ -57,7 +57,7 @@ mutable struct ParticleFilter{RS,PT,WT} <: AbstractParticleFilter
     const N::Int
     const resampler::RS
     const proposal::PT
-    aux::Union{Nothing,WT}
+    aux::WT
 end
 
 const PF = ParticleFilter
@@ -67,10 +67,9 @@ function ParticleFilter(
     proposal::PT;
     threshold::Real=1.0,
     resampler::AbstractResampler=Systematic(),
-    WT::Type=Float64,
-) where {PT<:AbstractProposal}
+    aux::Union{Nothing,Vector{WT}}=nothing,
+) where {PT<:AbstractProposal,WT}
     conditional_resampler = ESSResampler(threshold, resampler)
-    aux = zeros(WT, N)
     return ParticleFilter{ESSResampler,PT,typeof(aux)}(
         N, conditional_resampler, proposal, aux
     )
@@ -254,10 +253,12 @@ function filter(
 end
 
 ### Auxiliary particle filter
-const AuxiliaryParticleFilter{RS,P,WT} = ParticleFilter{RS,P,Array{WT}}
+const AuxiliaryParticleFilter{RS,P,WT} = ParticleFilter{RS,P,Vector{WT}}
 const APF = AuxiliaryParticleFilter
 
-APF(N::Int; kwargs...) = ParticleFilter(N, LatentProposal(); kwargs...)
+function APF(N::Int; kwargs...)
+    ParticleFilter(N, LatentProposal(); aux=zeros(Float64, N), kwargs...)
+end
 
 function update_weights!(
     state::ParticleDistribution,
