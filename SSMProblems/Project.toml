@@ -1,6 +1,9 @@
 name = "SSMProblems"
 uuid = "26aad666-b158-4e64-9d35-0e672562fa48"
-authors = ["FredericWantiez <frederic.wantiez@gmail.com>", "THargreaves <tim.hargreaves@icloud.com>"]
+authors = [
+    "FredericWantiez <frederic.wantiez@gmail.com>",
+    "THargreaves <tim.hargreaves@icloud.com>"
+]
 version = "0.5.2"
 
 [deps]
