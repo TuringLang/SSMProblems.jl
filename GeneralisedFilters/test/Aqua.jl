@@ -3,6 +3,8 @@ module AquaTests
 using Aqua: Aqua
 using GeneralisedFilters
 
-Aqua.test_all(GeneralisedFilters)
+@testset "Aqua.jl QA" begin
+    Aqua.test_all(SSMProblems)
+end
 
 end
