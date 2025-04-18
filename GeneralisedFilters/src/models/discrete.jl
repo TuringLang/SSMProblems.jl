@@ -1,4 +1,4 @@
-export DiscreteDynamics
+export DiscreteLatentDynamics
 export DiscreteStateSpaceModel
 export HomogeneousDiscreteLatentDynamics
 

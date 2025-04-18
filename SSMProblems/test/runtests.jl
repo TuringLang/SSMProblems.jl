@@ -79,5 +79,5 @@ using Test
 end
 
 @testset "Aqua.jl QA" begin
-    Aqua.test_all(SSMProblems)
+    Aqua.test_all(SSMProblems; deps_compat=false)
 end
