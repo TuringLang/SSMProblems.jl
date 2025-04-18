@@ -1,9 +1,6 @@
 name = "SSMProblems"
 uuid = "26aad666-b158-4e64-9d35-0e672562fa48"
-authors = [
-    "FredericWantiez <frederic.wantiez@gmail.com>",
-    "THargreaves <tim.hargreaves@icloud.com>"
-]
+authors = ["FredericWantiez <frederic.wantiez@gmail.com>", "THargreaves <tim.hargreaves@icloud.com>"]
 version = "0.5.2"
 
 [deps]
@@ -14,11 +11,15 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
 AbstractMCMC = "5"
+Aqua = "0.8"
 Distributions = "0.25"
+Random = "1"
+Test = "1"
 julia = "1.6"
 
 [extras]
+Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test"]
+test = ["Aqua", "Test"]

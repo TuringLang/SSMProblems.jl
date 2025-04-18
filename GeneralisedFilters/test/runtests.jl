@@ -3,6 +3,7 @@ using TestItemRunner
 
 @run_package_tests
 
+include("Aqua.jl")
 include("batch_kalman_test.jl")
 include("resamplers.jl")
 

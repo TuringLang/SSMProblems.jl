@@ -1,5 +1,6 @@
 using Distributions
 using Random
+using Aqua
 using SSMProblems
 using Test
 
@@ -75,4 +76,8 @@ using Test
         @test sample(rng, model, T; σ_init=σ_init, dts=dts) isa Tuple
         @test sample(model, T; σ_init=σ_init, dts=dts) isa Tuple
     end
+end
+
+@testset "Aqua.jl QA" begin
+    Aqua.test_all(SSMProblems)
 end
