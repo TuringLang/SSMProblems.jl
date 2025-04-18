@@ -1,10 +1,6 @@
-module AquaTests
-
-using Aqua: Aqua
+using Aqua
 using GeneralisedFilters
 
-@testitem "Aqua.jl QA" begin
+@testset "Aqua.jl QA" begin
     Aqua.test_all(GeneralisedFilters)
-end
-
 end
