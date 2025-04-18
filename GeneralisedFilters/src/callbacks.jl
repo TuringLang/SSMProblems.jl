@@ -97,7 +97,7 @@ end
 
 ## SPARSE PARTICLE STORAGE #################################################################
 
-Base.append!(s::Stack, a::AbstractVector) = map(x -> push!(s, x), a)
+append_to_stack!(s::Stack, a::AbstractVector) = map(x -> push!(s, x), a)
 
 """
     ParticleTree
@@ -119,7 +119,7 @@ mutable struct ParticleTree{T}
     function ParticleTree(states::Vector{T}, M::Integer) where {T}
         nodes = Vector{T}(undef, M)
         initial_free_indices = Stack{Int64}()
-        append!(initial_free_indices, M:-1:(length(states) + 1))
+        append_to_stack!(initial_free_indices, M:-1:(length(states) + 1))
         @inbounds nodes[1:length(states)] = states
         return new{T}(
             nodes, zeros(Int64, M), 1:length(states), zeros(Int64, M), initial_free_indices
@@ -178,7 +178,7 @@ function expand!(tree::ParticleTree)
     # new allocations must be zero valued, this is not a perfect solution
     tree.parents = [tree.parents; zero(tree.parents)]
     tree.offspring = [tree.offspring; zero(tree.offspring)]
-    append!(tree.free_indices, (2 * M):-1:(M + 1))
+    append_to_stack!(tree.free_indices, (2 * M):-1:(M + 1))
     return tree
 end
 
