@@ -25,8 +25,10 @@ jobs:
         pkg:
           - name: GeneralisedFilters
             dir: './GeneralisedFilters'
+            additional_paths: "./SSMProblems"
           - name: SSMProblems
             dir: './SSMProblems'
+            additional_paths: ""
     
     steps:
       - uses: actions/checkout@v4
@@ -35,7 +37,8 @@ jobs:
           version: '1'
       - uses: julia-actions/cache@v1
       - name: Install dependencies
-        run: julia --project=${{ matrix.pkg.dir }}/docs/ --color=yes -e '
+        run: |
+          julia --project=${{ matrix.pkg.dir }}/docs/ --color=yes -e '
           using Pkg;
           Pkg.Registry.update();
           Pkg.develop(PackageSpec(path="${{ matrix.pkg.dir }}"));
@@ -47,6 +50,7 @@ jobs:
         uses: TuringLang/actions/DocsDocumenter@main
         with:
           pkg_path: ${{ matrix.pkg.dir }}
+          additional_pkg_paths: ${{ matrix.pkg.additional_paths }}
           doc-path: ${{ matrix.pkg.dir }}/docs
           doc-make-path: ${{ matrix.pkg.dir }}/docs/make.jl
           doc-build-path: ${{ matrix.pkg.dir }}/docs/build

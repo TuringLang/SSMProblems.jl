@@ -1,18 +1,5 @@
 """Containers used for storing representations of the filtering distribution."""
 
-## INTERMEDIATES ###########################################################################
-
-mutable struct ParticleIntermediate{DT,AT}
-    proposed::DT
-    filtered::DT
-    ancestors::AT
-end
-
-mutable struct Intermediate{DT}
-    proposed::DT
-    filtered::DT
-end
-
 ## PARTICLES ###############################################################################
 
 """
@@ -23,7 +10,12 @@ object, with the states (or particles) distributed accoring to their log-weights
 """
 mutable struct ParticleDistribution{PT,WT<:Real}
     particles::Vector{PT}
+    ancestors::Vector{Int}
     log_weights::Vector{WT}
+end
+function ParticleDistribution(particles::Vector{PT}, log_weights::Vector{WT}) where {PT,WT}
+    N = length(particles)
+    return ParticleDistribution(particles, Vector{Int}(1:N), log_weights)
 end
 
 StatsBase.weights(state::ParticleDistribution) = softmax(state.log_weights)
@@ -42,12 +34,11 @@ function reset_weights!(state::ParticleDistribution{T,WT}) where {T,WT<:Real}
 end
 
 function update_ref!(
-    proposed::ParticleDistribution,
-    ref_state::Union{Nothing,AbstractVector},
-    step::Integer=0,
+    state::ParticleDistribution, ref_state::Union{Nothing,AbstractVector}, step::Integer=0
 )
     if !isnothing(ref_state)
-        proposed.particles[1] = ref_state[step]
+        state.particles[1] = ref_state[step]
+        state.ancestors[1] = 1
     end
     return proposed
 end
@@ -76,7 +67,14 @@ mutable struct RaoBlackwellisedParticleDistribution{
     T,M<:CUDA.AbstractMemory,PT<:BatchRaoBlackwellisedParticles
 }
     particles::PT
-    log_weights::CuArray{T,1,M}
+    ancestors::CuVector{Int,M}
+    log_weights::CuVector{T,M}
+end
+function RaoBlackwellisedParticleDistribution(
+    particles::PT, log_weights::CuVector{T,M}
+) where {T,M,PT}
+    N = length(log_weights)
+    return RaoBlackwellisedParticleDistribution(particles, CuVector{Int}(1:N), log_weights)
 end
 
 function StatsBase.weights(state::RaoBlackwellisedParticleDistribution)
@@ -116,14 +114,15 @@ function expand(p::BatchRaoBlackwellisedParticles, M::Integer)
 end
 
 function update_ref!(
-    proposed::RaoBlackwellisedParticleDistribution,
+    state::RaoBlackwellisedParticleDistribution,
     ref_state::Union{Nothing,AbstractVector},
     step::Integer=0,
 )
     if !isnothing(ref_state)
         CUDA.@allowscalar begin
-            proposed.particles.xs[:, 1] = ref_state[step].xs
-            proposed.particles.zs[1] = ref_state[step].zs
+            state.particles.xs[:, 1] = ref_state[step].xs
+            state.particles.zs[1] = ref_state[step].zs
+            state.ancestors[1] = 1
         end
     end
     return proposed

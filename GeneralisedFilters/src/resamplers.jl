@@ -7,16 +7,23 @@ export Multinomial, Systematic, Stratified, Metropolis, Rejection
 
 abstract type AbstractResampler end
 
-function resample(rng::AbstractRNG, resampler::AbstractResampler, states)
+function resample(
+    rng::AbstractRNG,
+    resampler::AbstractResampler,
+    states;
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+)
     weights = StatsBase.weights(states)
     idxs = sample_ancestors(rng, resampler, weights)
-    # TODO: generalise these
-    new_state = construct_new_state(states, idxs)
-    return new_state, idxs
+    # Set reference trajectory indices
+    if !isnothing(ref_state)
+        CUDA.@allowscalar idxs[1] = 1
+    end
+    return construct_new_state(states, idxs)
 end
 
 function construct_new_state(states::ParticleDistribution{PT,WT}, idxs) where {PT,WT}
-    return ParticleDistribution(states.particles[idxs], zeros(WT, length(states)))
+    return ParticleDistribution(states.particles[idxs], idxs, zeros(WT, length(states)))
 end
 
 function construct_new_state(
@@ -26,6 +33,7 @@ function construct_new_state(
         BatchRaoBlackwellisedParticles(
             states.particles.xs[:, idxs], states.particles.zs[idxs]
         ),
+        idxs,
         CUDA.zeros(T, length(states)),
     )
 end
@@ -42,17 +50,22 @@ struct ESSResampler <: AbstractConditionalResampler
     end
 end
 
-function resample(rng::AbstractRNG, cond_resampler::ESSResampler, state)
+function resample(
+    rng::AbstractRNG,
+    cond_resampler::ESSResampler,
+    state;
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+)
     n = length(state)
     # TODO: computing weights twice. Should create a wrapper to avoid this
     weights = StatsBase.weights(state)
     ess = inv(sum(abs2, weights))
-    @debug "ESS: $ess"
 
     if cond_resampler.threshold * n ≥ ess
-        return resample(rng, cond_resampler.resampler, state)
+        return resample(rng, cond_resampler.resampler, state; ref_state)
     else
-        return deepcopy(state), collect(1:n)
+        state.ancestors = collect(1:n)
+        return state
     end
 end
 

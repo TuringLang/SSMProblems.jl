@@ -20,11 +20,6 @@ function RBPF(
     return RBPF(inner_algo, N, ESSResampler(threshold, resampler))
 end
 
-function instantiate(::HierarchicalSSM{T}, filter::RBPF, initial; kwargs...) where {T}
-    N = filter.N
-    return ParticleIntermediate(initial, initial, Vector{Int}(undef, N))
-end
-
 function initialise(
     rng::AbstractRNG,
     model::HierarchicalSSM{T},
@@ -32,93 +27,72 @@ function initialise(
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 ) where {T}
-    particles = map(
-        x -> RaoBlackwellisedParticle(
-            simulate(rng, model.outer_dyn; kwargs...),
-            initialise(model.inner_model, algo.inner_algo; new_outer=x, kwargs...),
-        ),
-        1:(algo.N),
-    )
+    particles = map(1:(algo.N)) do i
+        x = if !isnothing(ref_state) && i == 1
+            ref_state[0]
+        else
+            SSMProblems.simulate(rng, model.outer_dyn; kwargs...)
+        end
+        z = initialise(rng, model.inner_model, algo.inner_algo; new_outer=x, kwargs...)
+
+        RaoBlackwellisedParticle(x, z)
+    end
     log_ws = zeros(T, algo.N)
 
-    return update_ref!(ParticleDistribution(particles, log_ws), ref_state)
+    return ParticleDistribution(particles, log_ws)
 end
 
 function predict(
     rng::AbstractRNG,
     model::HierarchicalSSM,
     algo::RBPF,
-    t::Integer,
-    filtered;
+    iter::Integer,
+    state,
+    observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    new_particles = map(
-        x -> marginal_predict(rng, model, algo, t, x; kwargs...), filtered.particles
-    )
-    # Don't need to deep copy weights as filtered will be overwritten in the update step
-    proposed = ParticleDistribution(new_particles, filtered.log_weights)
+    state.particles = map(enumerate(state.particles)) do (i, particle)
+        new_x = if !isnothing(ref_state) && i == 1
+            ref_state[iter]
+        else
+            SSMProblems.simulate(rng, model.outer_dyn, iter, particle.x; kwargs...)
+        end
+        new_z = predict(
+            rng,
+            model.inner_model,
+            algo.inner_algo,
+            iter,
+            particle.z,
+            observation;
+            prev_outer=particle.x,
+            new_outer=new_x,
+            kwargs...,
+        )
 
-    return update_ref!(proposed, ref_state, t)
-end
+        RaoBlackwellisedParticle(new_x, new_z)
+    end
 
-function marginal_predict(
-    rng::AbstractRNG, model::HierarchicalSSM, algo::RBPF, t::Integer, state; kwargs...
-)
-    proposed_x = simulate(rng, model.outer_dyn, t, state.x; kwargs...)
-    proposed_z = predict(
-        rng,
-        model.inner_model,
-        algo.inner_algo,
-        t,
-        state.z;
-        prev_outer=state.x,
-        new_outer=proposed_x,
-        kwargs...,
-    )
-
-    return RaoBlackwellisedParticle(proposed_x, proposed_z)
+    return state
 end
 
 function update(
-    model::HierarchicalSSM{T}, algo::RBPF, t::Integer, proposed, obs; kwargs...
+    model::HierarchicalSSM{T}, algo::RBPF, iter::Integer, state, observation; kwargs...
 ) where {T}
-    log_increments = similar(proposed.log_weights)
-    new_particles = deepcopy(proposed.particles)
     for i in 1:(algo.N)
-        new_particles[i].z, log_increments[i] = update(
+        state.particles[i].z, log_increments = update(
             model.inner_model,
             algo.inner_algo,
-            t,
-            proposed.particles[i].z,
-            obs;
-            new_outer=proposed.particles[i].x,
+            iter,
+            state.particles[i].z,
+            observation;
+            new_outer=state.particles[i].x,
             kwargs...,
         )
+        state.log_weights[i] += log_increments
     end
 
-    ## TODO: make this also work...
-    # result = map(
-    #     x -> marginal_update(model, algo, t, x, obs; kwargs...),
-    #     collect(states.proposed)
-    # )
-
-    new_weights = proposed.log_weights + log_increments
-    filtered = ParticleDistribution(new_particles, new_weights)
-
-    ll_increment = logsumexp(new_weights) - logsumexp(proposed.log_weights)
-
-    return filtered, ll_increment
-end
-
-function marginal_update(
-    model::HierarchicalSSM, algo::RBPF, t::Integer, state, obs; kwargs...
-)
-    filtered_z, log_increment = update(
-        model.inner_model, algo.inner_algo, t, state.z, obs; new_outer=state.x, kwargs...
-    )
-
-    return RaoBlackwellisedParticle(state.x, filtered_z), log_increment
+    return state, logsumexp(state.log_weights)
 end
 
 #################################
@@ -155,11 +129,6 @@ function searchsorted!(ws_cdf, us, idxs)
     end
 end
 
-function instantiate(model::HierarchicalSSM, algo::BatchRBPF, initial; kwargs...)
-    N = algo.N
-    return ParticleIntermediate(initial, initial, CuArray{Int}(undef, N))
-end
-
 function initialise(
     rng::AbstractRNG,
     model::HierarchicalSSM{T},
@@ -170,75 +139,78 @@ function initialise(
     N = algo.N
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
-    xs = SSMProblems.batch_simulate(rng, outer_dyn, N; kwargs...)
-    zs = initialise(inner_model, algo.inner_algo; new_outer=xs, kwargs...)
+    xs = SSMProblems.batch_simulate(rng, outer_dyn, N; ref_state, kwargs...)
+
+    # Set reference trajectory
+    if ref_state !== nothing
+        xs[:, 1] = ref_state[0]
+    end
+
+    zs = initialise(rng, inner_model, algo.inner_algo; new_outer=xs, kwargs...)
     log_ws = CUDA.zeros(T, N)
 
-    return update_ref!(
-        RaoBlackwellisedParticleDistribution(
-            BatchRaoBlackwellisedParticles(xs, zs), log_ws
-        ),
-        ref_state,
+    return RaoBlackwellisedParticleDistribution(
+        BatchRaoBlackwellisedParticles(xs, zs), log_ws
     )
 end
 
-# TODO: use RNG
 function predict(
     rng::AbstractRNG,
     model::HierarchicalSSM,
-    filter::BatchRBPF,
-    step::Integer,
-    filtered::RaoBlackwellisedParticleDistribution;
+    algo::BatchRBPF,
+    iter::Integer,
+    state::RaoBlackwellisedParticleDistribution,
+    observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
     new_xs = SSMProblems.batch_simulate(
-        rng, outer_dyn, step, filtered.particles.xs; kwargs...
+        rng, outer_dyn, iter, state.particles.xs; ref_state, kwargs...
     )
+
+    # Set reference trajectory
+    if ref_state !== nothing
+        new_xs[:, [1]] = ref_state[iter]
+    end
+
     new_zs = predict(
+        rng,
         inner_model,
-        filter.inner_algo,
-        step,
-        filtered.particles.zs;
-        prev_outer=filtered.particles.xs,
+        algo.inner_algo,
+        iter,
+        state.particles.zs,
+        observation;
+        prev_outer=state.particles.xs,
         new_outer=new_xs,
         kwargs...,
     )
-    # Don't need to deep copy weights as filtered will be overwritten in the update step
-    proposed = RaoBlackwellisedParticleDistribution(
-        BatchRaoBlackwellisedParticles(new_xs, new_zs), filtered.log_weights
-    )
+    state.particles = BatchRaoBlackwellisedParticles(new_xs, new_zs)
 
-    # return states
-    return update_ref!(proposed, ref_state, step)
+    return state
 end
 
 function update(
     model::HierarchicalSSM,
-    filter::BatchRBPF,
-    step::Integer,
-    proposed::RaoBlackwellisedParticleDistribution,
+    algo::BatchRBPF,
+    iter::Integer,
+    state::RaoBlackwellisedParticleDistribution,
     obs;
     kwargs...,
 )
     new_zs, inner_lls = update(
         model.inner_model,
-        filter.inner_algo,
-        step,
-        proposed.particles.zs,
+        algo.inner_algo,
+        iter,
+        state.particles.zs,
         obs;
-        new_outer=proposed.particles.xs,
+        new_outer=state.particles.xs,
         kwargs...,
     )
 
-    new_weights = proposed.log_weights + inner_lls
-    # Don't need to deep copy particles as update will be overwritten in the next step
-    filtered = RaoBlackwellisedParticleDistribution(
-        BatchRaoBlackwellisedParticles(proposed.particles.xs, new_zs), new_weights
-    )
+    state.log_weights += inner_lls
+    state.particles.zs = new_zs
 
-    step_ll = logsumexp(filtered.log_weights) - logsumexp(proposed.log_weights)
-    return filtered, step_ll
+    return state, logsumexp(state.log_weights)
 end

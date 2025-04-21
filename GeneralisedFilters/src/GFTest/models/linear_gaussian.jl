@@ -1,14 +1,19 @@
 function create_linear_gaussian_model(
-    rng::AbstractRNG, Dx::Integer, Dy::Integer, T::Type{<:Real}=Float64
+    rng::AbstractRNG,
+    Dx::Integer,
+    Dy::Integer,
+    T::Type{<:Real}=Float64,
+    process_noise_scale=T(0.1),
+    obs_noise_scale=T(1.0),
 )
     μ0 = rand(rng, T, Dx)
     Σ0 = rand_cov(rng, T, Dx)
     A = rand(rng, T, Dx, Dx)
     b = rand(rng, T, Dx)
-    Q = rand_cov(rng, T, Dx)
+    Q = rand_cov(rng, T, Dx; scale=process_noise_scale)
     H = rand(rng, T, Dy, Dx)
     c = rand(rng, T, Dy)
-    R = rand_cov(rng, T, Dy)
+    R = rand_cov(rng, T, Dy; scale=obs_noise_scale)
 
     return create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
 end

@@ -4,6 +4,48 @@ using AcceleratedKernels
 using DataStructures: Stack
 using Random: rand
 
+export AbstractCallback, CallbackTrigger
+export PostInit, PostResample, PostPredict, PostUpdate
+export PostInitCallback, PostResampleCallback, PostPredictCallback, PostUpdateCallback
+export DenseParticleContainer, ParticleTree, ParallelParticleTree
+export DenseAncestorCallback, AncestorCallback, ParallelAncestorCallback
+
+## ABSTRACT CALLBACK SYSTEM ################################################################
+
+abstract type AbstractCallback end
+
+abstract type CallbackTrigger end
+
+struct PostInitCallback <: CallbackTrigger end
+const PostInit = PostInitCallback()
+function (c::AbstractCallback)(model, filter, state, data, ::PostInitCallback; kwargs...)
+    return nothing
+end
+
+struct PostResampleCallback <: CallbackTrigger end
+const PostResample = PostResampleCallback()
+function (c::AbstractCallback)(
+    model, filter, step, state, data, ::PostResampleCallback; kwargs...
+)
+    return nothing
+end
+
+struct PostPredictCallback <: CallbackTrigger end
+const PostPredict = PostPredictCallback()
+function (c::AbstractCallback)(
+    model, filter, step, state, data, ::PostPredictCallback; kwargs...
+)
+    return nothing
+end
+
+struct PostUpdateCallback <: CallbackTrigger end
+const PostUpdate = PostUpdateCallback()
+function (c::AbstractCallback)(
+    model, filter, step, state, data, ::PostUpdateCallback; kwargs...
+)
+    return nothing
+end
+
 ## DENSE PARTICLE STORAGE ##################################################################
 
 struct DenseParticleContainer{T}
@@ -28,7 +70,7 @@ end
 
 A callback for dense ancestry storage, which fills a `DenseParticleContainer`.
 """
-struct DenseAncestorCallback{T}
+struct DenseAncestorCallback{T} <: AbstractCallback
     container::DenseParticleContainer{T}
 
     function DenseAncestorCallback(::Type{T}) where {T}
@@ -38,20 +80,24 @@ struct DenseAncestorCallback{T}
     end
 end
 
-function (c::DenseAncestorCallback)(model, filter, states, data; kwargs...)
-    push!(c.container.particles, deepcopy(states.filtered.particles))
+function (c::DenseAncestorCallback)(
+    model, filter, state, data, ::PostInitCallback; kwargs...
+)
+    push!(c.container.particles, deepcopy(state.particles))
     return nothing
 end
 
-function (c::DenseAncestorCallback)(model, filter, step, states, data; kwargs...)
-    push!(c.container.particles, deepcopy(states.filtered.particles))
-    push!(c.container.ancestors, deepcopy(states.ancestors))
+function (c::DenseAncestorCallback)(
+    model, filter, step, state, data, ::PostUpdateCallback; kwargs...
+)
+    push!(c.container.particles, deepcopy(state.particles))
+    push!(c.container.ancestors, deepcopy(state.ancestors))
     return nothing
 end
 
 ## SPARSE PARTICLE STORAGE #################################################################
 
-Base.append!(s::Stack, a::AbstractVector) = map(x -> push!(s, x), a)
+append_to_stack!(s::Stack, a::AbstractVector) = map(x -> push!(s, x), a)
 
 """
     ParticleTree
@@ -73,7 +119,7 @@ mutable struct ParticleTree{T}
     function ParticleTree(states::Vector{T}, M::Integer) where {T}
         nodes = Vector{T}(undef, M)
         initial_free_indices = Stack{Int64}()
-        append!(initial_free_indices, M:-1:(length(states) + 1))
+        append_to_stack!(initial_free_indices, M:-1:(length(states) + 1))
         @inbounds nodes[1:length(states)] = states
         return new{T}(
             nodes, zeros(Int64, M), 1:length(states), zeros(Int64, M), initial_free_indices
@@ -132,7 +178,7 @@ function expand!(tree::ParticleTree)
     # new allocations must be zero valued, this is not a perfect solution
     tree.parents = [tree.parents; zero(tree.parents)]
     tree.offspring = [tree.offspring; zero(tree.offspring)]
-    append!(tree.free_indices, (2 * M):-1:(M + 1))
+    append_to_stack!(tree.free_indices, (2 * M):-1:(M + 1))
     return tree
 end
 
@@ -293,19 +339,22 @@ A callback for parallel sparse ancestry storage, which preallocates and returns 
 `ParallelParticleTree` object.
 """
 # TODO: this should be initialised during inference so types don't need to be predetermined
-struct ParallelAncestorCallback{T}
+struct ParallelAncestorCallback{T} <: AbstractCallback
     tree::ParallelParticleTree{T}
 end
 
-function (c::ParallelAncestorCallback)(model, filter, states, data; kwargs...)
-    # Initialisation
-    @inbounds c.tree.states[1:(filter.N)] = deepcopy(states.filtered.particles)
+function (c::ParallelAncestorCallback)(
+    model, filter, step, state, data, ::PostInitCallback; kwargs...
+)
+    @inbounds c.tree.states[1:(filter.N)] = deepcopy(state.particles)
     return nothing
 end
 
-function (c::ParallelAncestorCallback)(model, filter, step, states, data; kwargs...)
-    # TODO: this is a combined prune/insert step—split them up
-    insert!(c.tree, states.proposed.particles, states.ancestors)
+function (c::ParallelAncestorCallback)(
+    model, filter, step, state, data, ::PostUpdateCallback; kwargs...
+)
+    # insert! implicitly deepcopies
+    insert!(c.tree, state.particles, state.ancestors)
     return nothing
 end
 
@@ -317,7 +366,7 @@ end
 A callback for sparse ancestry storage, which preallocates and returns a populated 
 `ParticleTree` object.
 """
-struct AncestorCallback{T}
+struct AncestorCallback{T} <: AbstractCallback
     tree::ParticleTree{T}
 end
 
@@ -327,15 +376,16 @@ function AncestorCallback(::Type{T}, N::Integer, C::Real=1.0) where {T}
     return new{T}(ParticleTree(nodes, M))
 end
 
-function (c::AncestorCallback)(model, filter, intermediate, data; kwargs...)
-    # Initialisation
-    @inbounds c.tree.states[1:(filter.N)] = deepcopy(intermediate.filtered.particles)
+function (c::AncestorCallback)(model, filter, state, data, ::PostInitCallback; kwargs...)
+    @inbounds c.tree.states[1:(filter.N)] = deepcopy(state.particles)
     return nothing
 end
 
-function (c::AncestorCallback)(model, filter, step, intermediate, data; kwargs...)
-    prune!(c.tree, get_offspring(intermediate.ancestors))
-    insert!(c.tree, intermediate.proposed.particles, intermediate.ancestors)
+function (c::AncestorCallback)(
+    model, filter, step, state, data, ::PostPredictCallback; kwargs...
+)
+    prune!(c.tree, get_offspring(state.ancestors))
+    insert!(c.tree, state.particles, state.ancestors)
     return nothing
 end
 
@@ -345,7 +395,7 @@ end
 A callback which follows the resampling indices over the filtering algorithm. This is more
 of a debug tool and visualizer for various resapmling algorithms.
 """
-struct ResamplerCallback
+struct ResamplerCallback <: AbstractCallback
     tree::ParticleTree
 
     function ResamplerCallback(N::Integer, C::Real=1.0)
@@ -355,10 +405,12 @@ struct ResamplerCallback
     end
 end
 
-function (c::ResamplerCallback)(model, filter, step, states, data; kwargs...)
+function (c::ResamplerCallback)(
+    model, filter, step, state, data, ::PostResampleCallback; kwargs...
+)
     if step != 1
-        prune!(c.tree, get_offspring(states.ancestors))
-        insert!(c.tree, collect(1:(filter.N)), states.ancestors)
+        prune!(c.tree, get_offspring(state.ancestors))
+        insert!(c.tree, collect(1:(filter.N)), state.ancestors)
     end
     return nothing
 end
