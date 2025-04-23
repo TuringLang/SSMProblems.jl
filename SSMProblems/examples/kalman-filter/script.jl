@@ -165,8 +165,8 @@ x_filts, P_filts = AbstractMCMC.sample(model, KalmanFilter(), ys);
 
 # Plot trajectory for first dimension
 p = plot(; title="First Dimension Kalman Filter Estimates", xlabel="Step", ylabel="Value")
-plot!(p, 0:T, first.(xs); label="Truth")
-scatter!(p, 1:T, first.(ys); label="Observations")
+plot!(p, first.(xs); label="Truth")
+scatter!(p, first.(ys); label="Observations")
 plot!(
     p,
     1:T,
