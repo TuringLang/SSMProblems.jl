@@ -29,24 +29,28 @@ function AbstractMCMC.sample(
 )
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
-    zs = Vector{eltype(inner_model.dyn)}(undef, T)
-    xs = Vector{eltype(outer_dyn)}(undef, T)
+    zs = OffsetVector(Vector{eltype(inner_model.dyn)}(undef, T + 1), -1)
+    xs = OffsetVector(Vector{eltype(outer_dyn)}(undef, T + 1), -1)
     ys = Vector{eltype(inner_model.obs)}(undef, T)
 
     # Simulate outer dynamics
-    x0 = simulate(rng, outer_dyn; kwargs...)
-    z0 = simulate(rng, inner_model.dyn; new_outer=x0, kwargs...)
+    xs[0] = simulate(rng, outer_dyn; kwargs...)
+    zs[0] = simulate(rng, inner_model.dyn; new_outer=xs[0], kwargs...)
     for t in 1:T
-        prev_x = t == 1 ? x0 : xs[t - 1]
-        prev_z = t == 1 ? z0 : zs[t - 1]
-        xs[t] = simulate(rng, model.outer_dyn, t, prev_x; kwargs...)
+        xs[t] = simulate(rng, model.outer_dyn, t, xs[t - 1]; kwargs...)
         zs[t] = simulate(
-            rng, inner_model.dyn, t, prev_z; prev_outer=prev_x, new_outer=xs[t], kwargs...
+            rng,
+            inner_model.dyn,
+            t,
+            zs[t - 1];
+            prev_outer=xs[t - 1],
+            new_outer=xs[t],
+            kwargs...,
         )
         ys[t] = simulate(rng, inner_model.obs, t, zs[t]; new_outer=xs[t], kwargs...)
     end
 
-    return x0, z0, xs, zs, ys
+    return xs, zs, ys
 end
 
 ## Methods to make HierarchicalSSM compatible with the bootstrap filter

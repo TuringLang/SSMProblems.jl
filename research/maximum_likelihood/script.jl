@@ -25,7 +25,7 @@ end
 # data generation process
 rng = MersenneTwister(1234)
 true_model = toy_model(1.0)
-_, _, ys = sample(rng, true_model, 1000)
+_, ys = sample(rng, true_model, 1000)
 
 # evaluate and return the log evidence
 function logℓ(θ, data)
