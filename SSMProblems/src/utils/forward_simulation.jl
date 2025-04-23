@@ -1,6 +1,9 @@
 """Forward simulation of state space models."""
 
+using OffsetArrays: OffsetVector
+
 import AbstractMCMC: sample
+
 export sample
 
 """
@@ -8,8 +11,9 @@ export sample
 
 Simulate a trajectory of length `T` from the state space model.
 
-Returns a tuple `(x0, xs, ys)` where `x0` is the initial state, `xs` is a vector of latent states,
-and `ys` is a vector of observations.
+Returns a tuple `(xs, ys)` where `xs` is an (offset) vector of latent states, and `ys` is a 
+vector of observations. The latent states are indexed from `0` to `T`, where `xs[0]` is the
+initial state.
 """
 function sample(
     rng::AbstractRNG, model::StateSpaceModel{<:Real,LD,OP}, T::Integer; kwargs...
@@ -17,16 +21,16 @@ function sample(
     T_dyn = eltype(LD)
     T_obs = eltype(OP)
 
-    xs = Vector{T_dyn}(undef, T)
+    xs = OffsetVector(Vector{T_dyn}(undef, T + 1), -1)
     ys = Vector{T_obs}(undef, T)
 
-    x0 = simulate(rng, model.dyn; kwargs...)
+    xs[0] = simulate(rng, model.dyn; kwargs...)
     for t in 1:T
-        xs[t] = simulate(rng, model.dyn, t, t == 1 ? x0 : xs[t - 1]; kwargs...)
+        xs[t] = simulate(rng, model.dyn, t, xs[t - 1]; kwargs...)
         ys[t] = simulate(rng, model.obs, t, xs[t]; kwargs...)
     end
 
-    return x0, xs, ys
+    return xs, ys
 end
 
 """
