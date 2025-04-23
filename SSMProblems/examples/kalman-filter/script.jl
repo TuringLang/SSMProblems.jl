@@ -157,7 +157,7 @@ model = StateSpaceModel(dyn, obs);
 # functions we defined above.
 
 rng = MersenneTwister(SEED);
-x0, xs, ys = sample(rng, model, T);
+xs, ys = sample(rng, model, T);
 
 # We can then run the Kalman filter and plot the filtering results against the ground truth.
 
@@ -165,7 +165,7 @@ x_filts, P_filts = AbstractMCMC.sample(model, KalmanFilter(), ys);
 
 # Plot trajectory for first dimension
 p = plot(; title="First Dimension Kalman Filter Estimates", xlabel="Step", ylabel="Value")
-plot!(p, 1:T, first.(xs); label="Truth")
+plot!(p, 0:T, first.(xs); label="Truth")
 scatter!(p, 1:T, first.(ys); label="Observations")
 plot!(
     p,
