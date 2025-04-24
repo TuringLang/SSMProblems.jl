@@ -48,6 +48,62 @@ include("resamplers.jl")
     end
 end
 
+@testitem "Square root Kalman filter test" begin
+    using GeneralisedFilters
+    using LinearAlgebra
+    using PDMats
+    using StableRNGs
+    using StaticArrays
+
+    rng = StableRNG(1234)
+    μ0 = rand(rng, 2)
+    Σ0 = rand(rng, 2, 2)
+    Σ0 = Σ0 * Σ0'  # make Σ0 positive definite
+    Σ0 = PDMat(Σ0)
+    A = rand(rng, 2, 2)
+    b = zeros(2)
+    Q = rand(rng, 2, 2)
+    Q = Q * Q'  # make Q positive definite
+    Q = PDMat(Q)
+    H = rand(rng, 2, 2)
+    c = zeros(2)
+    R = rand(rng, 2, 2)
+    R = R * R'  # make R positive definite
+    R = PDMat(R)
+
+    model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
+
+    T = 3
+    observations = [rand(rng, 2) for _ in 1:T]
+
+    # kf_state, kf_ll = GeneralisedFilters.filter(rng, model, KalmanFilter(), observations)
+    # srkf_state, srkf_ll = GeneralisedFilters.filter(rng, model, SRKF(), observations)
+
+    # @test isa(srkf_state.Σ, PDMat)
+    # @test kf_state.μ ≈ srkf_state.μ
+    # @test kf_state.Σ ≈ srkf_state.Σ
+    # @test kf_ll ≈ srkf_ll
+
+    # Test with StaticArrays.jl
+    μ0_static = SVector{2}(μ0)
+    Σ0_static = PDMat(SMatrix{2,2}(Σ0.mat))
+    A_static = SMatrix{2,2}(A)
+    b_static = SVector{2}(b)
+    Q_static = PDMat(SMatrix{2,2}(Q.mat))
+    H_static = SMatrix{2,2}(H)
+    c_static = SVector{2}(c)
+    R_static = PDMat(SMatrix{2,2}(R.mat))
+    model_static = create_homogeneous_linear_gaussian_model(
+        μ0_static, Σ0_static, A_static, b_static, Q_static, H_static, c_static, R_static
+    )
+    observations_static = [SVector{2}(rand(rng, 2)) for _ in 1:T]
+    srkf_state, _ = GeneralisedFilters.filter(
+        rng, model_static, SRKF(), observations_static
+    )
+    # @test isa(srkf_state.μ, SVector)
+    # @test isa(srkf_state.Σ.mat, SMatrix)
+end
+
 @testitem "Kalman smoother test" begin
     using GeneralisedFilters
     using Distributions
