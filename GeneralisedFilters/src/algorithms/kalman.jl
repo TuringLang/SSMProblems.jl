@@ -1,9 +1,11 @@
 export KalmanFilter, filter, BatchKalmanFilter
 using GaussianDistributions
 using CUDA: i32
+using PDMats
+using KalmanFilters
 import LinearAlgebra: hermitianpart
 
-export KalmanFilter, KF, KalmanSmoother, KS
+export KalmanFilter, KF, KalmanSmoother, KS, SRKF
 
 struct KalmanFilter <: AbstractFilter end
 
@@ -127,6 +129,58 @@ function update(
     log_likes[isnan.(log_likes)] .= -Inf
 
     return BatchGaussianDistribution(μ_filt, Σ_filt), dropdims(log_likes; dims=1)
+end
+
+## SQUARE-ROOT KALMAN FILTER ###############################################################
+
+"""
+     SRKF()
+
+     A square-root Kalman filter.
+
+     Implemented by wrapping KalmanFilters.jl.
+ """
+struct SRKF <: AbstractFilter end
+
+function initialise(
+    rng::AbstractRNG, model::LinearGaussianStateSpaceModel, filter::SRKF; kwargs...
+)
+    μ0, Σ0 = calc_initial(model.dyn; kwargs...)
+    return Gaussian(μ0, Σ0)
+end
+
+function predict(
+    rng::AbstractRNG,
+    model::LinearGaussianStateSpaceModel,
+    ::SRKF,
+    iter::Integer,
+    state::Gaussian,
+    observation=nothing;
+    kwargs...,
+)
+    μ, Σ = GaussianDistributions.pair(state)
+    A, b, Q = calc_params(model.dyn, iter; kwargs...)
+    !all(b .== 0) && error("SKRF doesn't current support non-zero b")
+
+    tu = KalmanFilters.time_update(μ, cholesky(Σ), A, cholesky(Q))
+    return Gaussian(tu.state, PDMat(tu.covariance))
+end
+
+function update(
+    model::LinearGaussianStateSpaceModel,
+    algo::SRKF,
+    iter::Integer,
+    state::Gaussian,
+    observation::AbstractVector;
+    kwargs...,
+)
+    μ, Σ = GaussianDistributions.pair(state)
+    H, c, R = calc_params(model.obs, iter; kwargs...)
+    !all(c .== 0) && error("SKRF doesn't current support non-zero c")
+
+    mu = KalmanFilters.measurement_update(μ, cholesky(Σ), observation, H, cholesky(R))
+    ll = logpdf(MvNormal(mu.innovation, PDMat(mu.innovation_covariance)), zero(observation))
+    return Gaussian(mu.state, PDMat(mu.covariance)), ll
 end
 
 ## KALMAN SMOOTHER #########################################################################
