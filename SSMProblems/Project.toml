@@ -4,7 +4,7 @@ authors = [
     "FredericWantiez <frederic.wantiez@gmail.com>",
     "THargreaves <tim.hargreaves@icloud.com>"
 ]
-version = "0.5.2"
+version = "0.5.0"
 
 [deps]
 AbstractMCMC = "80f14c24-f653-4e6a-9b94-39d6b0f70001"
