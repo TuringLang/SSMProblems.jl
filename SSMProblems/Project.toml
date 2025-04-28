@@ -2,7 +2,9 @@ name = "SSMProblems"
 uuid = "26aad666-b158-4e64-9d35-0e672562fa48"
 authors = [
     "FredericWantiez <frederic.wantiez@gmail.com>",
-    "THargreaves <tim.hargreaves@icloud.com>"
+    "THargreaves <tim.hargreaves@icloud.com>",
+    "Hong Ge",
+    "Charles Knipp" 
 ]
 version = "0.5.0"
 
@@ -10,6 +12,14 @@ version = "0.5.0"
 AbstractMCMC = "80f14c24-f653-4e6a-9b94-39d6b0f70001"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+
+[compat]
+AbstractMCMC = "5"
+Aqua = "0.8"
+Distributions = "0.25"
+Random = "1"
+Test = "1"
+julia = "1.6"
 
 [extras]
 Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
