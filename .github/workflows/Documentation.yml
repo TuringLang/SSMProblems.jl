@@ -12,6 +12,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   docs:
     name: ${{ matrix.pkg.name }} Docs
