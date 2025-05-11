@@ -12,6 +12,13 @@
 A minimalist framework to define state space models (SSMs) and their associated
 log-densities to feed into inference algorithms.
 
+
+## Talk at [LAFI 2024](https://popl25.sigplan.org/details/lafi-2025/11/State-Space-Model-Programming-in-Turing-jl)
+
+[![State space programming](http://i3.ytimg.com/vi/58DsScclqGU/hqdefault.jpg)](https://www.youtube.com/watch?v=58DsScclqGU
+)
+
+
 ## Basic interface
 
 This package defines the basic interface needed to run inference on state space
