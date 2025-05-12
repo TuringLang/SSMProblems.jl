@@ -35,7 +35,7 @@ end
 #### HOMOGENEOUS DISCRETE MODEL ####
 ####################################
 
-struct HomogenousDiscretePrior{AT<:AbstractVector} <: StatePrior
+struct HomogenousDiscretePrior{AT<:AbstractVector} <: DiscretePrior
     α0::AT
 end
 
