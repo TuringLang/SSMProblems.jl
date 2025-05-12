@@ -13,7 +13,9 @@ A minimalist framework to define state space models (SSMs) and their associated
 log-densities to feed into inference algorithms.
 
 
-## Talk at [LAFI 2024](https://popl25.sigplan.org/details/lafi-2025/11/State-Space-Model-Programming-in-Turing-jl)
+## Talk at [LAFI 2025](https://popl25.sigplan.org/details/lafi-2025/11/State-Space-Model-Programming-in-Turing-jl)
+
+[PDF Slides](https://github.com/user-attachments/files/20160397/LAFI_2025_Presentation.pdf)
 
 [![State space programming](http://i3.ytimg.com/vi/58DsScclqGU/hqdefault.jpg)](https://www.youtube.com/watch?v=58DsScclqGU
 )
