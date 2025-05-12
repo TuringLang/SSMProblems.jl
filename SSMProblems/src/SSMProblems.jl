@@ -67,7 +67,7 @@ See also [`StatePrior`](@ref).
 - `Distributions.Distribution`: The distribution of the initial state.
 """
 function distribution(prior::StatePrior; kwargs...)
-    throw(MethodError(distribution, (prior)))
+    throw(MethodError(distribution, (prior, kwargs...)))
 end
 
 """

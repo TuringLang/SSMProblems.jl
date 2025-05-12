@@ -14,7 +14,7 @@ Returns a tuple `(xs, ys)` where `xs` is a vector of latent states (including th
 state) and `ys` is a vector of observations.
 """
 function sample(rng::AbstractRNG, model::StateSpaceModel, T::Integer; kwargs...)
-    xs = OffsetVector(fill(simulate(rng, model.prior), T + 1), -1)
+    xs = OffsetVector(fill(simulate(rng, model.prior; kwargs...), T + 1), -1)
     for t in 1:T
         xs[t] = simulate(rng, model.dyn, t, xs[t - 1]; kwargs...)
     end
