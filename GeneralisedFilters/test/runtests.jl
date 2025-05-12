@@ -356,8 +356,8 @@ end
     struct DummyResampler <: GeneralisedFilters.AbstractResampler end
 
     function GeneralisedFilters.sample_ancestors(
-        rng::AbstractRNG, resampler::DummyResampler, weights::Vector{T}
-    ) where {T}
+        rng::AbstractRNG, resampler::DummyResampler, weights::AbstractVector
+    )
         return [mod1(a - 1, length(weights)) for a in 1:length(weights)]
     end
 
@@ -417,11 +417,11 @@ end
     N_steps = N_burnin + N_sample
     bf = BF(N_particles; threshold=0.6)
     ref_traj = nothing
-    trajectory_samples = Vector{OffsetVector{Vector{T},Vector{Vector{T}}}}(undef, N_sample)
-    lls = Vector{T}(undef, N_sample)
+    trajectory_samples = []
+    lls = []
 
     for i in 1:N_steps
-        cb = GeneralisedFilters.DenseAncestorCallback(Vector{T})
+        cb = GeneralisedFilters.DenseAncestorCallback(nothing)
         bf_state, ll = GeneralisedFilters.filter(
             rng, model, bf, ys; ref_state=ref_traj, callback=cb
         )
@@ -429,8 +429,8 @@ end
         sampled_idx = sample(rng, 1:length(weights), Weights(weights))
         global ref_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
         if i > N_burnin
-            trajectory_samples[i - N_burnin] = ref_traj
-            lls[i - N_burnin] = ll
+            push!(trajectory_samples, ref_traj)
+            push!(lls, ll)
         end
     end
 
@@ -478,19 +478,13 @@ end
         rng, full_model, KalmanSmoother(), ys; t_smooth=t_smooth
     )
 
-    particle_type = GeneralisedFilters.RaoBlackwellisedParticle{
-        Vector{T},Gaussian{SVector{D_inner,T},SMatrix{D_inner,D_inner,T,D_inner^2}}
-    }
-
     N_steps = N_burnin + N_sample
     rbpf = RBPF(KalmanFilter(), N_particles; threshold=0.6)
     ref_traj = nothing
-    trajectory_samples = Vector{OffsetVector{particle_type,Vector{particle_type}}}(
-        undef, N_sample
-    )
+    trajectory_samples = []
 
     for i in 1:N_steps
-        cb = GeneralisedFilters.DenseAncestorCallback(particle_type)
+        cb = GeneralisedFilters.DenseAncestorCallback(nothing)
         bf_state, _ = GeneralisedFilters.filter(
             rng, hier_model, rbpf, ys; ref_state=ref_traj, callback=cb
         )
@@ -499,7 +493,7 @@ end
 
         global ref_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
         if i > N_burnin
-            trajectory_samples[i - N_burnin] = deepcopy(ref_traj)
+            push!(trajectory_samples, deepcopy(ref_traj))
         end
         # Reference trajectory should only be nonlinear state for RBPF
         ref_traj = getproperty.(ref_traj, :x)
