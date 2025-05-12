@@ -12,7 +12,7 @@ KF() = KalmanFilter()
 function initialise(
     rng::AbstractRNG, model::LinearGaussianStateSpaceModel, filter::KalmanFilter; kwargs...
 )
-    μ0, Σ0 = calc_initial(model.dyn; kwargs...)
+    μ0, Σ0 = calc_initial(model.prior; kwargs...)
     return Gaussian(μ0, Σ0)
 end
 
@@ -61,23 +61,23 @@ end
 
 function initialise(
     rng::AbstractRNG,
-    model::LinearGaussianStateSpaceModel{T},
+    model::LinearGaussianStateSpaceModel,
     algo::BatchKalmanFilter;
     kwargs...,
-) where {T}
+)
     μ0s, Σ0s = batch_calc_initial(model.dyn, algo.batch_size; kwargs...)
     return BatchGaussianDistribution(μ0s, Σ0s)
 end
 
 function predict(
     rng::AbstractRNG,
-    model::LinearGaussianStateSpaceModel{T},
+    model::LinearGaussianStateSpaceModel,
     algo::BatchKalmanFilter,
     iter::Integer,
     state::BatchGaussianDistribution,
     observation;
     kwargs...,
-) where {T}
+)
     μs, Σs = state.μs, state.Σs
     As, bs, Qs = batch_calc_params(model.dyn, iter, algo.batch_size; kwargs...)
     μ̂s = NNlib.batched_vec(As, μs) .+ bs
@@ -86,13 +86,14 @@ function predict(
 end
 
 function update(
-    model::LinearGaussianStateSpaceModel{T},
+    model::LinearGaussianStateSpaceModel,
     algo::BatchKalmanFilter,
     iter::Integer,
     state::BatchGaussianDistribution,
     observation;
     kwargs...,
-) where {T}
+)
+    # T = Float32 # temporary fix!!!
     μs, Σs = state.μs, state.Σs
     Hs, cs, Rs = batch_calc_params(model.obs, iter, algo.batch_size; kwargs...)
     D = size(observation, 1)
@@ -120,8 +121,8 @@ function update(
     Σ_filt = Σs .- NNlib.batched_mul(K, NNlib.batched_mul(Hs, Σs))
 
     inv_term = NNlib.batched_vec(S_inv, y_res)
-    log_likes = -T(0.5) * NNlib.batched_vec(reshape(y_res, 1, D, size(S, 3)), inv_term)
-    log_likes = log_likes .- T(0.5) * (log_dets .+ D * log(T(2π)))
+    log_likes = -NNlib.batched_vec(reshape(y_res, 1, D, size(S, 3)), inv_term)
+    log_likes = (log_likes .- (log_dets .+ D * convert(eltype(log_likes), log(2π)))) ./ 2
 
     # HACK: only errors seems to be from numerical stability so will just overwrite
     log_likes[isnan.(log_likes)] .= -Inf
@@ -135,15 +136,23 @@ struct KalmanSmoother <: AbstractSmoother end
 
 const KS = KalmanSmoother()
 
-struct StateCallback{T} <: AbstractCallback
-    proposed_states::Vector{Gaussian{Vector{T},Matrix{T}}}
-    filtered_states::Vector{Gaussian{Vector{T},Matrix{T}}}
+mutable struct StateCallback <: AbstractCallback
+    proposed_states
+    filtered_states
 end
-function StateCallback(N::Integer, T::Type)
-    return StateCallback{T}(
-        Vector{Gaussian{Vector{T},Matrix{T}}}(undef, N),
-        Vector{Gaussian{Vector{T},Matrix{T}}}(undef, N),
-    )
+
+function (callback::StateCallback)(
+    model::LinearGaussianStateSpaceModel,
+    algo::KalmanFilter,
+    state::T,
+    observations,
+    ::PostInitCallback;
+    kwargs...,
+) where {T}
+    N = length(observations)
+    callback.proposed_states = Vector{T}(undef, N)
+    callback.filtered_states = Vector{T}(undef, N)
+    return nothing
 end
 
 function (callback::StateCallback)(
@@ -174,15 +183,14 @@ end
 
 function smooth(
     rng::AbstractRNG,
-    model::LinearGaussianStateSpaceModel{T},
+    model::LinearGaussianStateSpaceModel,
     algo::KalmanSmoother,
     observations::AbstractVector;
     t_smooth=1,
     callback=nothing,
     kwargs...,
-) where {T}
-    cache = StateCallback(length(observations), T)
-
+)
+    cache = StateCallback(nothing, nothing)
     filtered, ll = filter(
         rng, model, KalmanFilter(), observations; callback=cache, kwargs...
     )
@@ -199,14 +207,14 @@ end
 
 function backward(
     rng::AbstractRNG,
-    model::LinearGaussianStateSpaceModel{T},
+    model::LinearGaussianStateSpaceModel,
     algo::KalmanSmoother,
     iter::Integer,
     back_state,
     obs;
     states_cache,
     kwargs...,
-) where {T}
+)
     μ, Σ = GaussianDistributions.pair(back_state)
     μ_pred, Σ_pred = GaussianDistributions.pair(states_cache.proposed_states[iter + 1])
     μ_filt, Σ_filt = GaussianDistributions.pair(states_cache.filtered_states[iter])

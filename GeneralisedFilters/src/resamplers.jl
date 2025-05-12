@@ -22,21 +22,21 @@ function resample(
     return construct_new_state(states, idxs)
 end
 
-function construct_new_state(states::ParticleDistribution{PT,WT}, idxs) where {PT,WT}
-    return ParticleDistribution(states.particles[idxs], idxs, zeros(WT, length(states)))
+function construct_new_state(states::ParticleDistribution{PT}, idxs) where {PT}
+    return Particles(states.particles[idxs], idxs)
 end
 
-function construct_new_state(
-    states::RaoBlackwellisedParticleDistribution{T}, idxs
-) where {T}
-    return RaoBlackwellisedParticleDistribution(
-        BatchRaoBlackwellisedParticles(
-            states.particles.xs[:, idxs], states.particles.zs[idxs]
-        ),
-        idxs,
-        CUDA.zeros(T, length(states)),
-    )
-end
+# function construct_new_state(
+#     states::RaoBlackwellisedParticleDistribution{T}, idxs
+# ) where {T}
+#     return RaoBlackwellisedParticleDistribution(
+#         BatchRaoBlackwellisedParticles(
+#             states.particles.xs[:, idxs], states.particles.zs[idxs]
+#         ),
+#         idxs,
+#         CUDA.zeros(T, length(states)),
+#     )
+# end
 
 ## CONDITIONAL RESAMPLING ##################################################################
 

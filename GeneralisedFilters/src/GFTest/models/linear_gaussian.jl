@@ -19,7 +19,8 @@ function create_linear_gaussian_model(
 end
 
 function _compute_joint(model, T::Integer)
-    (; μ0, Σ0, A, b, Q) = model.dyn
+    (; μ0, Σ0) = model.prior
+    (; A, b, Q) = model.dyn
     (; H, c, R) = model.obs
     Dy, Dx = size(H)
 

@@ -1,32 +1,26 @@
 export DiscreteLatentDynamics
 export DiscreteStateSpaceModel
-export HomogeneousDiscreteLatentDynamics
+export HomogenousDiscretePrior, HomogeneousDiscreteLatentDynamics
 
 import SSMProblems: distribution
 import Distributions: Categorical
 
-abstract type DiscreteLatentDynamics{T_state<:Integer,T_prob<:Real} <:
-              LatentDynamics{T_prob,T_state} end
+abstract type DiscretePrior <: StatePrior end
+abstract type DiscreteLatentDynamics <: LatentDynamics end
 
 function calc_α0 end
 function calc_P end
 
-const DiscreteStateSpaceModel{T} = SSMProblems.StateSpaceModel{
-    T,LD,OD
-} where {T,LD<:DiscreteLatentDynamics{<:Integer,T},OD<:ObservationProcess{T}}
-
-function rb_eltype(
-    ::DiscreteStateSpaceModel{LD}
-) where {T_state,T_prob,LD<:DiscreteLatentDynamics{T_state,T_prob}}
-    return Vector{T_prob}
-end
+const DiscreteStateSpaceModel = SSMProblems.StateSpaceModel{
+    <:DiscretePrior,<:DiscreteLatentDynamics,<:ObservationProcess
+}
 
 #######################
 #### DISTRIBUTIONS ####
 #######################
 
-function SSMProblems.distribution(dyn::DiscreteLatentDynamics; kwargs...)
-    α0 = calc_α0(dyn; kwargs...)
+function SSMProblems.distribution(prior::DiscretePrior; kwargs...)
+    α0 = calc_α0(prior; kwargs...)
     return Categorical(α0)
 end
 
@@ -41,11 +35,13 @@ end
 #### HOMOGENEOUS DISCRETE MODEL ####
 ####################################
 
-# TODO: likewise, where do these types come from?
-struct HomogeneousDiscreteLatentDynamics{T_state<:Integer,T_prob<:Real} <:
-       DiscreteLatentDynamics{T_state,T_prob}
-    α0::Vector{T_prob}
-    P::Matrix{T_prob}
+struct HomogenousDiscretePrior{AT<:AbstractVector} <: StatePrior
+    α0::AT
 end
-calc_α0(dyn::HomogeneousDiscreteLatentDynamics; kwargs...) = dyn.α0
+
+struct HomogeneousDiscreteLatentDynamics{PT<:AbstractMatrix} <: DiscreteLatentDynamics
+    P::PT
+end
+
+calc_α0(prior::HomogenousDiscretePrior; kwargs...) = prior.α0
 calc_P(dyn::HomogeneousDiscreteLatentDynamics, ::Integer; kwargs...) = dyn.P

@@ -1,83 +1,96 @@
 import SSMProblems: LatentDynamics, ObservationProcess, simulate
 export HierarchicalSSM
 
-struct HierarchicalSSM{T<:Real,OD<:LatentDynamics{T},M<:StateSpaceModel{T}} <:
+struct HierarchicalSSM{PT<:StatePrior,LD<:LatentDynamics,MT<:StateSpaceModel} <:
        AbstractStateSpaceModel
-    outer_dyn::OD
-    inner_model::M
-    function HierarchicalSSM(
-        outer_dyn::LatentDynamics{T}, inner_model::StateSpaceModel{T}
-    ) where {T}
-        return new{T,typeof(outer_dyn),typeof(inner_model)}(outer_dyn, inner_model)
-    end
+    outer_prior::PT
+    outer_dyn::LD
+    inner_model::MT
 end
 
 function HierarchicalSSM(
-    outer_dyn::LatentDynamics{T}, inner_dyn::LatentDynamics{T}, obs::ObservationProcess{T}
-) where {T}
-    inner_model = StateSpaceModel(inner_dyn, obs)
-    return HierarchicalSSM(outer_dyn, inner_model)
+    outer_prior::StatePrior,
+    outer_dyn::LatentDynamics,
+    inner_prior::StatePrior,
+    inner_dyn::LatentDynamics,
+    obs::ObservationProcess,
+)
+    inner_model = StateSpaceModel(inner_prior, inner_dyn, obs)
+    return HierarchicalSSM(outer_prior, outer_dyn, inner_model)
 end
 
-SSMProblems.arithmetic_type(::Type{<:HierarchicalSSM{T}}) where {T} = T
-function SSMProblems.arithmetic_type(model::HierarchicalSSM)
-    return SSMProblems.arithmetic_type(model.outer_dyn)
-end
+# SSMProblems.arithmetic_type(::Type{<:HierarchicalSSM{T}}) where {T} = T
+# function SSMProblems.arithmetic_type(model::HierarchicalSSM)
+#     return SSMProblems.arithmetic_type(model.outer_dyn)
+# end
 
 function AbstractMCMC.sample(
     rng::AbstractRNG, model::HierarchicalSSM, T::Integer; kwargs...
 )
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
-    zs = Vector{eltype(inner_model.dyn)}(undef, T)
-    xs = Vector{eltype(outer_dyn)}(undef, T)
-    ys = Vector{eltype(inner_model.obs)}(undef, T)
+    # zs = OffsetVector(Vector{eltype(inner_model.dyn)}(undef, T + 1), -1)
+    # xs = OffsetVector(Vector{eltype(outer_dyn)}(undef, T + 1), -1)
+    xs = OffsetVector(fill(simulate(rng, model.outer_prior; kwargs...), T + 1), -1)
+    zs = OffsetVector(
+        fill(simulate(rng, inner_model.prior; new_outer=xs[0], kwargs...), T + 1), -1
+    )
+    # ys = Vector{eltype(inner_model.obs)}(undef, T)
 
     # Simulate outer dynamics
-    x0 = simulate(rng, outer_dyn; kwargs...)
-    z0 = simulate(rng, inner_model.dyn; new_outer=x0, kwargs...)
+    xs[0] = simulate(rng, outer_dyn; kwargs...)
+    zs[0] = simulate(rng, inner_model.dyn; new_outer=xs[0], kwargs...)
     for t in 1:T
-        prev_x = t == 1 ? x0 : xs[t - 1]
-        prev_z = t == 1 ? z0 : zs[t - 1]
-        xs[t] = simulate(rng, model.outer_dyn, t, prev_x; kwargs...)
+        xs[t] = simulate(rng, model.outer_dyn, t, xs[t - 1]; kwargs...)
         zs[t] = simulate(
-            rng, inner_model.dyn, t, prev_z; prev_outer=prev_x, new_outer=xs[t], kwargs...
+            rng,
+            inner_model.dyn,
+            t,
+            zs[t - 1];
+            prev_outer=xs[t - 1],
+            new_outer=xs[t],
+            kwargs...,
         )
-        ys[t] = simulate(rng, inner_model.obs, t, zs[t]; new_outer=xs[t], kwargs...)
+        # ys[t] = simulate(rng, inner_model.obs, t, zs[t]; new_outer=xs[t], kwargs...)
     end
 
-    return x0, z0, xs, zs, ys
+    ys = map(t -> simulate(rng, inner_model.obs, t, zs[t]; new_outer=xs[t], kwargs...))
+    return xs, zs, ys
 end
 
 ## Methods to make HierarchicalSSM compatible with the bootstrap filter
-struct HierarchicalDynamics{T<:Real,ET,D1<:LatentDynamics{T},D2<:LatentDynamics{T}} <:
-       LatentDynamics{T,ET}
+struct HierarchicalDynamics{D1<:LatentDynamics,D2<:LatentDynamics} <: LatentDynamics
     outer_dyn::D1
     inner_dyn::D2
-    function HierarchicalDynamics(
-        outer_dyn::D1, inner_dyn::D2
-    ) where {D1<:LatentDynamics,D2<:LatentDynamics}
-        ET = RaoBlackwellisedParticle{eltype(outer_dyn),eltype(inner_dyn)}
-        T = SSMProblems.arithmetic_type(outer_dyn)
-        return new{T,ET,D1,D2}(outer_dyn, inner_dyn)
-    end
+    # function HierarchicalDynamics(
+    #     outer_dyn::D1, inner_dyn::D2
+    # ) where {D1<:LatentDynamics,D2<:LatentDynamics}
+    #     ET = RaoBlackwellisedParticle{eltype(outer_dyn),eltype(inner_dyn)}
+    #     T = SSMProblems.arithmetic_type(outer_dyn)
+    #     return new{T,ET,D1,D2}(outer_dyn, inner_dyn)
+    # end
 end
 
-function SSMProblems.simulate(rng::AbstractRNG, dyn::HierarchicalDynamics; kwargs...)
-    outer_dyn, inner_dyn = dyn.outer_dyn, dyn.inner_dyn
-    x0 = simulate(rng, outer_dyn; kwargs...)
-    z0 = simulate(rng, inner_dyn; new_outer=x0, kwargs...)
+struct HierarchicalPrior{P1<:StatePrior,P2<:StatePrior} <: StatePrior
+    outer_prior::P1
+    inner_prior::P2
+end
+
+function SSMProblems.simulate(rng::AbstractRNG, prior::HierarchicalPrior; kwargs...)
+    outer_prior, inner_prior = prior.outer_prior, prior.inner_prior
+    x0 = simulate(rng, outer_prior; kwargs...)
+    z0 = simulate(rng, inner_prior; new_outer=x0, kwargs...)
     return RaoBlackwellisedParticle(x0, z0)
 end
 
 function SSMProblems.simulate(
     rng::AbstractRNG,
-    dyn::HierarchicalDynamics,
+    proc::HierarchicalDynamics,
     step::Integer,
     prev_state::RaoBlackwellisedParticle;
     kwargs...,
 )
-    outer_dyn, inner_dyn = dyn.outer_dyn, dyn.inner_dyn
+    outer_dyn, inner_dyn = proc.outer_dyn, proc.inner_dyn
     x = simulate(rng, outer_dyn, step, prev_state.x; kwargs...)
     z = simulate(
         rng, inner_dyn, step, prev_state.z; prev_outer=prev_state.x, new_outer=x, kwargs...
@@ -85,14 +98,13 @@ function SSMProblems.simulate(
     return RaoBlackwellisedParticle(x, z)
 end
 
-struct HierarchicalObservations{T<:Real,ET,OP<:ObservationProcess{T}} <:
-       ObservationProcess{T,ET}
+struct HierarchicalObservations{OP<:ObservationProcess} <: ObservationProcess
     obs::OP
-    function HierarchicalObservations(obs::OP) where {OP<:ObservationProcess}
-        T = SSMProblems.arithmetic_type(obs)
-        ET = eltype(obs)
-        return new{T,ET,OP}(obs)
-    end
+    # function HierarchicalObservations(obs::OP) where {OP<:ObservationProcess}
+    #     T = SSMProblems.arithmetic_type(obs)
+    #     ET = eltype(obs)
+    #     return new{T,ET,OP}(obs)
+    # end
 end
 
 function SSMProblems.distribution(

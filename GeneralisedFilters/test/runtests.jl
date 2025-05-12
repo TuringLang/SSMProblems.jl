@@ -21,7 +21,7 @@ include("resamplers.jl")
     for Dy in Dys
         rng = StableRNG(1234)
         model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
-        _, _, ys = sample(rng, model, 1)
+        _, ys = sample(rng, model, 1)
 
         filtered, ll = GeneralisedFilters.filter(rng, model, KalmanFilter(), ys)
 
@@ -61,7 +61,7 @@ end
     for Dy in Dys
         rng = StableRNG(1234)
         model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
-        _, _, ys = sample(rng, model, 2)
+        _, ys = sample(rng, model, 2)
 
         states, ll = GeneralisedFilters.smooth(rng, model, KalmanSmoother(), ys)
 
@@ -88,7 +88,7 @@ end
 
     rng = StableRNG(1234)
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, 1, 1)
-    _, _, ys = sample(rng, model, 10)
+    _, ys = sample(rng, model, 10)
 
     bf = BF(2^12; threshold=0.8)
     bf_state, llbf = GeneralisedFilters.filter(rng, model, bf, ys)
@@ -128,7 +128,7 @@ end
 
     rng = StableRNG(1234)
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, 1, 1)
-    _, _, ys = sample(rng, model, 10)
+    _, ys = sample(rng, model, 10)
 
     algo = PF(2^10, LinearGaussianProposal(); threshold=0.6)
     kf_states, kf_ll = GeneralisedFilters.filter(rng, model, KalmanFilter(), ys)
@@ -153,8 +153,8 @@ end
     P = rand(rng, 3, 3)
     P = P ./ sum(P; dims=2)
 
-    struct MixtureModelObservation{T} <: SSMProblems.ObservationProcess{T,T}
-        μs::Vector{T}
+    struct MixtureModelObservation{T<:Real,MT<:AbstractVector{T}} <: ObservationProcess
+        μs::MT
     end
 
     function SSMProblems.logdensity(
@@ -169,9 +169,10 @@ end
 
     μs = [0.0, 1.0, 2.0]
 
-    dyn = HomogeneousDiscreteLatentDynamics{Int,Float64}(α0, P)
+    prior = HomogenousDiscretePrior(α0)
+    dyn = HomogeneousDiscreteLatentDynamics(P)
     obs = MixtureModelObservation(μs)
-    model = StateSpaceModel(dyn, obs)
+    model = StateSpaceModel(prior, dyn, obs)
 
     observations = [rand(rng)]
 
@@ -212,7 +213,7 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, D_outer, D_inner, D_obs
     )
-    _, _, ys = sample(rng, full_model, T)
+    _, ys = sample(rng, full_model, T)
 
     # Ground truth Kalman filtering
     kf_states, kf_ll = GeneralisedFilters.filter(rng, full_model, KalmanFilter(), ys)
@@ -290,17 +291,10 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, 1, 1, 1
     )
-    _, _, ys = sample(rng, full_model, T)
+    _, ys = sample(rng, full_model, T)
 
-    # Manually create tree to force expansion on second step
-    particle_type = GeneralisedFilters.RaoBlackwellisedParticle{
-        eltype(hier_model.outer_dyn),GeneralisedFilters.rb_eltype(hier_model.inner_model)
-    }
-    nodes = Vector{particle_type}(undef, N_particles)
-    tree = GeneralisedFilters.ParticleTree(nodes, N_particles + 1)
-
+    cb = GeneralisedFilters.AncestorCallback(nothing)
     rbpf = RBPF(KalmanFilter(), N_particles)
-    cb = GeneralisedFilters.AncestorCallback(tree)
     GeneralisedFilters.filter(rng, hier_model, rbpf, ys; callback=cb)
 
     # TODO: add proper test comparing to dense storage
@@ -325,7 +319,7 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, D_outer, D_inner, D_obs
     )
-    _, _, ys = sample(rng, full_model, T)
+    _, ys = sample(rng, full_model, T)
 
     # Ground truth Kalman filtering
     kf_states, kf_ll = GeneralisedFilters.filter(rng, full_model, KalmanFilter(), ys)
@@ -373,12 +367,12 @@ end
 
     rng = StableRNG(SEED)
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, 1, 1)
-    _, _, ys = sample(rng, model, K)
+    _, ys = sample(rng, model, K)
 
     ref_traj = OffsetVector([rand(rng, 1) for _ in 0:K], -1)
 
     bf = BF(N_particles; threshold=1.0, resampler=DummyResampler())
-    cb = GeneralisedFilters.DenseAncestorCallback(Vector{Float64})
+    cb = GeneralisedFilters.DenseAncestorCallback(nothing)
     bf_state, _ = GeneralisedFilters.filter(
         rng, model, bf, ys; ref_state=ref_traj, callback=cb
     )
@@ -413,7 +407,7 @@ end
 
     rng = StableRNG(SEED)
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
-    _, _, ys = sample(rng, model, K)
+    _, ys = sample(rng, model, K)
 
     # Kalman smoother
     state, ks_ll = GeneralisedFilters.smooth(
@@ -477,7 +471,7 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, D_outer, D_inner, D_obs, T; static_arrays=true
     )
-    _, _, ys = sample(rng, full_model, K)
+    _, ys = sample(rng, full_model, K)
 
     # Kalman smoother
     state, _ = GeneralisedFilters.smooth(
