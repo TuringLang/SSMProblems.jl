@@ -9,19 +9,19 @@ using Plots
 
 ## PARTICLE DISTRIBUTIONS ##################################################################
 
-abstract type ParticleDistribution end
+abstract type ParticleDistribution{PT} end
 
-mutable struct Particles{PT} <: ParticleDistribution
+mutable struct Particles{PT} <: ParticleDistribution{PT}
     particles::Vector{PT}
 end
 
-mutable struct WeightedParticles{PT,WT<:Real} <: ParticleDistribution
+mutable struct WeightedParticles{PT,WT<:Real} <: ParticleDistribution{PT}
     particles::Vector{PT}
     log_weights::Vector{WT}
 end
 
-mutable struct GaussianDistribution{XT,ΣT} <: ParticleDistribution
-    x::XT
+struct GaussianDistribution{PT,ΣT} <: ParticleDistribution{PT}
+    μ::PT
     Σ::ΣT
 end
 
@@ -51,6 +51,7 @@ abstract type AbstractFilter end
 
 struct BootstrapFilter <: AbstractFilter
     N::Int
+    threshold::Float64
 end
 
 const BF = BootstrapFilter
@@ -66,7 +67,7 @@ end
 function resample(rng::AbstractRNG, algo::BF, state::ParticleDistribution)
     ws = weights(state)
     ess = inv(sum(abs2, ws))
-    if ess <= algo.N * 0.5
+    if ess <= algo.N * algo.threshold
         idx = rand(rng, Distributions.Categorical(ws), algo.N)
 
         # creates a new particle distribution in GF anyways
@@ -120,8 +121,8 @@ struct KalmanFilter <: AbstractFilter end
 const KF = KalmanFilter
 
 function initialize(rng::AbstractRNG, model::StateSpaceModel, algo::KF; kwargs...)
-    @unpack x, Σ = model.prior
-    return GaussianDistribution(x, Σ)
+    @unpack μ, Σ = model.prior
+    return GaussianDistribution(μ, Σ)
 end
 
 function resample(::AbstractRNG, ::KF, state::GaussianDistribution)
@@ -132,28 +133,26 @@ function predict(
     ::AbstractRNG, model::StateSpaceModel, algo::KF, iter::Int, state; kwargs...
 )
     @unpack Φ, b, Q = model.dyn
-    x = Φ * state.x + b
-    Σ = Φ * state.Σ * Φ' + Q
-    return GaussianDistribution(x, Σ)
+    return GaussianDistribution(Φ * state.μ + b, Φ * state.Σ * Φ' + Q)
 end
 
 function update(model::StateSpaceModel, algo::KF, iter::Int, state, observation; kwargs...)
     @unpack H, R = model.obs
     K = state.Σ * H' / (H * state.Σ * H' + R)
-    state.x = state.x + K * (observation - H * state.x)
-    state.Σ = state.Σ - K * H * state.Σ
-    return state
+    return GaussianDistribution(
+        state.μ + K * (observation - H * state.μ), state.Σ - K * H * state.Σ
+    )
 end
 
 ## STATE SPACE MODEL #######################################################################
 
 struct GaussianPrior{XT<:AbstractVector,ΣT<:AbstractMatrix} <: StatePrior
-    x::XT
+    μ::XT
     Σ::ΣT
 end
 
 struct LinearGaussianLatentDynamics{
-    ΦT<:AbstractMatrix,bT<:AbstractArray,QT<:AbstractMatrix
+    ΦT<:AbstractMatrix,bT<:AbstractVector,QT<:AbstractMatrix
 } <: LatentDynamics
     Φ::ΦT
     b::bT
@@ -167,7 +166,7 @@ struct LinearGaussianObservationProcess{HT<:AbstractMatrix,RT<:AbstractMatrix} <
 end
 
 function SSMProblems.distribution(prior::GaussianPrior; kwargs...)
-    return MvNormal(prior.x, prior.Σ)
+    return MvNormal(prior.μ, prior.Σ)
 end
 
 function SSMProblems.distribution(
