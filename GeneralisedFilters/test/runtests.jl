@@ -444,7 +444,6 @@ end
 
 @testitem "RBCSMC test" begin
     using GeneralisedFilters
-    using GaussianDistributions
     using StableRNGs
     using PDMats
     using LinearAlgebra
