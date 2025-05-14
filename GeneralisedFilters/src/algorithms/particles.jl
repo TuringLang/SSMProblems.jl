@@ -95,7 +95,7 @@ function initialise(
         end
     end
 
-    return ParticleDistribution(particles)
+    return Particles(particles)
 end
 
 function predict(
@@ -103,12 +103,12 @@ function predict(
     model::StateSpaceModel,
     algo::ParticleFilter,
     iter::Integer,
-    state::ParticleDistribution,
+    state,
     observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    proposed_particles = map(enumerate(state.particles)) do (i, particle)
+    proposed_particles = map(enumerate(state)) do (i, particle)
         if !isnothing(ref_state) && i == 1
             ref_state[iter]
         else
@@ -116,7 +116,7 @@ function predict(
         end
     end
 
-    log_weights = map(zip(proposed_particles, state.particles)) do (new_state, prev_state)
+    log_increments = map(zip(proposed_particles, state)) do (new_state, prev_state)
         log_f = SSMProblems.logdensity(model.dyn, iter, prev_state, new_state; kwargs...)
 
         log_q = SSMProblems.logdensity(
@@ -127,14 +127,14 @@ function predict(
     end
 
     state.particles = proposed_particles
-    return update_weights(state, log_weights)
+    return update_weights(state, log_increments)
 end
 
 function update(
     model::StateSpaceModel,
     algo::ParticleFilter,
     iter::Integer,
-    state::ParticleDistribution,
+    state,
     observation;
     kwargs...,
 )
@@ -183,12 +183,12 @@ function predict(
     model::StateSpaceModel,
     algo::BootstrapFilter,
     iter::Integer,
-    state::ParticleDistribution,
+    state,
     observation=nothing;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    state.particles = map(enumerate(state.particles)) do (i, particle)
+    state.particles = map(enumerate(state)) do (i, particle)
         if !isnothing(ref_state) && i == 1
             ref_state[iter]
         else

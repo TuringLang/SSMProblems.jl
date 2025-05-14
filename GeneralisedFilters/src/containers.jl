@@ -10,9 +10,12 @@ object, with the states (or particles) distributed accoring to their log-weights
 """
 abstract type ParticleDistribution{PT} end
 
-Base.collect(state::ParticleDistribution) = state.particles
-Base.length(state::ParticleDistribution) = length(state.particles)
-Base.keys(state::ParticleDistribution) = LinearIndices(state.particles)
+Base.collect(state::PT) where {PT<:ParticleDistribution} = state.particles
+Base.length(state::PT) where {PT<:ParticleDistribution} = length(state.particles)
+Base.keys(state::PT) where {PT<:ParticleDistribution} = LinearIndices(state.particles)
+
+Base.iterate(state::ParticleDistribution, i) = Base.iterate(state.particles, i)
+Base.iterate(state::ParticleDistribution) = Base.iterate(state.particles)
 
 # not sure if this is kosher, since it doesn't follow the convention of Base.getindex
 Base.@propagate_inbounds Base.getindex(state::ParticleDistribution, i) = state.particles[i]
@@ -28,18 +31,12 @@ mutable struct WeightedParticles{PT,WT<:Real} <: ParticleDistribution{PT}
     log_weights::Vector{WT}
 end
 
-# TODO: replace Gaussian with custom internals
-# struct GaussianDistribution{PT,ΣT} <: ParticleDistribution{PT}
-#     μ::PT
-#     Σ::ΣT
-# end
-
-function ParticleDistribution(particles::AbstractVector)
+function Particles(particles::AbstractVector)
     N = length(particles)
     return Particles(particles, Vector{Int}(1:N))
 end
 
-function ParticleDistribution(particles::AbstractVector, log_weights::Vector{<:Real})
+function WeightedParticles(particles, log_weights)
     N = length(particles)
     return WeightedParticles(particles, Vector{Int}(1:N), log_weights)
 end
@@ -63,6 +60,17 @@ end
 function logmeanexp(x::AbstractArray{T}; dims=:)::T where {T}
     max_ = fast_maximum(x; dims)
     @fastmath max_ .+ log.(mean(exp.(x .- max_); dims))
+end
+
+## GAUSSIAN STATES #########################################################################
+
+struct GaussianDistribution{PT,ΣT} <: ParticleDistribution{PT}
+    μ::PT
+    Σ::ΣT
+end
+
+function mean_cov(state::GaussianDistribution)
+    return state.μ, state.Σ
 end
 
 ## RAO-BLACKWELLISED PARTICLE ##############################################################

@@ -22,12 +22,12 @@ function resample(
     return construct_new_state(states, idxs)
 end
 
-function construct_new_state(states::Particles, idxs)
-    return Particles(states.particles[idxs], idxs)
+function construct_new_state(states::Particles{PT}, idxs) where {PT}
+    return Particles{PT}(states.particles[idxs], idxs)
 end
 
 function construct_new_state(states::WeightedParticles{PT,WT}, idxs) where {PT,WT}
-    return WeightedParticles(states.particles[idxs], idxs, zeros(WT, length(states)))
+    return WeightedParticles{PT,WT}(states.particles[idxs], idxs, zeros(WT, length(states)))
 end
 
 # function construct_new_state(

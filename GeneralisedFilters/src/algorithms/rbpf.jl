@@ -37,7 +37,7 @@ function initialise(
         RaoBlackwellisedParticle(x, z)
     end
 
-    return ParticleDistribution(particles)
+    return Particles(particles)
 end
 
 function predict(
