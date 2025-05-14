@@ -16,15 +16,17 @@ abstract type AbstractCallback end
 
 abstract type CallbackTrigger end
 
+const CallbackType = Union{Nothing,<:AbstractCallback}
+
 struct PostInitCallback <: CallbackTrigger end
 const PostInit = PostInitCallback()
-function (c::AbstractCallback)(model, filter, state, data, ::PostInitCallback; kwargs...)
+function (c::CallbackType)(model, filter, state, data, ::PostInitCallback; kwargs...)
     return nothing
 end
 
 struct PostResampleCallback <: CallbackTrigger end
 const PostResample = PostResampleCallback()
-function (c::AbstractCallback)(
+function (c::CallbackType)(
     model, filter, step, state, data, ::PostResampleCallback; kwargs...
 )
     return nothing
@@ -32,7 +34,7 @@ end
 
 struct PostPredictCallback <: CallbackTrigger end
 const PostPredict = PostPredictCallback()
-function (c::AbstractCallback)(
+function (c::CallbackType)(
     model, filter, step, state, data, ::PostPredictCallback; kwargs...
 )
     return nothing
@@ -40,7 +42,7 @@ end
 
 struct PostUpdateCallback <: CallbackTrigger end
 const PostUpdate = PostUpdateCallback()
-function (c::AbstractCallback)(
+function (c::CallbackType)(
     model, filter, step, state, data, ::PostUpdateCallback; kwargs...
 )
     return nothing
@@ -70,20 +72,16 @@ end
 
 A callback for dense ancestry storage, which fills a `DenseParticleContainer`.
 """
-struct DenseAncestorCallback{T} <: AbstractCallback
-    container::DenseParticleContainer{T}
-
-    function DenseAncestorCallback(::Type{T}) where {T}
-        particles = OffsetVector(Vector{T}[], -1)
-        ancestors = Vector{Int}[]
-        return new{T}(DenseParticleContainer(particles, ancestors))
-    end
+mutable struct DenseAncestorCallback <: AbstractCallback
+    container
 end
 
 function (c::DenseAncestorCallback)(
     model, filter, state, data, ::PostInitCallback; kwargs...
 )
-    push!(c.container.particles, deepcopy(state.particles))
+    c.container = DenseParticleContainer(
+        OffsetVector([deepcopy(state.particles)], -1), Vector{Int}[]
+    )
     return nothing
 end
 
@@ -366,18 +364,12 @@ end
 A callback for sparse ancestry storage, which preallocates and returns a populated 
 `ParticleTree` object.
 """
-struct AncestorCallback{T} <: AbstractCallback
-    tree::ParticleTree{T}
-end
-
-function AncestorCallback(::Type{T}, N::Integer, C::Real=1.0) where {T}
-    M = floor(Int64, C * N * log(N))
-    nodes = Vector{T}(undef, N)
-    return new{T}(ParticleTree(nodes, M))
+mutable struct AncestorCallback <: AbstractCallback
+    tree
 end
 
 function (c::AncestorCallback)(model, filter, state, data, ::PostInitCallback; kwargs...)
-    @inbounds c.tree.states[1:(filter.N)] = deepcopy(state.particles)
+    c.tree = ParticleTree(state.particles, floor(Int64, filter.N * log(filter.N)))
     return nothing
 end
 
@@ -395,22 +387,19 @@ end
 A callback which follows the resampling indices over the filtering algorithm. This is more
 of a debug tool and visualizer for various resapmling algorithms.
 """
-struct ResamplerCallback <: AbstractCallback
-    tree::ParticleTree
+mutable struct ResamplerCallback <: AbstractCallback
+    tree
+end
 
-    function ResamplerCallback(N::Integer, C::Real=1.0)
-        M = floor(Int64, C * N * log(N))
-        nodes = collect(1:N)
-        return new(ParticleTree(nodes, M))
-    end
+function (c::ResamplerCallback)(model, filter, state, data, ::PostInitCallback; kwargs...)
+    c.tree = ParticleTree(collect(1:N), floor(Int64, filter.N * log(filter.N)))
+    return nothing
 end
 
 function (c::ResamplerCallback)(
     model, filter, step, state, data, ::PostResampleCallback; kwargs...
 )
-    if step != 1
-        prune!(c.tree, get_offspring(state.ancestors))
-        insert!(c.tree, collect(1:(filter.N)), state.ancestors)
-    end
+    prune!(c.tree, get_offspring(state.ancestors))
+    insert!(c.tree, collect(1:(filter.N)), state.ancestors)
     return nothing
 end
