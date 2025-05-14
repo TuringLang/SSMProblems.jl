@@ -3,7 +3,6 @@ module GeneralisedFilters
 using AbstractMCMC: AbstractMCMC, AbstractSampler
 import Distributions: MvNormal
 import Random: AbstractRNG, default_rng, rand
-using GaussianDistributions: pairs, Gaussian
 using OffsetArrays
 using SSMProblems
 using StatsBase

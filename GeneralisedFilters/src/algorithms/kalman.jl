@@ -1,5 +1,4 @@
 export KalmanFilter, filter, BatchKalmanFilter
-using GaussianDistributions
 using CUDA: i32
 import LinearAlgebra: hermitianpart
 
@@ -13,7 +12,7 @@ function initialise(
     rng::AbstractRNG, model::LinearGaussianStateSpaceModel, filter::KalmanFilter; kwargs...
 )
     μ0, Σ0 = calc_initial(model.prior; kwargs...)
-    return Gaussian(μ0, Σ0)
+    return GaussianDistribution(μ0, Σ0)
 end
 
 function predict(
@@ -21,24 +20,24 @@ function predict(
     model::LinearGaussianStateSpaceModel,
     algo::KalmanFilter,
     iter::Integer,
-    state::Gaussian,
+    state::GaussianDistribution,
     observation=nothing;
     kwargs...,
 )
-    μ, Σ = GaussianDistributions.pair(state)
+    μ, Σ = mean_cov(state)
     A, b, Q = calc_params(model.dyn, iter; kwargs...)
-    return Gaussian(A * μ + b, A * Σ * A' + Q)
+    return GaussianDistribution(A * μ + b, A * Σ * A' + Q)
 end
 
 function update(
     model::LinearGaussianStateSpaceModel,
     algo::KalmanFilter,
     iter::Integer,
-    state::Gaussian,
+    state::GaussianDistribution,
     observation::AbstractVector;
     kwargs...,
 )
-    μ, Σ = GaussianDistributions.pair(state)
+    μ, Σ = mean_cov(state)
     H, c, R = calc_params(model.obs, iter; kwargs...)
 
     # Update state
@@ -47,7 +46,7 @@ function update(
     S = hermitianpart(H * Σ * H' + R)
     K = Σ * H' / S
 
-    state = Gaussian(μ + K * y, Σ - K * H * Σ)
+    state = GaussianDistribution(μ + K * y, Σ - K * H * Σ)
 
     # Compute log-likelihood
     ll = logpdf(MvNormal(m, S), observation)
@@ -215,13 +214,13 @@ function backward(
     states_cache,
     kwargs...,
 )
-    μ, Σ = GaussianDistributions.pair(back_state)
-    μ_pred, Σ_pred = GaussianDistributions.pair(states_cache.proposed_states[iter + 1])
-    μ_filt, Σ_filt = GaussianDistributions.pair(states_cache.filtered_states[iter])
+    μ, Σ = mean_cov(back_state)
+    μ_pred, Σ_pred = mean_cov(states_cache.proposed_states[iter + 1])
+    μ_filt, Σ_filt = mean_cov(states_cache.filtered_states[iter])
 
     G = Σ_filt * model.dyn.A' * inv(Σ_pred)
     μ = μ_filt .+ G * (μ .- μ_pred)
     Σ = Σ_filt .+ G * (Σ .- Σ_pred) * G'
 
-    return Gaussian(μ, Σ)
+    return GaussianDistribution(μ, Σ)
 end

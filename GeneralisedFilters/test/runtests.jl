@@ -107,7 +107,6 @@ end
     using LogExpFunctions: softmax
     using StableRNGs
     using Distributions
-    using GaussianDistributions
     using LinearAlgebra
 
     struct LinearGaussianProposal <: GeneralisedFilters.AbstractProposal end
@@ -121,7 +120,7 @@ end
         kwargs...,
     )
         A, b, Q = GeneralisedFilters.calc_params(model.dyn, iter; kwargs...)
-        pred = Gaussian(A * state + b, Q)
+        pred = GeneralisedFilters.GaussianDistribution(A * state + b, Q)
         prop, _ = GeneralisedFilters.update(model, KF(), iter, pred, observation; kwargs...)
         return MvNormal(prop.μ, hermitianpart(prop.Σ))
     end
