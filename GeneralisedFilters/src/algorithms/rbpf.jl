@@ -91,7 +91,7 @@ function update(
     end
 
     state = update_weights(state, log_increments)
-    return state, log_marginal_likelihood(state)
+    return state, logmeanexp(log_increments)
 end
 
 #################################

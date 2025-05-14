@@ -56,8 +56,14 @@ function update_weights(state::WeightedParticles, log_weights)
     return state
 end
 
-log_marginal_likelihood(state::Particles) = log(length(state))
-log_marginal_likelihood(state::WeightedParticles) = logsumexp(state.log_weights)
+function fast_maximum(x::AbstractArray{T}; dims)::T where {T}
+    @fastmath reduce(max, x; dims, init = float(T)(-Inf))
+end
+
+function logmeanexp(x::AbstractArray{T}; dims = :)::T where {T}
+    max_ = fast_maximum(x; dims)
+    @fastmath max_ .+ log.(mean(exp.(x .- max_); dims))
+end
 
 ## RAO-BLACKWELLISED PARTICLE ##############################################################
 

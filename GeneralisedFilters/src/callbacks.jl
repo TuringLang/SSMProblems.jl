@@ -16,15 +16,17 @@ abstract type AbstractCallback end
 
 abstract type CallbackTrigger end
 
+const CallbackType = Union{Nothing,<:AbstractCallback}
+
 struct PostInitCallback <: CallbackTrigger end
 const PostInit = PostInitCallback()
-function (c::AbstractCallback)(model, filter, state, data, ::PostInitCallback; kwargs...)
+function (c::CallbackType)(model, filter, state, data, ::PostInitCallback; kwargs...)
     return nothing
 end
 
 struct PostResampleCallback <: CallbackTrigger end
 const PostResample = PostResampleCallback()
-function (c::AbstractCallback)(
+function (c::CallbackType)(
     model, filter, step, state, data, ::PostResampleCallback; kwargs...
 )
     return nothing
@@ -32,7 +34,7 @@ end
 
 struct PostPredictCallback <: CallbackTrigger end
 const PostPredict = PostPredictCallback()
-function (c::AbstractCallback)(
+function (c::CallbackType)(
     model, filter, step, state, data, ::PostPredictCallback; kwargs...
 )
     return nothing
@@ -40,7 +42,7 @@ end
 
 struct PostUpdateCallback <: CallbackTrigger end
 const PostUpdate = PostUpdateCallback()
-function (c::AbstractCallback)(
+function (c::CallbackType)(
     model, filter, step, state, data, ::PostUpdateCallback; kwargs...
 )
     return nothing

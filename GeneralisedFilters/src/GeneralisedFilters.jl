@@ -63,15 +63,20 @@ function filter(
     model::AbstractStateSpaceModel,
     algo::AbstractFilter,
     observations::AbstractVector;
-    callback::Union{AbstractCallback,Nothing}=nothing,
+    callback::CallbackType=nothing,
     kwargs...,
 )
-    state = initialise(rng, model, algo; kwargs...)
-    isnothing(callback) || callback(model, algo, state, observations, PostInit; kwargs...)
+    # draw from the prior
+    init_state = initialise(rng, model, algo; kwargs...)
+    callback(model, algo, init_state, observations, PostInit; kwargs...)
 
-    log_evidence = initialise_log_evidence(algo, model)
+    # iterations starts here for type stability
+    state, log_evidence = step(
+        rng, model, algo, 1, init_state, observations[1]; callback, kwargs...
+    )
 
-    for t in eachindex(observations)
+    # subsequent iteration
+    for t in 2:length(observations)
         state, ll_increment = step(
             rng, model, algo, t, state, observations[t]; callback, kwargs...
         )
@@ -80,14 +85,6 @@ function filter(
 
     return state, log_evidence
 end
-
-function initialise_log_evidence(::AbstractFilter, model::AbstractStateSpaceModel)
-    return 0
-end
-
-# function initialise_log_evidence(alg::AbstractBatchFilter, model::AbstractStateSpaceModel)
-#     return CUDA.zeros(SSMProblems.arithmetic_type(model), alg.batch_size)
-# end
 
 function filter(
     model::AbstractStateSpaceModel,
@@ -105,16 +102,27 @@ function step(
     iter::Integer,
     state,
     observation;
-    callback::Union{AbstractCallback,Nothing}=nothing,
+    kwargs...,
+)
+    # generalised to fit analytical filters
+    return move(rng, model, algo, iter, state, observation; kwargs...)
+end
+
+function move(
+    rng::AbstractRNG,
+    model::AbstractStateSpaceModel,
+    algo::AbstractFilter,
+    iter::Integer,
+    state,
+    observation;
+    callback::CallbackType=nothing,
     kwargs...,
 )
     state = predict(rng, model, algo, iter, state, observation; kwargs...)
-    isnothing(callback) ||
-        callback(model, algo, iter, state, observation, PostPredict; kwargs...)
+    callback(model, algo, iter, state, observation, PostPredict; kwargs...)
 
     state, ll_increment = update(model, algo, iter, state, observation; kwargs...)
-    isnothing(callback) ||
-        callback(model, algo, iter, state, observation, PostUpdate; kwargs...)
+    callback(model, algo, iter, state, observation, PostUpdate; kwargs...)
 
     return state, ll_increment
 end

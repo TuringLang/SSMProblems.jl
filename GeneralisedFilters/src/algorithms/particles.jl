@@ -72,25 +72,12 @@ function step(
     state,
     observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
-    callback::Union{AbstractCallback,Nothing}=nothing,
+    callback::CallbackType=nothing,
     kwargs...,
 )
-    # capture the marginalized log-likelihood
     state = resample(rng, algo.resampler, state; ref_state)
-    marginalization_term = log_marginal_likelihood(state)
-    isnothing(callback) ||
-        callback(model, algo, iter, state, observation, PostResample; kwargs...)
-
-    state = predict(rng, model, algo, iter, state, observation; ref_state, kwargs...)
-    isnothing(callback) ||
-        callback(model, algo, iter, state, observation, PostPredict; kwargs...)
-
-    # TODO: ll_increment is no longer consistent with the Kalman filter
-    state, ll_increment = update(model, algo, iter, state, observation; kwargs...)
-    isnothing(callback) ||
-        callback(model, algo, iter, state, observation, PostUpdate; kwargs...)
-
-    return state, (ll_increment - marginalization_term)
+    callback(model, algo, iter, state, observation, PostResample; kwargs...)
+    return move(rng, model, algo, iter, state, observation; ref_state, callback, kwargs...)
 end
 
 function initialise(
@@ -157,7 +144,7 @@ function update(
     )
 
     state = update_weights(state, log_increments)
-    return state, log_marginal_likelihood(state)
+    return state, logmeanexp(log_increments)
 end
 
 struct LatentProposal <: AbstractProposal end
@@ -166,7 +153,7 @@ const BootstrapFilter{RS} = ParticleFilter{RS,LatentProposal}
 const BF = BootstrapFilter
 BootstrapFilter(N::Integer; kwargs...) = ParticleFilter(N, LatentProposal(); kwargs...)
 
-function simulate(
+function SSMProblems.simulate(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
     prop::LatentProposal,
@@ -178,7 +165,7 @@ function simulate(
     return SSMProblems.simulate(rng, model.dyn, iter, state; kwargs...)
 end
 
-function logdensity(
+function SSMProblems.logdensity(
     model::AbstractStateSpaceModel,
     prop::LatentProposal,
     iter::Integer,

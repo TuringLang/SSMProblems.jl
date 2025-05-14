@@ -99,7 +99,7 @@ end
 
     # Compare log-likelihood and states
     @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
-    @test llkf ≈ llbf atol = 1e-1
+    @test llkf ≈ llbf atol = 1e-2
 end
 
 @testitem "Guided filter test" begin
@@ -138,7 +138,7 @@ end
 
     # Compare log-likelihood and states
     @test first(kf_states.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
-    @test kf_ll ≈ pf_ll rtol = 1e-1
+    @test kf_ll ≈ pf_ll rtol = 1e-2
 end
 
 @testitem "Forward algorithm test" begin
