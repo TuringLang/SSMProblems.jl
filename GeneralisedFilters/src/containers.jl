@@ -57,10 +57,10 @@ function update_weights(state::WeightedParticles, log_weights)
 end
 
 function fast_maximum(x::AbstractArray{T}; dims)::T where {T}
-    @fastmath reduce(max, x; dims, init = float(T)(-Inf))
+    @fastmath reduce(max, x; dims, init=float(T)(-Inf))
 end
 
-function logmeanexp(x::AbstractArray{T}; dims = :)::T where {T}
+function logmeanexp(x::AbstractArray{T}; dims=:)::T where {T}
     max_ = fast_maximum(x; dims)
     @fastmath max_ .+ log.(mean(exp.(x .- max_); dims))
 end
