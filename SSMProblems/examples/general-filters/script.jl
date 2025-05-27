@@ -10,51 +10,39 @@ using StatsBase
 
 ## UTILITIES ###############################################################################
 
-function fast_maximum(x::AbstractArray{T}; dims)::T where {T}
-    @fastmath reduce(max, x; dims, init=float(T)(-Inf))
-end
-
 function logmeanexp(x::AbstractArray{T}; dims=:)::T where {T}
-    max_ = fast_maximum(x; dims)
+    max_ = @fastmath reduce(max, x; dims, init=float(T)(-Inf))
     @fastmath max_ .+ log.(mean(exp.(x .- max_); dims))
 end
 
+# for general PF, KF, and BF in that order
+log_marginal(log_trans_inc, log_obs_inc) = logmeanexp(log_trans_inc + log_obs_inc)
+log_marginal(::Nothing, log_obs_inc::Real) = log_obs_inc
+log_marginal(::Nothing, log_obs_inc::AbstractVector) = logmeanexp(log_obs_inc)
+
 ## PARTICLE DISTRIBUTIONS ##################################################################
 
-abstract type ParticleDistribution{PT} end
-
-Base.length(state::ParticleDistribution) = length(state.particles)
-
-mutable struct Particles{PT} <: ParticleDistribution{PT}
+mutable struct UniformParticles{PT}
     particles::Vector{PT}
 end
 
-mutable struct WeightedParticles{PT,WT<:Real} <: ParticleDistribution{PT}
+mutable struct ParticleDistribution{PT,WT<:Real}
     particles::Vector{PT}
     log_weights::Vector{WT}
 end
 
-struct GaussianDistribution{PT,ΣT} <: ParticleDistribution{PT}
+struct GaussianDistribution{PT,ΣT}
     μ::PT
     Σ::ΣT
 end
 
-function ParticleDistribution(particles::AbstractVector)
-    return Particles(particles)
+StatsBase.weights(state::ParticleDistribution) = Weights(softmax(state.log_weights))
+
+function update_weights!(state::UniformParticles, log_weights)
+    return ParticleDistribution(state.particles, log_weights)
 end
 
-function ParticleDistribution(particles::AbstractVector, log_weights::Vector{<:Real})
-    return WeightedParticles(particles, log_weights)
-end
-
-StatsBase.weights(state::Particles) = Weights(zeros(length(state.particles)))
-StatsBase.weights(state::WeightedParticles) = Weights(softmax(state.log_weights))
-
-function update_weights(state::Particles, log_weights)
-    return WeightedParticles(state.particles, log_weights)
-end
-
-function update_weights(state::WeightedParticles, log_weights)
+function update_weights!(state::ParticleDistribution, log_weights)
     state.log_weights += log_weights
     return state
 end
@@ -62,14 +50,11 @@ end
 StatsBase.mean(states::GaussianDistribution) = states.μ
 StatsBase.mean(states::ParticleDistribution) = mean(states.particles, weights(states))
 
-# for general PF, KF, and BF in that order
-log_marginal(log_trans_inc, log_obs_inc) = logmeanexp(log_trans_inc + log_obs_inc)
-log_marginal(::Nothing, log_obs_inc::Real) = log_obs_inc
-log_marginal(::Nothing, log_obs_inc::AbstractVector) = logmeanexp(log_obs_inc)
-
 ## FILTERING INTERFACE #####################################################################
 
 abstract type AbstractFilter end
+
+resample(::AbstractRNG, ::AbstractFilter, state) = state
 
 function step(
     rng::AbstractRNG,
@@ -97,14 +82,13 @@ function AbstractMCMC.sample(
     state, log_evidence = step(rng, model, algo, 1, init_state, observations[1]; kwargs...)
 
     T = length(observations)
-    filtererd_states = fill(state, T)
+    filtererd_states = fill(deepcopy(state), T)
 
     for t in 2:T
         state, log_marginal = step(rng, model, algo, t, state, observations[t]; kwargs...)
         log_evidence += log_marginal
         filtererd_states[t] = deepcopy(state)
     end
-
     return filtererd_states, log_evidence
 end
 
@@ -143,14 +127,11 @@ end
 
 ## PARTICLE FILTER #########################################################################
 
-abstract type AbstractParticleFilter <: AbstractFilter end
-
-struct ParticleFilter{PT} <: AbstractParticleFilter
+struct ParticleFilter{PT} <: AbstractFilter
     N::Int
     threshold::Float64
     proposal::PT
 end
-
 const PF = ParticleFilter
 ParticleFilter(N::Int, proposal; threshold=1.0) = ParticleFilter(N, threshold, proposal)
 
@@ -158,22 +139,19 @@ function initialize(rng::AbstractRNG, model::StateSpaceModel, algo::PF; kwargs..
     particles = map(1:(algo.N)) do _
         SSMProblems.simulate(rng, model.prior; kwargs...)
     end
-    return Particles(particles)
+    return UniformParticles(particles)
 end
 
-function resample(rng::AbstractRNG, algo::PF, state::WeightedParticles)
+function resample(rng::AbstractRNG, algo::PF, state::ParticleDistribution)
     ws = weights(state)
     ess = inv(sum(abs2, ws))
     if ess <= algo.N * algo.threshold
         idx = rand(rng, Distributions.Categorical(ws), algo.N)
-        return WeightedParticles(state.particles[idx], zero(ws))
+        return ParticleDistribution(state.particles[idx], zero(ws))
     else
         return state
     end
 end
-
-# no resampling for uniformly weighted particles
-resample(::AbstractRNG, ::PF, state::Particles) = state
 
 function predict(
     rng::AbstractRNG,
@@ -200,14 +178,14 @@ function predict(
         end
 
     state.particles = proposed_particles
-    return update_weights(state, log_increments), log_increments
+    return update_weights!(state, log_increments), log_increments
 end
 
 function update(model::StateSpaceModel, algo::PF, iter::Int, state, observation; kwargs...)
     log_increments = map(state.particles) do particle
         SSMProblems.logdensity(model.obs, iter, particle, observation; kwargs...)
     end
-    return update_weights(state, log_increments), log_increments
+    return update_weights!(state, log_increments), log_increments
 end
 
 ## BOOTSTRAP FILTER ########################################################################
@@ -242,10 +220,6 @@ function initialize(rng::AbstractRNG, model::StateSpaceModel, algo::KF; kwargs..
     return GaussianDistribution(μ, Σ)
 end
 
-function resample(::AbstractRNG, ::KF, state::GaussianDistribution)
-    return state
-end
-
 function predict(
     ::AbstractRNG,
     model::StateSpaceModel,
@@ -261,14 +235,12 @@ function predict(
 end
 
 function update(model::StateSpaceModel, algo::KF, iter::Int, state, observation; kwargs...)
-    @unpack H, R = model.obs
-
-    m = H * state.μ
-    y = observation - m
+    @unpack H, c, R = model.obs
+    m = H * state.μ + c
     S = hermitianpart(H * state.Σ * H' + R)
     K = state.Σ * H' / S
 
-    state = GaussianDistribution(state.μ + K * y, state.Σ - K * H * state.Σ)
+    state = GaussianDistribution(state.μ + K * (observation - m), state.Σ - K * H * state.Σ)
     return state, logpdf(MvNormal(m, S), observation)
 end
 
@@ -287,15 +259,15 @@ struct LinearGaussianLatentDynamics{
     Q::QT
 end
 
-struct LinearGaussianObservationProcess{HT<:AbstractMatrix,RT<:AbstractMatrix} <:
-       ObservationProcess
+struct LinearGaussianObservationProcess{
+    HT<:AbstractMatrix,cT<:AbstractVector,RT<:AbstractMatrix
+} <: ObservationProcess
     H::HT
+    c::cT
     R::RT
 end
 
-function SSMProblems.distribution(prior::GaussianPrior; kwargs...)
-    return MvNormal(prior.μ, prior.Σ)
-end
+SSMProblems.distribution(prior::GaussianPrior; kwargs...) = MvNormal(prior.μ, prior.Σ)
 
 function SSMProblems.distribution(
     model::LinearGaussianLatentDynamics, step::Int, prev_state::AbstractVector; kwargs...
@@ -306,7 +278,7 @@ end
 function SSMProblems.distribution(
     model::LinearGaussianObservationProcess, step::Int, state::AbstractVector; kwargs...
 )
-    return MvNormal(model.H * state, model.R)
+    return MvNormal(model.H * state + model.c, model.R)
 end
 
 const LinearGaussianSSM = StateSpaceModel{
@@ -318,7 +290,7 @@ struct LinearGaussianProposal <: AbstractProposal end
 function SSMProblems.distribution(
     model::AbstractStateSpaceModel,
     kernel::LinearGaussianProposal,
-    iter::Integer,
+    iter::Int,
     state,
     observation;
     kwargs...,
@@ -332,9 +304,9 @@ end
 ## DEMONSTRATION ###########################################################################
 
 toy_model = StateSpaceModel(
-    GaussianPrior([-1.0, 1.0], Matrix(1.0I, 2, 2)),
-    LinearGaussianLatentDynamics([0.8 0.2; -0.1 0.8], zeros(2), [0.2 0.0; 0.0 0.5]),
-    LinearGaussianObservationProcess([1.0 0.0;], Matrix(0.3I, 1, 1)),
+    GaussianPrior([-1, 1], I(2)),
+    LinearGaussianLatentDynamics([0.8 0.2; -0.1 0.8], zeros(2), Diagonal([0.2, 0.5])),
+    LinearGaussianObservationProcess([1 0;], zeros(1), 0.3I(1)),
 );
 
 rng = MersenneTwister(1234);
@@ -342,14 +314,14 @@ xs, ys = sample(rng, toy_model, 100);
 prop = LinearGaussianProposal();
 
 kf_states, kf_ll = AbstractMCMC.sample(rng, toy_model, KF(), ys);
-bf_states, bf_ll = AbstractMCMC.sample(rng, toy_model, BF(1024; threshold=0.5), ys);
+bf_states, bf_ll = AbstractMCMC.sample(rng, toy_model, BF(512; threshold=0.5), ys);
 pf_states, pf_ll = AbstractMCMC.sample(rng, toy_model, PF(64, prop; threshold=0.5), ys);
 
 begin
-    plt = plot(; title="First Dimension Filtered Estimates", xlabel="Step", ylabel="Value")
-    scatter!(plt, first.(ys); label="Observations", ms=2)
+    plt = plot(; title="First Dimension Filtered Estimates")
+    scatter!(plt, first.(ys); label=nothing, ms=2)
     plot!(plt, first.(mean.(kf_states)); label="Kalman Filter")
     plot!(plt, first.(mean.(bf_states)); label="Bootstrap Filter")
-    plot!(plt, first.(mean.(pf_states)); label="Optimally Filter")
+    plot!(plt, first.(mean.(pf_states)); label="Optimal Filter")
     plt
 end
