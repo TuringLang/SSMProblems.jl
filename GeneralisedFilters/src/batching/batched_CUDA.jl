@@ -1,5 +1,5 @@
 import Base: *, +, -, transpose, getindex
-import LinearAlgebra: Transpose, cholesky, \, I, UniformScaling
+import LinearAlgebra: Transpose, cholesky, \, /, I, UniformScaling, dot
 
 export BatchedCuVector, BatchedCuMatrix, BatchedCuCholesky
 
@@ -28,6 +28,14 @@ end
 function -(x::BatchedCuVector{T}, y::BatchedCuVector{T}) where {T}
     z_data = x.data .- y.data
     return BatchedCuVector(z_data)
+end
+
+function dot(x::BatchedCuVector{T}, y::BatchedCuVector{T}) where {T}
+    if size(x.data, 1) != size(y.data, 1)
+        throw(DimensionMismatch("Vectors must have the same length for dot product"))
+    end
+    xy = x.data .* y.data
+    return dropdims(sum(xy; dims=1); dims=1)
 end
 
 ###########################
@@ -67,6 +75,10 @@ function +(A::BatchedCuMatrix{T}, B::BatchedCuMatrix{T}) where {T}
     C_data = A.data .+ B.data
     return BatchedCuMatrix(C_data)
 end
+function +(A::BatchedCuMatrix{T}, B::Transpose{T,BatchedCuMatrix{T}}) where {T}
+    C_data = A.data .+ permutedims(B.parent.data, (2, 1, 3))
+    return BatchedCuMatrix(C_data)
+end
 
 function -(A::BatchedCuMatrix{T}, B::BatchedCuMatrix{T}) where {T}
     C_data = A.data .- B.data
@@ -89,12 +101,12 @@ end
 
 function *(A::BatchedCuMatrix{T}, x::BatchedCuVector{T}) where {T}
     y_data = CuArray{T}(undef, size(A.data, 1), size(x.data, 2))
-    CUDA.CUBLAS.gemv_strided_batched('N', T(1.0), A.data, x.data, T(0.0), y_data)
+    CUDA.CUBLAS.gemv_strided_batched!('N', T(1.0), A.data, x.data, T(0.0), y_data)
     return BatchedCuVector(y_data)
 end
 function *(A::Transpose{T,BatchedCuMatrix{T}}, x::BatchedCuVector{T}) where {T}
-    y_data = CuArray{T}(undef, size(A.data, 2), size(x.data, 2))
-    CUDA.CUBLAS.gemv_strided_batched('T', T(1.0), A.data, x.data, T(0.0), y_data)
+    y_data = CuArray{T}(undef, size(A.parent.data, 2), size(x.data, 2))
+    CUDA.CUBLAS.gemv_strided_batched!('T', T(1.0), A.parent.data, x.data, T(0.0), y_data)
     return BatchedCuVector(y_data)
 end
 
@@ -105,6 +117,15 @@ end
 function getindex(A::BatchedCuMatrix{T}, ::Colon, j::Int) where {T}
     col_data = A.data[:, j, :]
     return BatchedCuVector(col_data)
+end
+
+###########################
+#### SCALAR OPERATIONS ####
+###########################
+
+function /(A::BatchedCuMatrix, s::Number)
+    C_data = A.data ./ s
+    return BatchedCuMatrix(C_data)
 end
 
 #########################
@@ -135,11 +156,11 @@ for (fname, elty) in (
                 throw(DimensionMismatch("Matrix must be square for Cholesky decomposition"))
 
             P_data = copy(A.data)
-            P = BatchedCuCholesky(L_data)
+            P = BatchedCuCholesky(P_data)
 
             dh = CUDA.CUSOLVER.dense_handle()
             info = CuVector{Int}(undef, b)
-            CUDA.CUSOLVER.$fname(dh, 'L', m, L.ptrs, m, info, b)
+            CUDA.CUSOLVER.$fname(dh, 'L', m, P.ptrs, m, info, b)
 
             return P
         end
@@ -173,6 +194,25 @@ for (fname, elty) in (
     end
 end
 
+for (fname, elty) in (
+    (:cusolverDnSpotrsBatched, :Float32),
+    (:cusolverDnDpotrsBatched, :Float64),
+    (:cusolverDnCpotrsBatched, :ComplexF32),
+    (:cusolverDnZpotrsBatched, :ComplexF64),
+)
+    @eval begin
+        function \(P::BatchedCuCholesky{$elty}, x::BatchedCuVector{$elty})
+            m, b = size(x.data)
+            y_data = copy(x.data)
+            y = BatchedCuVector(y_data)
+            dh = CUDA.CUSOLVER.dense_handle()
+            info = CuVector{Int}(undef, b)
+            CUDA.CUSOLVER.$fname(dh, 'L', m, 1, P.ptrs, m, y.ptrs, m, info, b)
+            return y
+        end
+    end
+end
+
 ##########################
 #### MIXED OPERATIONS ####
 ##########################
@@ -180,4 +220,33 @@ end
 function -(x::CuVector{T}, y::BatchedCuVector{T}) where {T}
     z_data = x .- y.data
     return BatchedCuVector(z_data)
+end
+
+###################################
+#### DISTRIBUTIONAL OPERATIONS ####
+###################################
+
+function gaussian_likelihood(
+    m::BatchedCuVector{T}, S::BatchedCuMatrix{T}, y::Union{BatchedCuVector{T},CuVector{T}}
+) where {T}
+    D = size(S.data, 1)
+    y_res = y - m
+
+    # TODO: avoid recomputing Cholesky decomposition
+    S_chol = cholesky(S)
+
+    diags = CuArray{T}(undef, size(S.data, 1), size(S.data, 3))
+    for i in 1:size(S.data, 1)
+        diags[i, :] = S_chol.data[i, i, :]
+    end
+    log_dets = T(2) * dropdims(sum(log.(diags); dims=1); dims=1)
+
+    inv_term = S_chol \ y_res
+    log_likes = -T(0.5) * dot(y_res, inv_term)
+    log_likes .-= T(0.5) * (log_dets .+ D * log(T(2π)))
+
+    # HACK: only errors seems to be from numerical stability so will just overwrite
+    log_likes[isnan.(log_likes)] .= -Inf
+
+    return log_likes
 end
