@@ -17,6 +17,9 @@ include("callbacks.jl")
 include("containers.jl")
 include("resamplers.jl")
 
+# Batching utilities
+include("batching/batched_CUDA.jl")
+
 ## FILTERING BASE ##########################################################################
 
 abstract type AbstractFilter <: AbstractSampler end

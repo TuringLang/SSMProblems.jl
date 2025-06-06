@@ -1,7 +1,7 @@
 export KalmanFilter, filter, BatchKalmanFilter
 using GaussianDistributions
 using CUDA: i32
-import LinearAlgebra: hermitianpart
+import LinearAlgebra: hermitianpart, transpose, Cholesky
 
 export KalmanFilter, KF, KalmanSmoother, KS
 
@@ -27,7 +27,7 @@ function predict(
 )
     μ, Σ = GaussianDistributions.pair(state)
     A, b, Q = calc_params(model.dyn, iter; kwargs...)
-    return Gaussian(A * μ + b, A * Σ * A' + Q)
+    return Gaussian(A * μ + b, A * Σ * transpose(A) + Q)
 end
 
 function update(
@@ -44,89 +44,21 @@ function update(
     # Update state
     m = H * μ + c
     y = observation - m
-    S = hermitianpart(H * Σ * H' + R)
-    K = Σ * H' / S
+    S = H * Σ * transpose(H) + R
+    S = (S + transpose(S)) / 2  # force symmetry
+    S_chol = cholesky(S)
+    KT = S_chol \ H * Σ  # TODO: only using `\` for better integration with CuSolver
 
-    state = Gaussian(μ + K * y, Σ - K * H * Σ)
+    state = Gaussian(μ + transpose(KT) * y, Σ - transpose(KT) * H * Σ)
 
     # Compute log-likelihood
-    ll = logpdf(MvNormal(m, S), observation)
+    ll = gaussian_likelihood(m, S, observation)
 
     return state, ll
 end
 
-struct BatchKalmanFilter <: AbstractBatchFilter
-    batch_size::Int
-end
-
-function initialise(
-    rng::AbstractRNG,
-    model::LinearGaussianStateSpaceModel{T},
-    algo::BatchKalmanFilter;
-    kwargs...,
-) where {T}
-    μ0s, Σ0s = batch_calc_initial(model.dyn, algo.batch_size; kwargs...)
-    return BatchGaussianDistribution(μ0s, Σ0s)
-end
-
-function predict(
-    rng::AbstractRNG,
-    model::LinearGaussianStateSpaceModel{T},
-    algo::BatchKalmanFilter,
-    iter::Integer,
-    state::BatchGaussianDistribution,
-    observation;
-    kwargs...,
-) where {T}
-    μs, Σs = state.μs, state.Σs
-    As, bs, Qs = batch_calc_params(model.dyn, iter, algo.batch_size; kwargs...)
-    μ̂s = NNlib.batched_vec(As, μs) .+ bs
-    Σ̂s = NNlib.batched_mul(NNlib.batched_mul(As, Σs), NNlib.batched_transpose(As)) .+ Qs
-    return BatchGaussianDistribution(μ̂s, Σ̂s)
-end
-
-function update(
-    model::LinearGaussianStateSpaceModel{T},
-    algo::BatchKalmanFilter,
-    iter::Integer,
-    state::BatchGaussianDistribution,
-    observation;
-    kwargs...,
-) where {T}
-    μs, Σs = state.μs, state.Σs
-    Hs, cs, Rs = batch_calc_params(model.obs, iter, algo.batch_size; kwargs...)
-    D = size(observation, 1)
-
-    m = NNlib.batched_vec(Hs, μs) .+ cs
-    y_res = cu(observation) .- m
-    S = NNlib.batched_mul(Hs, NNlib.batched_mul(Σs, NNlib.batched_transpose(Hs))) .+ Rs
-
-    ΣH_T = NNlib.batched_mul(Σs, NNlib.batched_transpose(Hs))
-
-    S_inv = CUDA.similar(S)
-    d_ipiv, _, d_S = CUDA.CUBLAS.getrf_strided_batched(S, true)
-    CUDA.CUBLAS.getri_strided_batched!(d_S, S_inv, d_ipiv)
-
-    diags = CuArray{eltype(S)}(undef, size(S, 1), size(S, 3))
-    for i in 1:size(S, 1)
-        diags[i, :] .= d_S[i, i, :]
-    end
-
-    log_dets = sum(log ∘ abs, diags; dims=1)
-
-    K = NNlib.batched_mul(ΣH_T, S_inv)
-
-    μ_filt = μs .+ NNlib.batched_vec(K, y_res)
-    Σ_filt = Σs .- NNlib.batched_mul(K, NNlib.batched_mul(Hs, Σs))
-
-    inv_term = NNlib.batched_vec(S_inv, y_res)
-    log_likes = -T(0.5) * NNlib.batched_vec(reshape(y_res, 1, D, size(S, 3)), inv_term)
-    log_likes = log_likes .- T(0.5) * (log_dets .+ D * log(T(2π)))
-
-    # HACK: only errors seems to be from numerical stability so will just overwrite
-    log_likes[isnan.(log_likes)] .= -Inf
-
-    return BatchGaussianDistribution(μ_filt, Σ_filt), dropdims(log_likes; dims=1)
+function gaussian_likelihood(m::AbstractVector, S::AbstractMatrix, y::AbstractVector)
+    return logpdf(MvNormal(m, S), y)
 end
 
 ## KALMAN SMOOTHER #########################################################################

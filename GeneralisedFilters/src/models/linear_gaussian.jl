@@ -76,12 +76,17 @@ end
 ###########################################
 
 struct HomogeneousLinearGaussianLatentDynamics{
-    T<:Real,ΣT<:AbstractMatrix{T},AT<:AbstractMatrix{T},QT<:AbstractMatrix{T}
+    T<:Real,
+    μT<:Union{AbstractVector{T},BatchedVector{T}},
+    ΣT<:Union{AbstractMatrix{T},BatchedMatrix{T}},
+    AT<:Union{AbstractMatrix{T},BatchedMatrix{T}},
+    bT<:Union{AbstractVector{T},BatchedVector{T}},
+    QT<:Union{AbstractMatrix{T},BatchedMatrix{T}},
 } <: LinearGaussianLatentDynamics{T}
-    μ0::Vector{T}
+    μ0::μT
     Σ0::ΣT
     A::AT
-    b::Vector{T}
+    b::bT
     Q::QT
 end
 calc_μ0(dyn::HomogeneousLinearGaussianLatentDynamics; kwargs...) = dyn.μ0
@@ -91,10 +96,13 @@ calc_b(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer; kwargs...) = dyn
 calc_Q(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer; kwargs...) = dyn.Q
 
 struct HomogeneousLinearGaussianObservationProcess{
-    T<:Real,HT<:AbstractMatrix{T},RT<:AbstractMatrix{T}
+    T<:Real,
+    HT<:Union{AbstractMatrix{T},BatchedMatrix{T}},
+    cT<:Union{AbstractVector{T},BatchedVector{T}},
+    RT<:Union{AbstractMatrix{T},BatchedMatrix{T}},
 } <: LinearGaussianObservationProcess{T}
     H::HT
-    c::Vector{T}
+    c::cT
     R::RT
 end
 calc_H(obs::HomogeneousLinearGaussianObservationProcess, ::Integer; kwargs...) = obs.H
