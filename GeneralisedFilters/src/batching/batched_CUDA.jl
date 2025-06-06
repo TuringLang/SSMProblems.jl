@@ -3,11 +3,14 @@ import LinearAlgebra: Transpose, cholesky, \, I, UniformScaling
 
 export BatchedCuVector, BatchedCuMatrix, BatchedCuCholesky
 
+abstract type BatchedVector{T} end
+abstract type BatchedMatrix{T} end
+
 ###########################
 #### VECTOR OPERATIONS ####
 ###########################
 
-struct BatchedCuVector{T}
+struct BatchedCuVector{T} <: BatchedVector{T}
     data::CuArray{T,2,CUDA.DeviceMemory}
     ptrs::CuVector{CuPtr{T},CUDA.DeviceMemory}
 end
@@ -31,7 +34,7 @@ end
 #### MATRIX OPERATIONS ####
 ###########################
 
-struct BatchedCuMatrix{T}
+struct BatchedCuMatrix{T} <: BatchedMatrix{T}
     data::CuArray{T,3,CUDA.DeviceMemory}
     ptrs::CuVector{CuPtr{T},CUDA.DeviceMemory}
 end
@@ -108,7 +111,7 @@ end
 #### POTR OPERATIONS ####
 #########################
 
-struct BatchedCuCholesky{T}
+struct BatchedCuCholesky{T} <: BatchedMatrix{T}
     data::CuArray{T,3,CUDA.DeviceMemory}
     ptrs::CuVector{CuPtr{T},CUDA.DeviceMemory}
 end
@@ -131,14 +134,14 @@ for (fname, elty) in (
             m == n ||
                 throw(DimensionMismatch("Matrix must be square for Cholesky decomposition"))
 
-            L_data = copy(A.data)
-            L = BatchedCuCholesky(L_data)
+            P_data = copy(A.data)
+            P = BatchedCuCholesky(L_data)
 
             dh = CUDA.CUSOLVER.dense_handle()
             info = CuVector{Int}(undef, b)
             CUDA.CUSOLVER.$fname(dh, 'L', m, L.ptrs, m, info, b)
 
-            return L
+            return P
         end
     end
 end
@@ -151,7 +154,7 @@ for (fname, elty) in (
     (:cusolverDnZpotrsBatched, :ComplexF64),
 )
     @eval begin
-        function \(L::BatchedCuCholesky{$elty}, A::BatchedCuMatrix{$elty})
+        function \(P::BatchedCuCholesky{$elty}, A::BatchedCuMatrix{$elty})
             m, n, b, = size(A.data)
             # CUSOLVER does not support matrix RHS for potrs so solve each column separately
             bs_data = Vector{CuMatrix{$elty}}(undef, n)
@@ -161,7 +164,7 @@ for (fname, elty) in (
 
                 dh = CUDA.CUSOLVER.dense_handle()
                 info = CuVector{Int}(undef, b)
-                CUDA.CUSOLVER.$fname(dh, 'L', m, 1, L.ptrs, m, b_ptr, m, info, b)
+                CUDA.CUSOLVER.$fname(dh, 'L', m, 1, P.ptrs, m, b_ptr, m, info, b)
             end
 
             B_data = stack(bs_data; dims=2)
@@ -178,4 +181,3 @@ function -(x::CuVector{T}, y::BatchedCuVector{T}) where {T}
     z_data = x .- y.data
     return BatchedCuVector(z_data)
 end
-
