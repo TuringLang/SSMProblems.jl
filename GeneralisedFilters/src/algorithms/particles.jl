@@ -122,26 +122,38 @@ function predict(
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    proposed_particles = map(enumerate(state.particles)) do (i, particle)
-        if !isnothing(ref_state) && i == 1
-            ref_state[iter]
-        else
-            simulate(rng, model, filter.proposal, iter, particle, observation; kwargs...)
-        end
+    proposed_particles =
+        SSMProblems.simulate.(
+            Ref(rng),
+            Ref(model),
+            Ref(filter.proposal),
+            Ref(iter),
+            state.particles,
+            Ref(observation),
+            kwargs...,
+        )
+    if !isnothing(ref_state)
+        proposed_particles[1] = ref_state[iter]
     end
 
-    state.log_weights +=
-        map(zip(proposed_particles, state.particles)) do (new_state, prev_state)
-            log_f = SSMProblems.logdensity(
-                model.dyn, iter, prev_state, new_state; kwargs...
-            )
-
-            log_q = SSMProblems.logdensity(
-                model, filter.proposal, iter, prev_state, new_state, observation; kwargs...
-            )
-
-            (log_f - log_q)
-        end
+    state.log_weights .+=
+        SSMProblems.logdensity.(
+            Ref(model.dyn),
+            Ref(iter),
+            state.particles,
+            proposed_particles,
+            kwargs...,
+        )
+    state.log_weights .-=
+        SSMProblems.logdensity.(
+            Ref(model),
+            Ref(filter.proposal),
+            Ref(iter),
+            state.particles,
+            proposed_particles,
+            Ref(observation);
+            kwargs...,
+        )
 
     state.particles = proposed_particles
 
@@ -156,10 +168,10 @@ function update(
     observation;
     kwargs...,
 ) where {T}
-    log_increments = map(
-        x -> SSMProblems.logdensity(model.obs, iter, x, observation; kwargs...),
-        state.particles,
-    )
+    log_increments =
+        SSMProblems.logdensity.(
+            Ref(model.obs), Ref(iter), state.particles, Ref(observation); kwargs...
+        )
 
     state.log_weights += log_increments
 
@@ -207,12 +219,12 @@ function predict(
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    state.particles = map(enumerate(state.particles)) do (i, particle)
-        if !isnothing(ref_state) && i == 1
-            ref_state[iter]
-        else
-            SSMProblems.simulate(rng, model.dyn, iter, particle; kwargs...)
-        end
+    state.particles =
+        SSMProblems.simulate.(
+            Ref(rng), Ref(model.dyn), Ref(iter), state.particles; kwargs...
+        )
+    if !isnothing(ref_state)
+        state.particles[1] = ref_state[iter]
     end
 
     return state
