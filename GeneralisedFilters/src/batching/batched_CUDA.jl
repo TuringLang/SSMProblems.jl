@@ -19,6 +19,7 @@ function BatchedCuVector(data::CuArray{T,2}) where {T}
 end
 Base.eltype(::BatchedCuVector{T}) where {T} = T
 Base.length(x::BatchedCuVector) = size(x.data, 2)
+Base.getindex(x::BatchedCuVector, idxs) = BatchedCuVector(x.data[:, idxs])
 
 function +(x::BatchedCuVector{T}, y::BatchedCuVector{T}) where {T}
     z_data = x.data .+ y.data
@@ -52,6 +53,7 @@ function BatchedCuMatrix(data::CuArray{T,3}) where {T}
 end
 Base.eltype(::BatchedCuMatrix{T}) where {T} = T
 Base.length(A::BatchedCuMatrix) = size(A.data, 3)
+Base.getindex(A::BatchedCuMatrix, idxs) = BatchedCuMatrix(A.data[:, :, idxs])
 
 transpose(A::BatchedCuMatrix{T}) where {T} = Transpose{T,BatchedCuMatrix{T}}(A)
 
@@ -143,6 +145,7 @@ function BatchedCuCholesky(data::CuArray{T,3}) where {T}
 end
 Base.eltype(::BatchedCuCholesky{T}) where {T} = T
 Base.length(P::BatchedCuCholesky) = size(P.data, 3)
+Base.getindex(P::BatchedCuCholesky, idxs) = BatchedCuCholesky(P.data[:, :, idxs])
 
 for (fname, elty) in (
     (:cusolverDnSpotrfBatched, :Float32),

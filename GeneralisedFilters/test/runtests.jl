@@ -108,7 +108,6 @@ end
     using LogExpFunctions: softmax
     using CUDA
     using LinearAlgebra
-    using GeneralisedFilters
 
     rng = StableRNG(1234)
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, 1, 1)
@@ -128,8 +127,7 @@ end
         ),
     )
 
-    # HACK: disabling resampling for now
-    bf = BF(2^12; threshold=0.0)
+    bf = BF(2^12; threshold=1.0)
     # HACK: run BF manually until initialisation interface is finalised
     # Initialisation
     Z = BatchedCuVector(CUDA.randn(Float32, 1, bf.N))

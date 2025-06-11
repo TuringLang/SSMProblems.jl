@@ -8,14 +8,19 @@
 A container for particle filters which composes the weighted sample into a distibution-like
 object, with the states (or particles) distributed accoring to their log-weights.
 """
-mutable struct ParticleDistribution{PT,WT}
+mutable struct ParticleDistribution{PT,AT,WT}
     particles::PT
-    ancestors::Vector{Int}
+    ancestors::AT
     log_weights::WT
 end
-function ParticleDistribution(particles, log_weights)
+# TODO: these helpers might be more confusing than they're worth — and don't cover all cases
+function ParticleDistribution(particles, log_weights::Vector)
     N = length(particles)
     return ParticleDistribution(particles, Vector{Int}(1:N), log_weights)
+end
+function ParticleDistribution(particles, log_weights::CuVector)
+    N = length(particles)
+    return ParticleDistribution(particles, CuVector{Int}(1:N), log_weights)
 end
 
 StatsBase.weights(state::ParticleDistribution) = softmax(state.log_weights)

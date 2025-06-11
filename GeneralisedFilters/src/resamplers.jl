@@ -23,7 +23,7 @@ function resample(
 end
 
 function construct_new_state(states::ParticleDistribution{PT,WT}, idxs) where {PT,WT}
-    return ParticleDistribution(states.particles[idxs], idxs, zeros(WT, length(states)))
+    return ParticleDistribution(states.particles[idxs], idxs, zero(states.log_weights))
 end
 
 function construct_new_state(
