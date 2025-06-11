@@ -32,114 +32,49 @@
     ]
 
     T = 5
-    Ys = [[rand(rng, Dy) for _ in 1:T] for _ in 1:K]
+    ys_cpu = [rand(rng, Dy) for _ in 1:T]
+    Ys = [ys_cpu for _ in 1:K]
 
     outputs = [
         GeneralisedFilters.filter(rng, models[k], KalmanFilter(), Ys[k]) for k in 1:K
     ]
-
     states = first.(outputs)
     log_likelihoods = last.(outputs)
 
-    struct BatchLinearGaussianDynamics{T,MT} <: LinearGaussianLatentDynamics{T}
-        μ0s::CuArray{T,2,MT}
-        Σ0s::CuArray{T,3,MT}
-        As::CuArray{T,3,MT}
-        bs::CuArray{T,2,MT}
-        Qs::CuArray{T,3,MT}
-    end
+    # Define batched model
+    μ0 = BatchedCuVector(cu(stack(μ0s)))
+    Σ0 = BatchedCuMatrix(cu(stack(Σ0s)))
+    A = BatchedCuMatrix(cu(stack(As)))
+    b = BatchedCuVector(cu(stack(bs)))
+    Q = BatchedCuMatrix(cu(stack(Qs)))
 
-    function BatchLinearGaussianDynamics(
-        μ0s::Vector{Vector{T}},
-        Σ0s::Vector{Matrix{T}},
-        As::Vector{Matrix{T}},
-        bs::Vector{Vector{T}},
-        Qs::Vector{Matrix{T}},
+    dyn = GeneralisedFilters.HomogeneousLinearGaussianLatentDynamics(μ0, Σ0, A, b, Q)
+
+    H = BatchedCuMatrix(cu(stack(Hs)))
+    c = BatchedCuVector(cu(stack(cs)))
+    R = BatchedCuMatrix(cu(stack(Rs)))
+
+    obs = GeneralisedFilters.HomogeneousLinearGaussianObservationProcess(H, c, R)
+
+    ssm = StateSpaceModel(dyn, obs)
+    ys = cu.(ys_cpu)
+
+    # Hack: manually setting of initialisation for this model
+    function GeneralisedFilters.initialise_log_evidence(
+        ::KalmanFilter,
+        model::StateSpaceModel{
+            T,
+            <:GeneralisedFilters.HomogeneousLinearGaussianLatentDynamics{
+                T,<:BatchedCuVector
+            },
+        },
     ) where {T}
-        μ0s = CuArray(stack(μ0s))
-        Σ0s = CuArray(stack(Σ0s))
-        As = CuArray(stack(As))
-        bs = CuArray(stack(bs))
-        Qs = CuArray(stack(Qs))
-        return BatchLinearGaussianDynamics(μ0s, Σ0s, As, bs, Qs)
+        D = size(model.dyn.μ0.data, 2)
+        return CUDA.zeros(T, D)
     end
 
-    function GeneralisedFilters.batch_calc_μ0s(
-        dyn::BatchLinearGaussianDynamics, ::Integer; kwargs...
-    )
-        return dyn.μ0s
-    end
-    function GeneralisedFilters.batch_calc_Σ0s(
-        dyn::BatchLinearGaussianDynamics, ::Integer; kwargs...
-    )
-        return dyn.Σ0s
-    end
-    function GeneralisedFilters.batch_calc_As(
-        dyn::BatchLinearGaussianDynamics, ::Integer, ::Integer; kwargs...
-    )
-        return dyn.As
-    end
-    function GeneralisedFilters.batch_calc_bs(
-        dyn::BatchLinearGaussianDynamics, ::Integer, ::Integer; kwargs...
-    )
-        return dyn.bs
-    end
-    function GeneralisedFilters.batch_calc_Qs(
-        dyn::BatchLinearGaussianDynamics, ::Integer, ::Integer; kwargs...
-    )
-        return dyn.Qs
-    end
+    state, ll = GeneralisedFilters.filter(rng, ssm, KalmanFilter(), ys)
 
-    struct BatchLinearGaussianObservations{T,MT} <: LinearGaussianObservationProcess{T}
-        Hs::CuArray{T,3,MT}
-        cs::CuArray{T,2,MT}
-        Rs::CuArray{T,3,MT}
-    end
-
-    function BatchLinearGaussianObservations(
-        Hs::Vector{Matrix{T}}, cs::Vector{Vector{T}}, Rs::Vector{Matrix{T}}
-    ) where {T}
-        Hs = CuArray(stack(Hs))
-        cs = CuArray(stack(cs))
-        Rs = CuArray(stack(Rs))
-        return BatchLinearGaussianObservations(Hs, cs, Rs)
-    end
-
-    function GeneralisedFilters.batch_calc_Hs(
-        obs::BatchLinearGaussianObservations, ::Integer, ::Integer; kwargs...
-    )
-        return obs.Hs
-    end
-    function GeneralisedFilters.batch_calc_cs(
-        obs::BatchLinearGaussianObservations, ::Integer, ::Integer; kwargs...
-    )
-        return obs.cs
-    end
-    function GeneralisedFilters.batch_calc_Rs(
-        obs::BatchLinearGaussianObservations, ::Integer, ::Integer; kwargs...
-    )
-        return obs.Rs
-    end
-
-    batch_model = GeneralisedFilters.StateSpaceModel(
-        BatchLinearGaussianDynamics(μ0s, Σ0s, As, bs, Qs),
-        BatchLinearGaussianObservations(Hs, cs, Rs),
-    )
-
-    Ys_batch = Vector{Matrix{Float64}}(undef, T)
-    for t in 1:T
-        Ys_batch[t] = stack(Ys[k][t] for k in 1:K)
-    end
-    batch_output = GeneralisedFilters.filter(
-        rng, batch_model, BatchKalmanFilter(K), Ys_batch
-    )
-
-    # println("Batch log-likelihood: ", batch_output[2])
-    # println("Individual log-likelihoods: ", log_likelihoods)
-
-    # println("Batch states: ", batch_output[1].μs')
-    # println("Individual states: ", getproperty.(states, :μ))
-
-    @test Array(batch_output[2])[end] .≈ log_likelihoods[end] rtol = 1e-5
-    @test Array(batch_output[1].μs) ≈ stack(getproperty.(states, :μ)) rtol = 1e-5
+    @test all(isapprox.(Array(ll), log_likelihoods; rtol=1e-5))
+    @test Array(state.μ.data) ≈ stack(getproperty.(states, :μ)) rtol = 1e-5
 end
