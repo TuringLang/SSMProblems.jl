@@ -138,11 +138,7 @@ function predict(
 
     state.log_weights .+=
         SSMProblems.logdensity.(
-            Ref(model.dyn),
-            Ref(iter),
-            state.particles,
-            proposed_particles,
-            kwargs...,
+            Ref(model.dyn), Ref(iter), state.particles, proposed_particles, kwargs...
         )
     state.log_weights .-=
         SSMProblems.logdensity.(
@@ -244,4 +240,46 @@ function filter(
         HierarchicalObservations(model.inner_model.obs),
     )
     return filter(rng, ssm, algo, observations; ref_state=ref_state, kwargs...)
+end
+
+# Broadcast wrapper for batched types
+# TODO: this can likely be replaced with a broadcast style
+function Base.Broadcast.broadcasted(
+    ::typeof(SSMProblems.simulate),
+    rng_ref::Base.RefValue,
+    model_dyn_ref::Base.RefValue,
+    iter_ref::Base.RefValue,
+    particles::BatchedVector;
+    kwargs...,
+)
+    # Extract values from Ref and call non-broadcasted version
+    return SSMProblems.simulate(
+        rng_ref[], model_dyn_ref[], iter_ref[], particles; kwargs...
+    )
+end
+function Base.Broadcast.broadcasted(
+    ::typeof(SSMProblems.logdensity),
+    model_obs_ref::Base.RefValue,
+    iter_ref::Base.RefValue,
+    particles::BatchedVector,
+    observation::Base.RefValue;
+    kwargs...,
+)
+    # Extract values from Ref and call non-broadcasted version
+    return SSMProblems.logdensity(
+        model_obs_ref[], iter_ref[], particles, observation[]; kwargs...
+    )
+end
+function Base.Broadcast.broadcasted(
+    ::typeof(SSMProblems.logdensity),
+    model_dyn_ref::Base.RefValue,
+    iter_ref::Base.RefValue,
+    prev_particles::BatchedVector,
+    new_particles::BatchedVector;
+    kwargs...,
+)
+    # Extract values from Ref and call non-broadcasted version
+    return SSMProblems.logdensity(
+        model_dyn_ref[], iter_ref[], prev_particles, new_particles; kwargs...
+    )
 end

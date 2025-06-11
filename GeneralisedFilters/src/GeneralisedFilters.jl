@@ -18,7 +18,9 @@ include("containers.jl")
 include("resamplers.jl")
 
 # Batching utilities
+include("batching/batching.jl")
 include("batching/batched_CUDA.jl")
+include("batching/batched_SA.jl")
 
 ## FILTERING BASE ##########################################################################
 

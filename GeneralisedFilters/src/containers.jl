@@ -8,12 +8,12 @@
 A container for particle filters which composes the weighted sample into a distibution-like
 object, with the states (or particles) distributed accoring to their log-weights.
 """
-mutable struct ParticleDistribution{PT,WT<:Real}
-    particles::Vector{PT}
+mutable struct ParticleDistribution{PT,WT}
+    particles::PT
     ancestors::Vector{Int}
-    log_weights::Vector{WT}
+    log_weights::WT
 end
-function ParticleDistribution(particles::Vector{PT}, log_weights::Vector{WT}) where {PT,WT}
+function ParticleDistribution(particles, log_weights)
     N = length(particles)
     return ParticleDistribution(particles, Vector{Int}(1:N), log_weights)
 end

@@ -102,6 +102,61 @@ end
     @test llkf ≈ llbf atol = 1e-1
 end
 
+@testitem "GPU bootstrap filter test" tags = [:gpu] begin
+    using SSMProblems
+    using StableRNGs
+    using LogExpFunctions: softmax
+    using CUDA
+    using LinearAlgebra
+    using GeneralisedFilters
+
+    rng = StableRNG(1234)
+    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, 1, 1)
+    _, _, ys = sample(rng, model, 10)
+
+    # HACK: convert model to CUDA
+    gpu_model = StateSpaceModel(
+        GeneralisedFilters.HomogeneousLinearGaussianLatentDynamics(
+            cu(model.dyn.μ0),
+            cu(model.dyn.Σ0),
+            cu(model.dyn.A),
+            cu(model.dyn.b),
+            cu(model.dyn.Q),
+        ),
+        GeneralisedFilters.HomogeneousLinearGaussianObservationProcess(
+            cu(model.obs.H), cu(model.obs.c), cu(model.obs.R)
+        ),
+    )
+
+    # HACK: disabling resampling for now
+    bf = BF(2^12; threshold=0.0)
+    # HACK: run BF manually until initialisation interface is finalised
+    # Initialisation
+    Z = BatchedCuVector(CUDA.randn(Float32, 1, bf.N))
+    Σ_L = cu(cholesky(model.dyn.Σ0).L)
+    initial_particles = cu(model.dyn.μ0) + Σ_L.data * Z
+    bf_state = GeneralisedFilters.ParticleDistribution(
+        initial_particles, CUDA.zeros(Float32, bf.N)
+    )
+    llbf = 0.0
+    for t in eachindex(ys)
+        global bf_state, llbf
+        bf_state, ll_increment = GeneralisedFilters.step(
+            rng, gpu_model, bf, t, bf_state, cu(ys[t])
+        )
+        llbf += ll_increment
+    end
+
+    kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
+
+    xs = bf_state.particles.data[1, :]
+    ws = softmax(bf_state.log_weights)
+
+    # Compare log-likelihood and states
+    @test first(kf_state.μ) ≈ sum(xs .* ws) rtol = 1e-2
+    @test llkf ≈ llbf atol = 1e-1
+end
+
 @testitem "Guided filter test" begin
     using SSMProblems
     using LogExpFunctions: softmax

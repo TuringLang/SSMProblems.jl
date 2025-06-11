@@ -1,10 +1,9 @@
 import Base: *, +, -, transpose, getindex
 import LinearAlgebra: Transpose, cholesky, \, /, I, UniformScaling, dot
+import Distributions: logpdf
+import Random: rand
 
 export BatchedCuVector, BatchedCuMatrix, BatchedCuCholesky
-
-abstract type BatchedVector{T} end
-abstract type BatchedMatrix{T} end
 
 ###########################
 #### VECTOR OPERATIONS ####
@@ -19,6 +18,7 @@ function BatchedCuVector(data::CuArray{T,2}) where {T}
     return BatchedCuVector{T}(data, ptrs)
 end
 Base.eltype(::BatchedCuVector{T}) where {T} = T
+Base.length(x::BatchedCuVector) = size(x.data, 2)
 
 function +(x::BatchedCuVector{T}, y::BatchedCuVector{T}) where {T}
     z_data = x.data .+ y.data
@@ -51,6 +51,7 @@ function BatchedCuMatrix(data::CuArray{T,3}) where {T}
     return BatchedCuMatrix{T}(data, ptrs)
 end
 Base.eltype(::BatchedCuMatrix{T}) where {T} = T
+Base.length(A::BatchedCuMatrix) = size(A.data, 3)
 
 transpose(A::BatchedCuMatrix{T}) where {T} = Transpose{T,BatchedCuMatrix{T}}(A)
 
@@ -141,6 +142,7 @@ function BatchedCuCholesky(data::CuArray{T,3}) where {T}
     return BatchedCuCholesky{T}(data, ptrs)
 end
 Base.eltype(::BatchedCuCholesky{T}) where {T} = T
+Base.length(P::BatchedCuCholesky) = size(P.data, 3)
 
 for (fname, elty) in (
     (:cusolverDnSpotrfBatched, :Float32),
@@ -221,11 +223,78 @@ function -(x::CuVector{T}, y::BatchedCuVector{T}) where {T}
     z_data = x .- y.data
     return BatchedCuVector(z_data)
 end
+function +(x::CuVector{T}, y::BatchedCuVector{T}) where {T}
+    z_data = x .+ y.data
+    return BatchedCuVector(z_data)
+end
+function +(x::BatchedCuVector{T}, y::CuVector{T}) where {T}
+    z_data = x.data .+ y
+    return BatchedCuVector(z_data)
+end
+# TODO: these need to be generated automatically and call a common function
+# TODO: are we best using the strided or non-strided version. The former don't need pointer duplication
+for (fname, elty, gemv_batched) in (
+    (:cublasSgemvBatched_64, :Float32, CUDA.CUBLAS.cublasSgemvBatched_64),
+    (:cublasDgemvBatched_64, :Float64, CUDA.CUBLAS.cublasDgemvBatched_64),
+    (:cublasCgemvBatched_64, :ComplexF32, CUDA.CUBLAS.cublasCgemvBatched_64),
+    (:cublasZgemvBatched_64, :ComplexF64, CUDA.CUBLAS.cublasZgemvBatched_64),
+)
+    @eval begin
+        function *(A::BatchedCuMatrix{$elty}, x::CuVector{$elty})
+            m, n, b = size(A.data)
+            y_data = CuArray{$elty}(undef, m, b)
+            y = BatchedCuVector(y_data)
+
+            # Call gemv directly
+            x_ptrs = batch_singleton(x, b)
+            h = CUDA.CUBLAS.handle()
+            $gemv_batched(
+                h, 'N', m, n, $elty(1.0), A.ptrs, m, x_ptrs, 1, $elty(0.0), y.ptrs, 1, b
+            )
+            return y
+        end
+
+        function *(A::CuMatrix{$elty}, x::BatchedCuVector{$elty})
+            m, n = size(A)
+            b = size(x.data, 2)
+            y_data = CuArray{$elty}(undef, m, b)
+            y = BatchedCuVector(y_data)
+
+            # Call gemv directly
+            A_ptrs = batch_singleton(A, b)
+            h = CUDA.CUBLAS.handle()
+            $gemv_batched(
+                h, 'N', m, n, $elty(1.0), A_ptrs, m, x.ptrs, 1, $elty(0.0), y.ptrs, 1, b
+            )
+            return y
+        end
+    end
+end
+
+@inline function batch_singleton(array::DenseCuArray{T}, N::Int) where {T}
+    ptrs = CuArray{CuPtr{T}}(undef, N)
+    function compute_pointers()
+        i = (blockIdx().x - 1i32) * blockDim().x + threadIdx().x
+        grid_stride = gridDim().x * blockDim().x
+        while i <= length(ptrs)
+            @inbounds ptrs[i] = reinterpret(CuPtr{T}, pointer(array))
+            i += grid_stride
+        end
+        return nothing
+    end
+    kernel = @cuda launch = false compute_pointers()
+    config = launch_configuration(kernel.fun)
+    threads = min(config.threads, N)
+    blocks = min(config.blocks, cld(N, threads))
+    @cuda threads blocks compute_pointers()
+    return ptrs
+end
 
 ###################################
 #### DISTRIBUTIONAL OPERATIONS ####
 ###################################
 
+# Can likely replace by using Gaussian
 function gaussian_likelihood(
     m::BatchedCuVector{T}, S::BatchedCuMatrix{T}, y::Union{BatchedCuVector{T},CuVector{T}}
 ) where {T}
@@ -249,4 +318,62 @@ function gaussian_likelihood(
     log_likes[isnan.(log_likes)] .= -Inf
 
     return log_likes
+end
+
+# HACK: this is more hard-coded than it needs to be. Can generalise to other batched types
+# by taking advantage of the internal calls used in GaussianDistributions.jl
+function Distributions.logpdf(
+    P::Gaussian{BatchedCuVector{T},BatchedCuMatrix{T}},
+    y::Union{BatchedCuVector{T},CuVector{T}},
+) where {T}
+    return gaussian_likelihood(P.μ, P.Σ, y)
+end
+# HACK: MAJOR — this is just to handle a special case for bootstrap filter unit test until
+# we have a general approach to this
+function Distributions.logpdf(
+    P::Gaussian{BatchedCuVector{T},<:CuMatrix{T}}, y::CuVector{T}
+) where {T}
+    # Stack Σ to form a batched matrix
+    Σ_data = CuArray{T}(undef, size(P.Σ)..., size(P.μ.data, 2))
+    Σ_data[:, :, :] .= P.Σ
+    return gaussian_likelihood(P.μ, BatchedCuMatrix(Σ_data), y)
+end
+
+# TODO: need to generalise to only one argument being batched
+function Random.rand(
+    ::AbstractRNG, P::Gaussian{BatchedCuVector{T},BatchedCuMatrix{T}}
+) where {T}
+    D, N = size(P.μ.data)
+    Σ_chol = cholesky(P.Σ)
+    Z = BatchedCuVector(CUDA.randn(T, D, N))
+    # HACK: CUBLAS doesn't have batched trmv so we'll use gemm with zeroing out for now.
+    # Should later replace with MAGMA
+    L = BatchedCuMatrix(Σ_chol.data)
+    zero_upper_triangle!(L.data)
+    return P.μ + L * Z
+end
+# TODO: the singleton Cholesky should probably be handled on the CPU
+function Random.rand(::AbstractRNG, P::Gaussian{BatchedCuVector{T},<:CuMatrix{T}}) where {T}
+    D, N = size(P.μ.data)
+    Σ_L = cholesky(P.Σ).L
+    Z = BatchedCuVector(CUDA.randn(T, D, N))
+    return P.μ + CuArray(Σ_L) * Z
+end
+
+function zero_upper_triangle!(A::CuArray{T,3}) where {T}
+    D, _, N = size(A)
+
+    function kernel_zero_upper_triangle!(A, D)
+        i = threadIdx().x
+        j = threadIdx().y
+        k = blockIdx().x
+
+        if i < j && i <= D && j <= D
+            A[i, j, k] = zero(eltype(A))
+        end
+        return nothing
+    end
+
+    @cuda threads = (D, D) blocks = N kernel_zero_upper_triangle!(A, D)
+    return nothing
 end

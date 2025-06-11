@@ -52,23 +52,24 @@ end
 #### DISTRIBUTIONS ####
 #######################
 
+# We choose Gaussian over MvNormal since it allows for batched types
 function SSMProblems.distribution(dyn::LinearGaussianLatentDynamics; kwargs...)
     μ0, Σ0 = calc_initial(dyn; kwargs...)
-    return MvNormal(μ0, Σ0)
+    return Gaussian(μ0, Σ0)
 end
 
 function SSMProblems.distribution(
-    dyn::LinearGaussianLatentDynamics, step::Integer, state::AbstractVector; kwargs...
+    dyn::LinearGaussianLatentDynamics, step::Integer, state; kwargs...
 )
     A, b, Q = calc_params(dyn, step; kwargs...)
-    return MvNormal(A * state + b, Q)
+    return Gaussian(A * state + b, Q)
 end
 
 function SSMProblems.distribution(
-    obs::LinearGaussianObservationProcess, step::Integer, state::AbstractVector; kwargs...
+    obs::LinearGaussianObservationProcess, step::Integer, state; kwargs...
 )
     H, c, R = calc_params(obs, step; kwargs...)
-    return MvNormal(H * state + c, R)
+    return Gaussian(H * state + c, R)
 end
 
 ###########################################
