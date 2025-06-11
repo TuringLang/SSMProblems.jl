@@ -117,14 +117,20 @@ function move(
     callback::CallbackType=nothing,
     kwargs...,
 )
-    state = predict(rng, model, algo, iter, state, observation; kwargs...)
+    state, log_trans_inc = predict(rng, model, algo, iter, state, observation; kwargs...)
     callback(model, algo, iter, state, observation, PostPredict; kwargs...)
 
-    state, ll_increment = update(model, algo, iter, state, observation; kwargs...)
+    state, log_obs_inc = update(model, algo, iter, state, observation; kwargs...)
     callback(model, algo, iter, state, observation, PostUpdate; kwargs...)
 
-    return state, ll_increment
+    return state, log_marginal(log_trans_inc, log_obs_inc)
 end
+
+# for general PF, KF, and BF in that order
+log_marginal(log_trans_inc, log_obs_inc) = logmeanexp(log_trans_inc + log_obs_inc)
+log_marginal(::Nothing, log_obs_inc::Real) = log_obs_inc
+log_marginal(::Nothing, log_obs_inc::AbstractVector) = logmeanexp(log_obs_inc)
+log_marginal(::AbstractVector{Nothing}, log_obs_inc::AbstractVector) = logmeanexp(log_obs_inc)
 
 ## SMOOTHING BASE ##########################################################################
 

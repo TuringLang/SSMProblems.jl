@@ -4,6 +4,7 @@
 This example demonstrates the extensibility of GeneralisedFilters with an adaptation of VSMC
 with a tunable proposal ([Naesseth et al, 2016](https://arxiv.org/pdf/1705.11140)).
 =#
+using Pkg; Pkg.activate("research/variational_filter")
 
 using GeneralisedFilters, SSMProblems
 using PDMats, LinearAlgebra
@@ -37,7 +38,7 @@ end
 
 rng = MersenneTwister(1234)
 true_model = toy_model(Float32, 10, 10)
-_, _, ys = sample(rng, true_model, 100)
+_, ys = sample(rng, true_model, 100)
 
 # ## Deep Gaussian Proposal
 

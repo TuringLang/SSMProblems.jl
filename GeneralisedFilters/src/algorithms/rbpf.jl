@@ -50,13 +50,13 @@ function predict(
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    state.particles = map(enumerate(state.particles)) do (i, particle)
+    log_increments = map(enumerate(state.particles)) do (i, particle)
         new_x = if !isnothing(ref_state) && i == 1
             ref_state[iter]
         else
             SSMProblems.simulate(rng, model.outer_dyn, iter, particle.x; kwargs...)
         end
-        new_z = predict(
+        new_z, log_incs = predict(
             rng,
             model.inner_model,
             algo.inner_algo,
@@ -68,10 +68,11 @@ function predict(
             kwargs...,
         )
 
-        RaoBlackwellisedParticle(new_x, new_z)
+        state.particles[i] = RaoBlackwellisedParticle(new_x, new_z)
+        log_incs
     end
 
-    return state
+    return state, log_increments
 end
 
 function update(
@@ -91,7 +92,7 @@ function update(
     end
 
     state = update_weights(state, log_increments)
-    return state, logmeanexp(log_increments)
+    return state, log_increments
 end
 
 #################################

@@ -26,7 +26,7 @@ function predict(
 )
     μ, Σ = mean_cov(state)
     A, b, Q = calc_params(model.dyn, iter; kwargs...)
-    return GaussianDistribution(A * μ + b, A * Σ * A' + Q)
+    return GaussianDistribution(A * μ + b, A * Σ * A' + Q), nothing
 end
 
 function update(

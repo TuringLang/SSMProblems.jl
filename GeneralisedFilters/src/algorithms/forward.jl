@@ -19,7 +19,7 @@ function predict(
     kwargs...,
 )
     P = calc_P(model.dyn, step; kwargs...)
-    return (states' * P)'
+    return (states' * P)', nothing
 end
 
 function update(
