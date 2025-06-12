@@ -130,7 +130,9 @@ end
 log_marginal(log_trans_inc, log_obs_inc) = logmeanexp(log_trans_inc + log_obs_inc)
 log_marginal(::Nothing, log_obs_inc::Real) = log_obs_inc
 log_marginal(::Nothing, log_obs_inc::AbstractVector) = logmeanexp(log_obs_inc)
-log_marginal(::AbstractVector{Nothing}, log_obs_inc::AbstractVector) = logmeanexp(log_obs_inc)
+function log_marginal(::AbstractVector{Nothing}, log_obs_inc::AbstractVector)
+    logmeanexp(log_obs_inc)
+end
 
 ## SMOOTHING BASE ##########################################################################
 
