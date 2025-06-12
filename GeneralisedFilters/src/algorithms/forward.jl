@@ -6,20 +6,20 @@ const FW = ForwardAlgorithm
 function initialise(
     rng::AbstractRNG, model::DiscreteStateSpaceModel, ::ForwardAlgorithm; kwargs...
 )
-    return calc_α0(model.dyn; kwargs...)
+    return calc_α0(model.prior; kwargs...)
 end
 
 function predict(
     rng::AbstractRNG,
-    model::DiscreteStateSpaceModel{T},
+    model::DiscreteStateSpaceModel,
     filter::ForwardAlgorithm,
     step::Integer,
     states::AbstractVector,
     observation;
     kwargs...,
-) where {T}
+)
     P = calc_P(model.dyn, step; kwargs...)
-    return (states' * P)'
+    return (states' * P)', nothing
 end
 
 function update(
