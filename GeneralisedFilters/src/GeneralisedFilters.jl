@@ -123,15 +123,7 @@ function move(
     state, log_obs_inc = update(model, algo, iter, state, observation; kwargs...)
     callback(model, algo, iter, state, observation, PostUpdate; kwargs...)
 
-    return state, log_marginal(log_trans_inc, log_obs_inc)
-end
-
-# for general PF, KF, and BF in that order
-log_marginal(log_trans_inc, log_obs_inc) = logmeanexp(log_trans_inc + log_obs_inc)
-log_marginal(::Nothing, log_obs_inc::Real) = log_obs_inc
-log_marginal(::Nothing, log_obs_inc::AbstractVector) = logmeanexp(log_obs_inc)
-function log_marginal(::AbstractVector{Nothing}, log_obs_inc::AbstractVector)
-    logmeanexp(log_obs_inc)
+    return state, log_marginal(algo, log_trans_inc, log_obs_inc)
 end
 
 ## SMOOTHING BASE ##########################################################################
@@ -151,6 +143,28 @@ include("algorithms/particles.jl")
 include("algorithms/kalman.jl")
 include("algorithms/forward.jl")
 include("algorithms/rbpf.jl")
+
+# for particle filtering with a proposal
+function log_marginal(
+    ::AbstractParticleFilter, log_trans_inc::AbstractVector, log_obs_inc::AbstractVector
+)
+    return logmeanexp(log_trans_inc + log_obs_inc)
+end
+
+# for bootstrap filtering
+function log_marginal(::AbstractParticleFilter, ::Nothing, log_obs_inc::AbstractVector)
+    return logmeanexp(log_obs_inc)
+end
+
+# for rao blackwellization
+function log_marginal(
+    ::AbstractParticleFilter, ::AbstractVector{Nothing}, log_obs_inc::AbstractVector
+)
+    return logmeanexp(log_obs_inc)
+end
+
+# for analytical filtering
+log_marginal(::AbstractFilter, ::Nothing, log_obs_inc) = log_obs_inc
 
 # Unit-testing helper module
 include("GFTest/GFTest.jl")
