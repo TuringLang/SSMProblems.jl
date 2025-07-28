@@ -44,7 +44,7 @@ function SSMProblems.simulate(
     proc::LocalLevelTrend,
     step::Integer,
     state::AbstractVector{T};
-    kwargs...
+    kwargs...,
 ) where {T<:Real}
     new_state = deepcopy(state)
     new_state[2:3] += proc.γ .* randn(rng, T, 2)
@@ -99,9 +99,7 @@ end
 # include UCSV as a baseline
 function UCSV(γ::T) where {T<:Real}
     return StateSpaceModel(
-        LocalLevelTrendPrior{T}(),
-        LocalLevelTrend(fill(γ, 2)),
-        SimpleObservation()
+        LocalLevelTrendPrior{T}(), LocalLevelTrend(fill(γ, 2)), SimpleObservation()
     )
 end
 
@@ -111,7 +109,7 @@ function UCSVO(γ::T, prob::T) where {T<:Real}
     return StateSpaceModel(
         OutlierAdjustedTrendPrior{T}(),
         OutlierAdjustedTrend(trend, Bernoulli(prob), Uniform{T}(2, 10)),
-        OutlierAdjustedObservation()
+        OutlierAdjustedObservation(),
     )
 end
 

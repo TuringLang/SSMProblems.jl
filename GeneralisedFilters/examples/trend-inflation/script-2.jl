@@ -45,9 +45,7 @@ end
 
 struct StochasticVolatilityPrior{T<:Real} <: StatePrior end
 
-function SSMProblems.distribution(
-    prior::StochasticVolatilityPrior{T}; kwargs...
-) where {T}
+function SSMProblems.distribution(prior::StochasticVolatilityPrior{T}; kwargs...) where {T}
     return product_distribution(Normal(zero(T), T(1)), Normal(zero(T), T(1)))
 end
 
@@ -70,7 +68,7 @@ function SSMProblems.simulate(
     proc::StochasticVolatility,
     step::Integer,
     state::AbstractVector{T};
-    kwargs...
+    kwargs...,
 ) where {T<:Real}
     new_state = deepcopy(state)
     new_state[1:2] += proc.γ .* randn(rng, T, 2)
@@ -106,12 +104,10 @@ function UCSV(γ::T) where {T<:Real}
     local_level_model = StateSpaceModel(
         GF.HomogeneousGaussianPrior(zeros(T, 1), Matrix(100.0I(1))),
         LocalLevelTrend(),
-        SimpleObservation()
+        SimpleObservation(),
     )
 
-    return HierarchicalSSM(
-        stoch_vol_prior, stoch_vol_process, local_level_model
-    )
+    return HierarchicalSSM(stoch_vol_prior, stoch_vol_process, local_level_model)
 end
 
 function UCSVO(γ::T, prob::T) where {T<:Real}
@@ -125,12 +121,10 @@ function UCSVO(γ::T, prob::T) where {T<:Real}
     local_level_model = StateSpaceModel(
         GF.HomogeneousGaussianPrior(zeros(T, 1), Matrix(100.0I(1))),
         LocalLevelTrend(),
-        OutlierAdjustedObservation()
+        OutlierAdjustedObservation(),
     )
 
-    return HierarchicalSSM(
-        stoch_vol_prior, stoch_vol_process, local_level_model
-    )
+    return HierarchicalSSM(stoch_vol_prior, stoch_vol_process, local_level_model)
 end
 
 function plot_ucsv(rng::AbstractRNG, model::HierarchicalSSM, data)
@@ -144,7 +138,7 @@ function plot_ucsv(rng::AbstractRNG, model::HierarchicalSSM, data)
 
     zs = mean(
         [hcat(getproperty.(getproperty.(path, :z), :μ)...) for path in all_paths],
-        Weights(StatsBase.weights(states.log_weights))
+        Weights(StatsBase.weights(states.log_weights)),
     )
 
     ax = Axis(
@@ -159,7 +153,7 @@ function plot_ucsv(rng::AbstractRNG, model::HierarchicalSSM, data)
 
     xs = mean(
         [hcat(getproperty.(path, :x)...) for path in all_paths],
-        Weights(StatsBase.weights(states.log_weights))
+        Weights(StatsBase.weights(states.log_weights)),
     )
 
     ax1 = Axis(fig[1, 2]; title="Volatility", xtickformat=dateticks)
