@@ -93,27 +93,6 @@ mutable struct BatchRaoBlackwellisedParticles{XT,ZT}
     zs::ZT
 end
 
-# mutable struct RaoBlackwellisedParticleDistribution{
-#     T,M<:CUDA.AbstractMemory,PT<:BatchRaoBlackwellisedParticles
-# }
-#     particles::PT
-#     ancestors::CuVector{Int,M}
-#     log_weights::CuVector{T,M}
-# end
-# function RaoBlackwellisedParticleDistribution(
-#     particles::PT, log_weights::CuVector{T,M}
-# ) where {T,M,PT}
-#     N = length(log_weights)
-#     return RaoBlackwellisedParticleDistribution(particles, CuVector{Int}(1:N), log_weights)
-# end
-
-# function StatsBase.weights(state::RaoBlackwellisedParticleDistribution)
-#     return softmax(state.log_weights)
-# end
-# function Base.length(state::RaoBlackwellisedParticleDistribution)
-#     return length(state.log_weights)
-# end
-
 # Allow particle to be get and set via tree_states[:, 1:N] = states
 function Base.getindex(state::BatchRaoBlackwellisedParticles, i)
     return BatchRaoBlackwellisedParticles(state.xs[:, [i]], state.zs[i])
@@ -129,34 +108,6 @@ function Base.setindex!(
     return state
 end
 Base.length(state::BatchRaoBlackwellisedParticles) = size(state.xs, 2)
-
-# function expand(particles::CuArray{T,2,Mem}, M::Integer) where {T,Mem<:CUDA.AbstractMemory}
-#     new_particles = CuArray(zeros(eltype(particles), size(particles, 1), M))
-#     new_particles[:, 1:size(particles, 2)] = particles
-#     return new_particles
-# end
-
-# # Method for increasing size of particle container
-# function expand(p::BatchRaoBlackwellisedParticles, M::Integer)
-#     new_x = expand(p.xs, M)
-#     new_z = expand(p.zs, M)
-#     return BatchRaoBlackwellisedParticles(new_x, new_z)
-# end
-
-# function update_ref!(
-#     state::RaoBlackwellisedParticleDistribution,
-#     ref_state::Union{Nothing,AbstractVector},
-#     step::Integer=0,
-# )
-#     if !isnothing(ref_state)
-#         CUDA.@allowscalar begin
-#             state.particles.xs[:, 1] = ref_state[step].xs
-#             state.particles.zs[1] = ref_state[step].zs
-#             state.ancestors[1] = 1
-#         end
-#     end
-#     return proposed
-# end
 
 ## BATCH GAUSSIAN DISTRIBUTION #############################################################
 

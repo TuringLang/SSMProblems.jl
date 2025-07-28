@@ -30,18 +30,6 @@ function construct_new_state(states::WeightedParticles{PT,WT}, idxs) where {PT,W
     return WeightedParticles{PT,WT}(states.particles[idxs], idxs, zeros(WT, length(states)))
 end
 
-# function construct_new_state(
-#     states::RaoBlackwellisedParticleDistribution{T}, idxs
-# ) where {T}
-#     return RaoBlackwellisedParticleDistribution(
-#         BatchRaoBlackwellisedParticles(
-#             states.particles.xs[:, idxs], states.particles.zs[idxs]
-#         ),
-#         idxs,
-#         CUDA.zeros(T, length(states)),
-#     )
-# end
-
 ## CONDITIONAL RESAMPLING ##################################################################
 
 abstract type AbstractConditionalResampler <: AbstractResampler end

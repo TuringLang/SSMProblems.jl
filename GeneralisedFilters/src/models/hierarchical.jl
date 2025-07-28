@@ -19,23 +19,15 @@ function HierarchicalSSM(
     return HierarchicalSSM(outer_prior, outer_dyn, inner_model)
 end
 
-# SSMProblems.arithmetic_type(::Type{<:HierarchicalSSM{T}}) where {T} = T
-# function SSMProblems.arithmetic_type(model::HierarchicalSSM)
-#     return SSMProblems.arithmetic_type(model.outer_dyn)
-# end
-
 function AbstractMCMC.sample(
     rng::AbstractRNG, model::HierarchicalSSM, T::Integer; kwargs...
 )
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
-    # zs = OffsetVector(Vector{eltype(inner_model.dyn)}(undef, T + 1), -1)
-    # xs = OffsetVector(Vector{eltype(outer_dyn)}(undef, T + 1), -1)
     xs = OffsetVector(fill(simulate(rng, model.outer_prior; kwargs...), T + 1), -1)
     zs = OffsetVector(
         fill(simulate(rng, inner_model.prior; new_outer=xs[0], kwargs...), T + 1), -1
     )
-    # ys = Vector{eltype(inner_model.obs)}(undef, T)
 
     # Simulate outer dynamics
     xs[0] = simulate(rng, outer_dyn; kwargs...)
@@ -51,7 +43,6 @@ function AbstractMCMC.sample(
             new_outer=xs[t],
             kwargs...,
         )
-        # ys[t] = simulate(rng, inner_model.obs, t, zs[t]; new_outer=xs[t], kwargs...)
     end
 
     ys = map(t -> simulate(rng, inner_model.obs, t, zs[t]; new_outer=xs[t], kwargs...), 1:T)
@@ -62,13 +53,6 @@ end
 struct HierarchicalDynamics{D1<:LatentDynamics,D2<:LatentDynamics} <: LatentDynamics
     outer_dyn::D1
     inner_dyn::D2
-    # function HierarchicalDynamics(
-    #     outer_dyn::D1, inner_dyn::D2
-    # ) where {D1<:LatentDynamics,D2<:LatentDynamics}
-    #     ET = RaoBlackwellisedParticle{eltype(outer_dyn),eltype(inner_dyn)}
-    #     T = SSMProblems.arithmetic_type(outer_dyn)
-    #     return new{T,ET,D1,D2}(outer_dyn, inner_dyn)
-    # end
 end
 
 struct HierarchicalPrior{P1<:StatePrior,P2<:StatePrior} <: StatePrior
@@ -100,11 +84,6 @@ end
 
 struct HierarchicalObservations{OP<:ObservationProcess} <: ObservationProcess
     obs::OP
-    # function HierarchicalObservations(obs::OP) where {OP<:ObservationProcess}
-    #     T = SSMProblems.arithmetic_type(obs)
-    #     ET = eltype(obs)
-    #     return new{T,ET,OP}(obs)
-    # end
 end
 
 function SSMProblems.distribution(
