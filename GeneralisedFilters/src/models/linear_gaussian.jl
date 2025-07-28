@@ -129,7 +129,7 @@ function batch_calc_cs end
 function batch_calc_Rs end
 
 # TODO: can we remove batch size argument?
-function batch_calc_initial(prior::HomogeneousGaussianPrior, N::Integer; kwargs...)
+function batch_calc_initial(prior::GaussianPrior, N::Integer; kwargs...)
     return batch_calc_μ0s(prior, N; kwargs...), batch_calc_Σ0s(prior, N; kwargs...)
 end
 

@@ -64,7 +64,7 @@ function initialise(
     algo::BatchKalmanFilter;
     kwargs...,
 )
-    μ0s, Σ0s = batch_calc_initial(model.dyn, algo.batch_size; kwargs...)
+    μ0s, Σ0s = batch_calc_initial(model.prior, algo.batch_size; kwargs...)
     return BatchGaussianDistribution(μ0s, Σ0s)
 end
 
@@ -81,7 +81,7 @@ function predict(
     As, bs, Qs = batch_calc_params(model.dyn, iter, algo.batch_size; kwargs...)
     μ̂s = NNlib.batched_vec(As, μs) .+ bs
     Σ̂s = NNlib.batched_mul(NNlib.batched_mul(As, Σs), NNlib.batched_transpose(As)) .+ Qs
-    return BatchGaussianDistribution(μ̂s, Σ̂s)
+    return BatchGaussianDistribution(μ̂s, Σ̂s), nothing
 end
 
 function update(
