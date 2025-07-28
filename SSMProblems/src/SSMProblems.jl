@@ -217,7 +217,7 @@ abstract type AbstractStateSpaceModel <: AbstractMCMC.AbstractModel end
 """
 A state space model.
 
-A vanilla implementation of a state space model, composed of an intiail state prior, latent
+A vanilla implementation of a state space model, composed of an initail state prior, latent
 dynamics and an observation process.
 
 # Fields
