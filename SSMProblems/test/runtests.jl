@@ -31,7 +31,7 @@ using Test
         model = StateSpaceModel(
             UncontrolledPrior(),
             UncontrolledLatentDynamics(0.1, 0.2),
-            UncontrolledObservationProcess(0.3)
+            UncontrolledObservationProcess(0.3),
         )
 
         rng = MersenneTwister(1234)
@@ -69,7 +69,7 @@ using Test
         model = StateSpaceModel(
             ControlledPrior(),
             ControlledLatentDynamics(0.1, 0.2),
-            ControlledObservationProcess(0.3)
+            ControlledObservationProcess(0.3),
         )
 
         rng = MersenneTwister(1234)
