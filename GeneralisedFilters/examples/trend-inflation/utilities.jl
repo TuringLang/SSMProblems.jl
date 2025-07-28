@@ -15,27 +15,6 @@ fred = get_data(
     aggregation_method="eop",
 );
 
-## CALLBACKS ###############################################################################
-
-struct MeanCallback
-    μ::Vector
-end
-
-# clearly this isn't particularly robust, but is purely for visualization sake
-function (c::MeanCallback)(model, filter, step, states, data; kwargs...)
-    μz = mean(
-        getproperty.(getproperty.(states.filtered.particles, :z), :μ),
-        Weights(weights(states.filtered)),
-    )
-
-    μx = mean(
-        getproperty.(states.filtered.particles, :x), Weights(weights(states.filtered))
-    )
-
-    push!(c.μ, [μx; μz])
-    return nothing
-end
-
 ## PLOTTING UTILITIES ######################################################################
 
 # this is essential for plotting dates
