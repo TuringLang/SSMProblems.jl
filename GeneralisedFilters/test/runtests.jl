@@ -2,7 +2,7 @@ using Test
 using TestItems
 using TestItemRunner
 
-@run_package_tests
+@run_package_tests filter = ti -> !(:gpu in ti.tags)
 
 include("Aqua.jl")
 include("batch_kalman_test.jl")
@@ -255,7 +255,7 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, D_outer, D_inner, D_obs, ET
     )
-    _, _, ys = sample(rng, full_model, T)
+    _, ys = sample(rng, full_model, T)
 
     # Ground truth Kalman filtering
     kf_state, kf_ll = GeneralisedFilters.filter(full_model, KalmanFilter(), ys)
@@ -548,7 +548,7 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, D_outer, D_inner, D_obs, T
     )
-    _, _, ys = sample(rng, full_model, K)
+    _, ys = sample(rng, full_model, K)
 
     # Generate random reference trajectory
     ref_trajectory = [CuArray(rand(rng, T, D_outer, 1)) for _ in 0:K]
@@ -581,7 +581,7 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, D_outer, D_inner, D_obs, T
     )
-    _, _, ys = sample(rng, full_model, K)
+    _, ys = sample(rng, full_model, K)
 
     # Manually create tree to force expansion on second step
     M = N_particles * 2 - 1
@@ -628,7 +628,7 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, D_outer, D_inner, D_obs, T
     )
-    _, _, ys = sample(rng, full_model, K)
+    _, ys = sample(rng, full_model, K)
 
     # Kalman smoother
     state, _ = GeneralisedFilters.smooth(
