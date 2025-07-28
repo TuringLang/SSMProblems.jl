@@ -78,14 +78,14 @@ end
 function update(
     model::HierarchicalSSM, algo::RBPF, iter::Integer, state, observation; kwargs...
 )
-    log_increments = map(1:(algo.N)) do i
+    log_increments = map(enumerate(state.particles)) do (i, particle)
         state.particles[i].z, log_increment = update(
             model.inner_model,
             algo.inner_algo,
             iter,
-            state.particles[i].z,
+            particle.z,
             observation;
-            new_outer=state.particles[i].x,
+            new_outer=particle.x,
             kwargs...,
         )
         log_increment

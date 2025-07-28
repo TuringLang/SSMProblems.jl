@@ -54,7 +54,7 @@ function AbstractMCMC.sample(
         # ys[t] = simulate(rng, inner_model.obs, t, zs[t]; new_outer=xs[t], kwargs...)
     end
 
-    ys = map(t -> simulate(rng, inner_model.obs, t, zs[t]; new_outer=xs[t], kwargs...))
+    ys = map(t -> simulate(rng, inner_model.obs, t, zs[t]; new_outer=xs[t], kwargs...), 1:T)
     return xs, zs, ys
 end
 
