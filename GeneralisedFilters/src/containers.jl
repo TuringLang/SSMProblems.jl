@@ -10,12 +10,12 @@ object, with the states (or particles) distributed accoring to their log-weights
 """
 abstract type ParticleDistribution{PT} end
 
-Base.collect(state::PT) where {PT<:ParticleDistribution} = state.particles
-Base.length(state::PT) where {PT<:ParticleDistribution} = length(state.particles)
-Base.keys(state::PT) where {PT<:ParticleDistribution} = LinearIndices(state.particles)
+Base.collect(state::ParticleDistribution) = state.particles
+Base.length(state::ParticleDistribution) = length(state.particles)
+Base.keys(state::ParticleDistribution) = LinearIndices(state.particles)
 
-Base.iterate(state::ParticleDistribution, i) = Base.iterate(state.particles, i)
-Base.iterate(state::ParticleDistribution) = Base.iterate(state.particles)
+Base.iterate(state::ParticleDistribution, i) = iterate(state.particles, i)
+Base.iterate(state::ParticleDistribution) = iterate(state.particles)
 
 # not sure if this is kosher, since it doesn't follow the convention of Base.getindex
 Base.@propagate_inbounds Base.getindex(state::ParticleDistribution, i) = state.particles[i]
@@ -64,7 +64,7 @@ end
 
 ## GAUSSIAN STATES #########################################################################
 
-struct GaussianDistribution{PT,ΣT} <: ParticleDistribution{PT}
+struct GaussianDistribution{PT,ΣT}
     μ::PT
     Σ::ΣT
 end
