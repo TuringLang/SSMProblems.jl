@@ -77,7 +77,6 @@ function step(
 )
     # capture the marginalized log-likelihood
     state = resample(rng, algo.resampler, state; ref_state)
-    marginalization_term = logsumexp(state.log_weights)
     isnothing(callback) ||
         callback(model, algo, iter, state, observation, PostResample; kwargs...)
 
@@ -85,12 +84,11 @@ function step(
     isnothing(callback) ||
         callback(model, algo, iter, state, observation, PostPredict; kwargs...)
 
-    # TODO: ll_increment is no longer consistent with the Kalman filter
     state, ll_increment = update(model, algo, iter, state, observation; kwargs...)
     isnothing(callback) ||
         callback(model, algo, iter, state, observation, PostUpdate; kwargs...)
 
-    return state, (ll_increment - marginalization_term)
+    return state, ll_increment
 end
 
 function initialise(
@@ -130,7 +128,7 @@ function predict(
         end
     end
 
-    state.log_weights +=
+    state.log_weights.log_weights +=
         map(zip(proposed_particles, state.particles)) do (new_state, prev_state)
             log_f = SSMProblems.logdensity(
                 model.dyn, iter, prev_state, new_state; kwargs...
@@ -161,9 +159,13 @@ function update(
         state.particles,
     )
 
-    state.log_weights += log_increments
+    state.log_weights.log_weights += log_increments
+    lse = logsumexp(state.log_weights.log_weights)
 
-    return state, logsumexp(state.log_weights)
+    ll_increment = (lse - state.log_weights.prev_logsumexp)
+    state.log_weights.prev_logsumexp = lse
+
+    return state, ll_increment
 end
 
 struct LatentProposal <: AbstractProposal end

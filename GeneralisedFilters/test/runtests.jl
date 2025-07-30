@@ -90,16 +90,16 @@ end
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, 1, 1)
     _, _, ys = sample(rng, model, 10)
 
-    bf = BF(2^12; threshold=0.8)
+    bf = BF(2^10; threshold=0.8)
     bf_state, llbf = GeneralisedFilters.filter(rng, model, bf, ys)
     kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
 
     xs = bf_state.particles
-    ws = softmax(bf_state.log_weights)
+    ws = softmax(bf_state.log_weights.log_weights)
 
     # Compare log-likelihood and states
     @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
-    @test llkf ≈ llbf atol = 1e-1
+    @test llkf ≈ llbf atol = 1e-3
 end
 
 @testitem "Guided filter test" begin
@@ -134,11 +134,11 @@ end
     kf_states, kf_ll = GeneralisedFilters.filter(rng, model, KalmanFilter(), ys)
     pf_states, pf_ll = GeneralisedFilters.filter(rng, model, algo, ys)
     xs = pf_states.particles
-    ws = softmax(pf_states.log_weights)
+    ws = softmax(pf_states.log_weights.log_weights)
 
     # Compare log-likelihood and states
     @test first(kf_states.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
-    @test kf_ll ≈ pf_ll rtol = 1e-1
+    @test kf_ll ≈ pf_ll rtol = 1e-3
 end
 
 @testitem "Forward algorithm test" begin

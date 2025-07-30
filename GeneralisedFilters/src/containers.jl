@@ -2,6 +2,11 @@
 
 ## PARTICLES ###############################################################################
 
+mutable struct ParticleWeights{WT<:Real}
+    log_weights::Vector{WT}
+    prev_logsumexp::WT
+end
+
 """
     ParticleDistribution
 
@@ -11,14 +16,15 @@ object, with the states (or particles) distributed accoring to their log-weights
 mutable struct ParticleDistribution{PT,WT<:Real}
     particles::Vector{PT}
     ancestors::Vector{Int}
-    log_weights::Vector{WT}
+    log_weights::ParticleWeights{WT}
 end
 function ParticleDistribution(particles::Vector{PT}, log_weights::Vector{WT}) where {PT,WT}
     N = length(particles)
+    log_weights = ParticleWeights(log_weights, logsumexp(log_weights))
     return ParticleDistribution(particles, Vector{Int}(1:N), log_weights)
 end
 
-StatsBase.weights(state::ParticleDistribution) = softmax(state.log_weights)
+StatsBase.weights(state::ParticleDistribution) = softmax(state.log_weights.log_weights)
 
 Base.collect(state::ParticleDistribution) = state.particles
 Base.length(state::ParticleDistribution) = length(state.particles)
