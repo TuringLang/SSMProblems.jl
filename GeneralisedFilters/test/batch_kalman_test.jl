@@ -41,39 +41,43 @@
     states = first.(outputs)
     log_likelihoods = last.(outputs)
 
-    struct BatchLinearGaussianDynamics{T,MT} <: LinearGaussianLatentDynamics{T}
+    struct BatchGaussianPrior{T,MT} <: GaussianPrior
         μ0s::CuArray{T,2,MT}
         Σ0s::CuArray{T,3,MT}
+    end
+
+    function BatchGaussianPrior(μ0s::Vector{Vector{T}}, Σ0s::Vector{Matrix{T}}) where {T}
+        μ0s = CuArray(stack(μ0s))
+        Σ0s = CuArray(stack(Σ0s))
+        return BatchGaussianPrior(μ0s, Σ0s)
+    end
+
+    function GeneralisedFilters.batch_calc_μ0s(
+        dyn::BatchGaussianPrior, ::Integer; kwargs...
+    )
+        return dyn.μ0s
+    end
+    function GeneralisedFilters.batch_calc_Σ0s(
+        dyn::BatchGaussianPrior, ::Integer; kwargs...
+    )
+        return dyn.Σ0s
+    end
+
+    struct BatchLinearGaussianDynamics{T,MT} <: LinearGaussianLatentDynamics
         As::CuArray{T,3,MT}
         bs::CuArray{T,2,MT}
         Qs::CuArray{T,3,MT}
     end
 
     function BatchLinearGaussianDynamics(
-        μ0s::Vector{Vector{T}},
-        Σ0s::Vector{Matrix{T}},
-        As::Vector{Matrix{T}},
-        bs::Vector{Vector{T}},
-        Qs::Vector{Matrix{T}},
+        As::Vector{Matrix{T}}, bs::Vector{Vector{T}}, Qs::Vector{Matrix{T}}
     ) where {T}
-        μ0s = CuArray(stack(μ0s))
-        Σ0s = CuArray(stack(Σ0s))
         As = CuArray(stack(As))
         bs = CuArray(stack(bs))
         Qs = CuArray(stack(Qs))
-        return BatchLinearGaussianDynamics(μ0s, Σ0s, As, bs, Qs)
+        return BatchLinearGaussianDynamics(As, bs, Qs)
     end
 
-    function GeneralisedFilters.batch_calc_μ0s(
-        dyn::BatchLinearGaussianDynamics, ::Integer; kwargs...
-    )
-        return dyn.μ0s
-    end
-    function GeneralisedFilters.batch_calc_Σ0s(
-        dyn::BatchLinearGaussianDynamics, ::Integer; kwargs...
-    )
-        return dyn.Σ0s
-    end
     function GeneralisedFilters.batch_calc_As(
         dyn::BatchLinearGaussianDynamics, ::Integer, ::Integer; kwargs...
     )
@@ -90,7 +94,7 @@
         return dyn.Qs
     end
 
-    struct BatchLinearGaussianObservations{T,MT} <: LinearGaussianObservationProcess{T}
+    struct BatchLinearGaussianObservations{T,MT} <: LinearGaussianObservationProcess
         Hs::CuArray{T,3,MT}
         cs::CuArray{T,2,MT}
         Rs::CuArray{T,3,MT}
@@ -122,7 +126,8 @@
     end
 
     batch_model = GeneralisedFilters.StateSpaceModel(
-        BatchLinearGaussianDynamics(μ0s, Σ0s, As, bs, Qs),
+        BatchGaussianPrior(μ0s, Σ0s),
+        BatchLinearGaussianDynamics(As, bs, Qs),
         BatchLinearGaussianObservations(Hs, cs, Rs),
     )
 
