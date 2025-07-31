@@ -1,19 +1,8 @@
-using FredData
+using CSV, DataFrames
 using CairoMakie
 using Dates
 
-## FRED QUERY ##############################################################################
-
-# there are some redundancies here, but I wanted it to clearly reflect the data in the paper
-fred = get_data(
-    Fred(),
-    "PCEPI";
-    observation_start="1959-06-01",
-    observation_end="2016-01-01",
-    units="pca",
-    frequency="q",
-    aggregation_method="eop",
-);
+fred_data = CSV.read(joinpath(INFL_PATH, "data.csv"), DataFrame)
 
 ## PLOTTING UTILITIES ######################################################################
 

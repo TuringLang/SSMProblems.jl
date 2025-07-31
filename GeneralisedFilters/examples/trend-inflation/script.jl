@@ -13,7 +13,8 @@ using LinearAlgebra
 
 const GF = GeneralisedFilters
 
-include(joinpath(@__DIR__, "..", "..", "..", "examples", "trend-inflation", "utilities.jl")); #hide
+INFL_PATH = joinpath(@__DIR__, "..", "..", "..", "examples", "trend-inflation"); #hide
+include(joinpath(INFL_PATH, "utilities.jl")); #hide
 
 # ## Model Definition
 
@@ -135,7 +136,7 @@ states, ll = GF.filter(
     rng,
     UCSV(0.2),
     RBPF(KalmanFilter(), 2^12; threshold=1.0),
-    [[pce] for pce in fred.data.value];
+    [[pce] for pce in fred_data.value];
     callback=sparse_ancestry,
 );
 
@@ -145,7 +146,7 @@ states, ll = GF.filter(
 # take the mean path by passing a custom function.
 
 trends, volatilities = mean_path(GF.get_ancestry(sparse_ancestry.tree), states.log_weights);
-plot_ucsv(trends[1, :], eachrow(volatilities), fred.data)
+plot_ucsv(trends[1, :], eachrow(volatilities), fred_data)
 
 # #### Outlier Adjustments
 
@@ -238,7 +239,7 @@ states, ll = GF.filter(
     rng,
     UCSVO(0.2, 0.05),
     RBPF(KalmanFilter(), 2^12; threshold=1.0),
-    [[pce] for pce in fred.data.value];
+    [[pce] for pce in fred_data.value];
     callback=sparse_ancestry,
 );
 
@@ -247,4 +248,4 @@ states, ll = GF.filter(
 # clear when comparing the maximum transitory noise around the GFC.
 
 trends, volatilities = mean_path(GF.get_ancestry(sparse_ancestry.tree), states.log_weights);
-plot_ucsv(trends[1, :], eachrow(volatilities), fred.data)
+plot_ucsv(trends[1, :], eachrow(volatilities), fred_data)
