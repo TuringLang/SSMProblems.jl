@@ -24,16 +24,17 @@ function AbstractMCMC.sample(
 )
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
-    xs = OffsetVector(fill(simulate(rng, model.outer_prior; kwargs...), T + 1), -1)
-    zs = OffsetVector(
-        fill(simulate(rng, inner_model.prior; new_outer=xs[0], kwargs...), T + 1), -1
-    )
+    x0 = simulate(rng, model.outer_prior; kwargs...)
+    z0 = simulate(rng, inner_model.prior; new_outer=xs[0], kwargs...)
 
     # Simulate outer dynamics
-    xs[0] = simulate(rng, outer_dyn; kwargs...)
-    zs[0] = simulate(rng, inner_model.dyn; new_outer=xs[0], kwargs...)
-    for t in 1:T
-        xs[t] = simulate(rng, model.outer_dyn, t, xs[t - 1]; kwargs...)
+    xs = fill(simulate(rng, outer_dyn, t, x0; kwargs...), T)
+    zs = fill(
+        simulate(rng, inner_model.dyn, 1, z0; prev_outer=x0, new_outer=xs[1], kwargs...), T
+    )
+
+    for t in 2:T
+        xs[t] = simulate(rng, outer_dyn, t, xs[t - 1]; kwargs...)
         zs[t] = simulate(
             rng,
             inner_model.dyn,
@@ -46,7 +47,7 @@ function AbstractMCMC.sample(
     end
 
     ys = map(t -> simulate(rng, inner_model.obs, t, zs[t]; new_outer=xs[t], kwargs...), 1:T)
-    return xs, zs, ys
+    return x0, z0, xs, zs, ys
 end
 
 ## Methods to make HierarchicalSSM compatible with the bootstrap filter

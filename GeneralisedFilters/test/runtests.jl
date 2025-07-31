@@ -21,7 +21,7 @@ include("resamplers.jl")
     for Dy in Dys
         rng = StableRNG(1234)
         model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
-        _, ys = sample(rng, model, 1)
+        _, _, ys = sample(rng, model, 1)
 
         filtered, ll = GeneralisedFilters.filter(rng, model, KalmanFilter(), ys)
 
@@ -61,7 +61,7 @@ end
     for Dy in Dys
         rng = StableRNG(1234)
         model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
-        _, ys = sample(rng, model, 2)
+        _, _, ys = sample(rng, model, 2)
 
         states, ll = GeneralisedFilters.smooth(rng, model, KalmanSmoother(), ys)
 
@@ -88,7 +88,7 @@ end
 
     rng = StableRNG(1234)
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, 1, 1)
-    _, ys = sample(rng, model, 10)
+    _, _, ys = sample(rng, model, 10)
 
     bf = BF(2^12; threshold=0.8)
     bf_state, llbf = GeneralisedFilters.filter(rng, model, bf, ys)
@@ -127,7 +127,7 @@ end
 
     rng = StableRNG(1234)
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, 1, 1)
-    _, ys = sample(rng, model, 10)
+    _, _, ys = sample(rng, model, 10)
 
     algo = PF(2^10, LinearGaussianProposal(); threshold=0.6)
     kf_states, kf_ll = GeneralisedFilters.filter(rng, model, KalmanFilter(), ys)
@@ -212,7 +212,7 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, D_outer, D_inner, D_obs
     )
-    _, ys = sample(rng, full_model, T)
+    _, _, ys = sample(rng, full_model, T)
 
     # Ground truth Kalman filtering
     kf_states, kf_ll = GeneralisedFilters.filter(rng, full_model, KalmanFilter(), ys)
@@ -255,7 +255,7 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, D_outer, D_inner, D_obs, ET
     )
-    _, ys = sample(rng, full_model, T)
+    _, _, ys = sample(rng, full_model, T)
 
     # Ground truth Kalman filtering
     kf_state, kf_ll = GeneralisedFilters.filter(full_model, KalmanFilter(), ys)
@@ -290,7 +290,7 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, 1, 1, 1
     )
-    _, ys = sample(rng, full_model, T)
+    _, _, ys = sample(rng, full_model, T)
 
     cb = GeneralisedFilters.AncestorCallback(nothing)
     rbpf = RBPF(KalmanFilter(), N_particles)
@@ -318,7 +318,7 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, D_outer, D_inner, D_obs
     )
-    _, ys = sample(rng, full_model, T)
+    _, _, ys = sample(rng, full_model, T)
 
     # Ground truth Kalman filtering
     kf_states, kf_ll = GeneralisedFilters.filter(rng, full_model, KalmanFilter(), ys)
@@ -366,7 +366,7 @@ end
 
     rng = StableRNG(SEED)
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, 1, 1)
-    _, ys = sample(rng, model, K)
+    _, _, ys = sample(rng, model, K)
 
     ref_traj = OffsetVector([rand(rng, 1) for _ in 0:K], -1)
 
@@ -406,7 +406,7 @@ end
 
     rng = StableRNG(SEED)
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
-    _, ys = sample(rng, model, K)
+    _, _, ys = sample(rng, model, K)
 
     # Kalman smoother
     state, ks_ll = GeneralisedFilters.smooth(
@@ -469,7 +469,7 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, D_outer, D_inner, D_obs, T; static_arrays=true
     )
-    _, ys = sample(rng, full_model, K)
+    _, _, ys = sample(rng, full_model, K)
 
     # Kalman smoother
     state, _ = GeneralisedFilters.smooth(
@@ -548,7 +548,7 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, D_outer, D_inner, D_obs, T
     )
-    _, ys = sample(rng, full_model, K)
+    _, _, ys = sample(rng, full_model, K)
 
     # Generate random reference trajectory
     ref_trajectory = [CuArray(rand(rng, T, D_outer, 1)) for _ in 0:K]
@@ -581,7 +581,7 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, D_outer, D_inner, D_obs, T
     )
-    _, ys = sample(rng, full_model, K)
+    _, _, ys = sample(rng, full_model, K)
 
     # Manually create tree to force expansion on second step
     M = N_particles * 2 - 1
@@ -628,7 +628,7 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, D_outer, D_inner, D_obs, T
     )
-    _, ys = sample(rng, full_model, K)
+    _, _, ys = sample(rng, full_model, K)
 
     # Kalman smoother
     state, _ = GeneralisedFilters.smooth(

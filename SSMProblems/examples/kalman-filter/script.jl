@@ -164,7 +164,7 @@ model = StateSpaceModel(prior, dyn, obs);
 # functions we defined above.
 
 rng = MersenneTwister(SEED);
-xs, ys = sample(rng, model, T);
+x0, xs, ys = sample(rng, model, T);
 # @code_warntype sample(rng, model, T)
 
 # We can then run the Kalman filter and plot the filtering results against the ground truth.

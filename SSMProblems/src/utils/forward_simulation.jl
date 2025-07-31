@@ -1,7 +1,5 @@
 """Forward simulation of state space models."""
 
-using OffsetArrays: OffsetVector
-
 import AbstractMCMC: sample
 export sample
 
@@ -14,11 +12,12 @@ Returns a tuple `(xs, ys)` where `xs` is a vector of latent states (including th
 state) and `ys` is a vector of observations.
 """
 function sample(rng::AbstractRNG, model::StateSpaceModel, T::Integer; kwargs...)
-    xs = OffsetVector(fill(simulate(rng, model.prior; kwargs...), T + 1), -1)
-    for t in 1:T
+    x0 = simulate(rng, model.prior; kwargs...)
+    xs = fill(simulate(rng, model.dyn, 1, x0; kwargs...), T)
+    for t in 2:T
         xs[t] = simulate(rng, model.dyn, t, xs[t - 1]; kwargs...)
     end
-    return xs, map(t -> simulate(rng, model.obs, t, xs[t]; kwargs...), 1:T)
+    return x0, xs, map(t -> simulate(rng, model.obs, t, xs[t]; kwargs...), 1:T)
 end
 
 """

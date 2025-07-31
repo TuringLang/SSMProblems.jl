@@ -38,7 +38,7 @@ end
 
 rng = MersenneTwister(1234)
 true_model = toy_model(Float32, 10, 10)
-_, ys = sample(rng, true_model, 100)
+_, _, ys = sample(rng, true_model, 100)
 
 # ## Deep Gaussian Proposal
 
