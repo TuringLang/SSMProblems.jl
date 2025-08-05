@@ -7,10 +7,6 @@ mutable struct ParticleWeights{WT<:Real}
     prev_logsumexp::WT
 end
 
-function ParticleWeights(log_weights::Vector{WT}) where {WT}
-    return ParticleWeights{WT}(log_weights, logsumexp(log_weights))
-end
-
 """
     ParticleDistribution
 
@@ -47,15 +43,15 @@ end
 
 function WeightedParticles(particles::AbstractVector, log_weights::AbstractVector)
     N = length(particles)
-    weights = ParticleWeights(log_weights)
+    weights = ParticleWeights(log_weights, logsumexp(log_weights))
     return WeightedParticles(particles, Vector{Int}(1:N), weights)
 end
 
 StatsBase.weights(state::Particles) = Weights(fill(1 / length(state), length(state)))
 StatsBase.weights(state::WeightedParticles) = Weights(softmax(state.weights.log_weights))
 
-function update_weights(state::Particles, log_weights)
-    weights = ParticleWeights(log_weights, logsumexp(zero(log_weights)))
+function update_weights(state::Particles, log_weights::Vector{WT}) where {WT}
+    weights = ParticleWeights(log_weights, WT(log(length(state))))
     return WeightedParticles(state.particles, state.ancestors, weights)
 end
 
