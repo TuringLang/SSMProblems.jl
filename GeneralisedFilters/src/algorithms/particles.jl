@@ -72,98 +72,82 @@ function step(
     state,
     observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
-    callback::Union{AbstractCallback,Nothing}=nothing,
+    callback::CallbackType=nothing,
     kwargs...,
 )
-    # capture the marginalized log-likelihood
     state = resample(rng, algo.resampler, state; ref_state)
-    marginalization_term = logsumexp(state.log_weights)
-    isnothing(callback) ||
-        callback(model, algo, iter, state, observation, PostResample; kwargs...)
-
-    state = predict(rng, model, algo, iter, state, observation; ref_state, kwargs...)
-    isnothing(callback) ||
-        callback(model, algo, iter, state, observation, PostPredict; kwargs...)
-
-    # TODO: ll_increment is no longer consistent with the Kalman filter
-    state, ll_increment = update(model, algo, iter, state, observation; kwargs...)
-    isnothing(callback) ||
-        callback(model, algo, iter, state, observation, PostUpdate; kwargs...)
-
-    return state, (ll_increment - marginalization_term)
+    callback(model, algo, iter, state, observation, PostResample; kwargs...)
+    return move(rng, model, algo, iter, state, observation; ref_state, callback, kwargs...)
 end
 
 function initialise(
     rng::AbstractRNG,
-    model::StateSpaceModel{T},
-    filter::ParticleFilter;
+    model::StateSpaceModel,
+    algo::ParticleFilter;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
-) where {T}
-    particles = map(1:(filter.N)) do i
+)
+    particles = map(1:(algo.N)) do i
         if !isnothing(ref_state) && i == 1
             ref_state[0]
         else
-            SSMProblems.simulate(rng, model.dyn; kwargs...)
+            SSMProblems.simulate(rng, model.prior; kwargs...)
         end
     end
-    log_ws = zeros(T, filter.N)
 
-    return ParticleDistribution(particles, log_ws)
+    return Particles(particles)
 end
 
 function predict(
     rng::AbstractRNG,
     model::StateSpaceModel,
-    filter::ParticleFilter,
+    algo::ParticleFilter,
     iter::Integer,
-    state::ParticleDistribution,
+    state,
     observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    proposed_particles = map(enumerate(state.particles)) do (i, particle)
+    proposed_particles = map(enumerate(state)) do (i, particle)
         if !isnothing(ref_state) && i == 1
             ref_state[iter]
         else
-            simulate(rng, model, filter.proposal, iter, particle, observation; kwargs...)
+            simulate(rng, model, algo.proposal, iter, particle, observation; kwargs...)
         end
     end
 
-    state.log_weights +=
-        map(zip(proposed_particles, state.particles)) do (new_state, prev_state)
-            log_f = SSMProblems.logdensity(
-                model.dyn, iter, prev_state, new_state; kwargs...
-            )
+    log_increments = map(zip(proposed_particles, state)) do (new_state, prev_state)
+        log_f = SSMProblems.logdensity(model.dyn, iter, prev_state, new_state; kwargs...)
 
-            log_q = SSMProblems.logdensity(
-                model, filter.proposal, iter, prev_state, new_state, observation; kwargs...
-            )
+        log_q = SSMProblems.logdensity(
+            model, algo.proposal, iter, prev_state, new_state, observation; kwargs...
+        )
 
-            (log_f - log_q)
-        end
+        (log_f - log_q)
+    end
 
     state.particles = proposed_particles
-
+    state = update_weights(state, log_increments)
     return state
 end
 
 function update(
-    model::StateSpaceModel{T},
-    filter::ParticleFilter,
+    model::StateSpaceModel,
+    algo::ParticleFilter,
     iter::Integer,
-    state::ParticleDistribution,
+    state,
     observation;
     kwargs...,
-) where {T}
+)
     log_increments = map(
         x -> SSMProblems.logdensity(model.obs, iter, x, observation; kwargs...),
         state.particles,
     )
 
-    state.log_weights += log_increments
+    state = update_weights(state, log_increments)
+    ll_increment = marginalise!(state)
 
-    return state, logsumexp(state.log_weights)
+    return state, ll_increment
 end
 
 struct LatentProposal <: AbstractProposal end
@@ -172,7 +156,7 @@ const BootstrapFilter{RS} = ParticleFilter{RS,LatentProposal}
 const BF = BootstrapFilter
 BootstrapFilter(N::Integer; kwargs...) = ParticleFilter(N, LatentProposal(); kwargs...)
 
-function simulate(
+function SSMProblems.simulate(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
     prop::LatentProposal,
@@ -184,7 +168,7 @@ function simulate(
     return SSMProblems.simulate(rng, model.dyn, iter, state; kwargs...)
 end
 
-function logdensity(
+function SSMProblems.logdensity(
     model::AbstractStateSpaceModel,
     prop::LatentProposal,
     iter::Integer,
@@ -200,14 +184,14 @@ end
 function predict(
     rng::AbstractRNG,
     model::StateSpaceModel,
-    filter::BootstrapFilter,
+    algo::BootstrapFilter,
     iter::Integer,
-    state::ParticleDistribution,
+    state,
     observation=nothing;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    state.particles = map(enumerate(state.particles)) do (i, particle)
+    state.particles = map(enumerate(state)) do (i, particle)
         if !isnothing(ref_state) && i == 1
             ref_state[iter]
         else
@@ -228,6 +212,7 @@ function filter(
     kwargs...,
 )
     ssm = StateSpaceModel(
+        HierarchicalPrior(model.outer_prior, model.inner_model.prior),
         HierarchicalDynamics(model.outer_dyn, model.inner_model.dyn),
         HierarchicalObservations(model.inner_model.obs),
     )

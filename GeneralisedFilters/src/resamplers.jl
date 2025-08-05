@@ -13,8 +13,7 @@ function resample(
     states;
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
-    weights = StatsBase.weights(states)
-    idxs = sample_ancestors(rng, resampler, weights)
+    idxs = sample_ancestors(rng, resampler, weights(states))
     # Set reference trajectory indices
     if !isnothing(ref_state)
         CUDA.@allowscalar idxs[1] = 1
@@ -22,20 +21,13 @@ function resample(
     return construct_new_state(states, idxs)
 end
 
-function construct_new_state(states::ParticleDistribution{PT,WT}, idxs) where {PT,WT}
-    return ParticleDistribution(states.particles[idxs], idxs, zeros(WT, length(states)))
+function construct_new_state(states::Particles{PT}, idxs) where {PT}
+    return Particles{PT}(states.particles[idxs], idxs)
 end
 
-function construct_new_state(
-    states::RaoBlackwellisedParticleDistribution{T}, idxs
-) where {T}
-    return RaoBlackwellisedParticleDistribution(
-        BatchRaoBlackwellisedParticles(
-            states.particles.xs[:, idxs], states.particles.zs[idxs]
-        ),
-        idxs,
-        CUDA.zeros(T, length(states)),
-    )
+function construct_new_state(states::WeightedParticles{PT,WT}, idxs) where {PT,WT}
+    weights = ParticleWeights(zeros(WT, length(states)), WT(log(length(states))))
+    return WeightedParticles{PT,WT}(states.particles[idxs], idxs, weights)
 end
 
 ## CONDITIONAL RESAMPLING ##################################################################

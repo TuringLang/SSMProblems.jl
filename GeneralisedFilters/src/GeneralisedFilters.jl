@@ -3,7 +3,6 @@ module GeneralisedFilters
 using AbstractMCMC: AbstractMCMC, AbstractSampler
 import Distributions: MvNormal
 import Random: AbstractRNG, default_rng, rand
-using GaussianDistributions: pairs, Gaussian
 using OffsetArrays
 using SSMProblems
 using StatsBase
@@ -23,57 +22,62 @@ abstract type AbstractFilter <: AbstractSampler end
 abstract type AbstractBatchFilter <: AbstractFilter end
 
 """
-    initialise([rng,] model, alg; kwargs...)
+    initialise([rng,] model, algo; kwargs...)
 
 Propose an initial state distribution.
 """
 function initialise end
 
 """
-    step([rng,] model, alg, iter, state, observation; kwargs...)
+    step([rng,] model, algo, iter, state, observation; kwargs...)
 
 Perform a combined predict and update call of the filtering on the state.
 """
 function step end
 
 """
-    predict([rng,] model, alg, iter, filtered; kwargs...)
+    predict([rng,] model, algo, iter, filtered; kwargs...)
 
 Propagate the filtered distribution forward in time.
 """
 function predict end
 
 """
-    update(model, alg, iter, proposed, observation; kwargs...)
+    update(model, algo, iter, proposed, observation; kwargs...)
 
 Update beliefs on the propagated distribution given an observation.
 """
 function update end
 
-function initialise(model, alg; kwargs...)
-    return initialise(default_rng(), model, alg; kwargs...)
+function initialise(model, algo; kwargs...)
+    return initialise(default_rng(), model, algo; kwargs...)
 end
 
-function predict(model, alg, step, filtered, observation; kwargs...)
-    return predict(default_rng(), model, alg, step, filtered; kwargs...)
+function predict(model, algo, step, filtered, observation; kwargs...)
+    return predict(default_rng(), model, algo, step, filtered; kwargs...)
 end
 
 function filter(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
-    alg::AbstractFilter,
+    algo::AbstractFilter,
     observations::AbstractVector;
-    callback::Union{AbstractCallback,Nothing}=nothing,
+    callback::CallbackType=nothing,
     kwargs...,
 )
-    state = initialise(rng, model, alg; kwargs...)
-    isnothing(callback) || callback(model, alg, state, observations, PostInit; kwargs...)
+    # draw from the prior
+    init_state = initialise(rng, model, algo; kwargs...)
+    callback(model, algo, init_state, observations, PostInit; kwargs...)
 
-    log_evidence = initialise_log_evidence(alg, model)
+    # iterations starts here for type stability
+    state, log_evidence = step(
+        rng, model, algo, 1, init_state, observations[1]; callback, kwargs...
+    )
 
-    for t in eachindex(observations)
+    # subsequent iteration
+    for t in 2:length(observations)
         state, ll_increment = step(
-            rng, model, alg, t, state, observations[t]; callback, kwargs...
+            rng, model, algo, t, state, observations[t]; callback, kwargs...
         )
         log_evidence += ll_increment
     end
@@ -81,40 +85,43 @@ function filter(
     return state, log_evidence
 end
 
-function initialise_log_evidence(::AbstractFilter, model::AbstractStateSpaceModel)
-    return zero(SSMProblems.arithmetic_type(model))
-end
-
-function initialise_log_evidence(alg::AbstractBatchFilter, model::AbstractStateSpaceModel)
-    return CUDA.zeros(SSMProblems.arithmetic_type(model), alg.batch_size)
-end
-
 function filter(
     model::AbstractStateSpaceModel,
-    alg::AbstractFilter,
+    algo::AbstractFilter,
     observations::AbstractVector;
     kwargs...,
 )
-    return filter(default_rng(), model, alg, observations; kwargs...)
+    return filter(default_rng(), model, algo, observations; kwargs...)
 end
 
 function step(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
-    alg::AbstractFilter,
+    algo::AbstractFilter,
     iter::Integer,
     state,
     observation;
-    callback::Union{AbstractCallback,Nothing}=nothing,
     kwargs...,
 )
-    state = predict(rng, model, alg, iter, state, observation; kwargs...)
-    isnothing(callback) ||
-        callback(model, alg, iter, state, observation, PostPredict; kwargs...)
+    # generalised to fit analytical filters
+    return move(rng, model, algo, iter, state, observation; kwargs...)
+end
 
-    state, ll_increment = update(model, alg, iter, state, observation; kwargs...)
-    isnothing(callback) ||
-        callback(model, alg, iter, state, observation, PostUpdate; kwargs...)
+function move(
+    rng::AbstractRNG,
+    model::AbstractStateSpaceModel,
+    algo::AbstractFilter,
+    iter::Integer,
+    state,
+    observation;
+    callback::CallbackType=nothing,
+    kwargs...,
+)
+    state = predict(rng, model, algo, iter, state, observation; kwargs...)
+    callback(model, algo, iter, state, observation, PostPredict; kwargs...)
+
+    state, ll_increment = update(model, algo, iter, state, observation; kwargs...)
+    callback(model, algo, iter, state, observation, PostUpdate; kwargs...)
 
     return state, ll_increment
 end

@@ -46,13 +46,13 @@ end
     rng = CUDA.RNG(SEED)
 
     xs = randn(rng, N)
-    ws = pdf(Normal(1, 1), xs) ./ pdf(Normal(0, 1), xs)
+    ws = map(x -> pdf(Normal(1, 1), x) / pdf(Normal(0, 1), x), xs)
     ws ./= sum(ws)
 
     μ0 = sum(ws .* xs)
 end
 
-@testitem "Test GPU categorical resampling" setup = [GPUResamplingTestSetup] begin
+@testitem "Test GPU categorical resampling" setup = [GPUResamplingTestSetup] tags = [:gpu] begin
     idxs = GeneralisedFilters.sample_ancestors(rng, Multinomial(), ws)
     @test length(idxs) == N
     μ1 = sum(xs[idxs]) / N
