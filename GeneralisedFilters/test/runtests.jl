@@ -88,7 +88,7 @@ end
 
     rng = StableRNG(1234)
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, 1, 1)
-    _, _, ys = sample(rng, model, 2)
+    _, _, ys = sample(rng, model, 10)
 
     bf = BF(2^12; threshold=0.8)
     bf_state, llbf = GeneralisedFilters.filter(rng, model, bf, ys)
