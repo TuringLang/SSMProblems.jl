@@ -145,7 +145,7 @@ states, ll = GF.filter(
 # structure to a human readable array by using `GeneralisedFilters.get_ancestry` and then
 # take the mean path by passing a custom function.
 
-trends, volatilities = mean_path(GF.get_ancestry(sparse_ancestry.tree), states.log_weights);
+trends, volatilities = mean_path(GF.get_ancestry(sparse_ancestry.tree), states.weights);
 plot_ucsv(trends[1, :], eachrow(volatilities), fred_data)
 
 # #### Outlier Adjustments
@@ -247,5 +247,5 @@ states, ll = GF.filter(
 # which captures the outlier distance. We omit this feature in the plots, but the impact is
 # clear when comparing the maximum transitory noise around the GFC.
 
-trends, volatilities = mean_path(GF.get_ancestry(sparse_ancestry.tree), states.log_weights);
+trends, volatilities = mean_path(GF.get_ancestry(sparse_ancestry.tree), states.weights);
 plot_ucsv(trends[1, :], eachrow(volatilities), fred_data)

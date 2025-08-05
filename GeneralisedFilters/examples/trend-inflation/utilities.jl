@@ -6,19 +6,19 @@ fred_data = CSV.read(joinpath(INFL_PATH, "data.csv"), DataFrame)
 
 ## PLOTTING UTILITIES ######################################################################
 
-function _mean_path(f, paths, log_weights)
-    return mean(map(x -> hcat(f(x)...), paths), StatsBase.weights(log_weights))
+function _mean_path(f, paths, weights)
+    return mean(map(x -> hcat(f(x)...), paths), StatsBase.weights(weights))
 end
 
 # for normal collections
-mean_path(paths, log_weights) = _mean_path(identity, paths, log_weights)
+mean_path(paths, weights) = _mean_path(identity, paths, weights)
 
 # for rao blackwellised particles
 function mean_path(
-    paths::Vector{Vector{T}}, log_weights
+    paths::Vector{Vector{T}}, weights
 ) where {T<:GeneralisedFilters.RaoBlackwellisedParticle}
-    zs = _mean_path(z -> getproperty.(getproperty.(z, :z), :μ), paths, log_weights)
-    xs = _mean_path(x -> getproperty.(x, :x), paths, log_weights)
+    zs = _mean_path(z -> getproperty.(getproperty.(z, :z), :μ), paths, weights)
+    xs = _mean_path(x -> getproperty.(x, :x), paths, weights)
     return zs, xs
 end
 
