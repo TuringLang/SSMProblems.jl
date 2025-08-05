@@ -52,23 +52,24 @@ end
 #### DISTRIBUTIONS ####
 #######################
 
+# We choose Gaussian over MvNormal since it allows for batched types
 function SSMProblems.distribution(dyn::LinearGaussianLatentDynamics; kwargs...)
     μ0, Σ0 = calc_initial(dyn; kwargs...)
-    return MvNormal(μ0, Σ0)
+    return Gaussian(μ0, Σ0)
 end
 
 function SSMProblems.distribution(
-    dyn::LinearGaussianLatentDynamics, step::Integer, state::AbstractVector; kwargs...
+    dyn::LinearGaussianLatentDynamics, step::Integer, state; kwargs...
 )
     A, b, Q = calc_params(dyn, step; kwargs...)
-    return MvNormal(A * state + b, Q)
+    return Gaussian(A * state + b, Q)
 end
 
 function SSMProblems.distribution(
-    obs::LinearGaussianObservationProcess, step::Integer, state::AbstractVector; kwargs...
+    obs::LinearGaussianObservationProcess, step::Integer, state; kwargs...
 )
     H, c, R = calc_params(obs, step; kwargs...)
-    return MvNormal(H * state + c, R)
+    return Gaussian(H * state + c, R)
 end
 
 ###########################################
@@ -76,12 +77,17 @@ end
 ###########################################
 
 struct HomogeneousLinearGaussianLatentDynamics{
-    T<:Real,ΣT<:AbstractMatrix{T},AT<:AbstractMatrix{T},QT<:AbstractMatrix{T}
+    T<:Real,
+    μT<:Union{AbstractVector{T},BatchedVector{T}},
+    ΣT<:Union{AbstractMatrix{T},BatchedMatrix{T}},
+    AT<:Union{AbstractMatrix{T},BatchedMatrix{T}},
+    bT<:Union{AbstractVector{T},BatchedVector{T}},
+    QT<:Union{AbstractMatrix{T},BatchedMatrix{T}},
 } <: LinearGaussianLatentDynamics{T}
-    μ0::Vector{T}
+    μ0::μT
     Σ0::ΣT
     A::AT
-    b::Vector{T}
+    b::bT
     Q::QT
 end
 calc_μ0(dyn::HomogeneousLinearGaussianLatentDynamics; kwargs...) = dyn.μ0
@@ -91,10 +97,13 @@ calc_b(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer; kwargs...) = dyn
 calc_Q(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer; kwargs...) = dyn.Q
 
 struct HomogeneousLinearGaussianObservationProcess{
-    T<:Real,HT<:AbstractMatrix{T},RT<:AbstractMatrix{T}
+    T<:Real,
+    HT<:Union{AbstractMatrix{T},BatchedMatrix{T}},
+    cT<:Union{AbstractVector{T},BatchedVector{T}},
+    RT<:Union{AbstractMatrix{T},BatchedMatrix{T}},
 } <: LinearGaussianObservationProcess{T}
     H::HT
-    c::Vector{T}
+    c::cT
     R::RT
 end
 calc_H(obs::HomogeneousLinearGaussianObservationProcess, ::Integer; kwargs...) = obs.H

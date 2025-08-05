@@ -122,26 +122,34 @@ function predict(
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    proposed_particles = map(enumerate(state.particles)) do (i, particle)
-        if !isnothing(ref_state) && i == 1
-            ref_state[iter]
-        else
-            simulate(rng, model, filter.proposal, iter, particle, observation; kwargs...)
-        end
+    proposed_particles =
+        SSMProblems.simulate.(
+            Ref(rng),
+            Ref(model),
+            Ref(filter.proposal),
+            Ref(iter),
+            state.particles,
+            Ref(observation),
+            kwargs...,
+        )
+    if !isnothing(ref_state)
+        proposed_particles[1] = ref_state[iter]
     end
 
-    state.log_weights +=
-        map(zip(proposed_particles, state.particles)) do (new_state, prev_state)
-            log_f = SSMProblems.logdensity(
-                model.dyn, iter, prev_state, new_state; kwargs...
-            )
-
-            log_q = SSMProblems.logdensity(
-                model, filter.proposal, iter, prev_state, new_state, observation; kwargs...
-            )
-
-            (log_f - log_q)
-        end
+    state.log_weights .+=
+        SSMProblems.logdensity.(
+            Ref(model.dyn), Ref(iter), state.particles, proposed_particles, kwargs...
+        )
+    state.log_weights .-=
+        SSMProblems.logdensity.(
+            Ref(model),
+            Ref(filter.proposal),
+            Ref(iter),
+            state.particles,
+            proposed_particles,
+            Ref(observation);
+            kwargs...,
+        )
 
     state.particles = proposed_particles
 
@@ -156,10 +164,10 @@ function update(
     observation;
     kwargs...,
 ) where {T}
-    log_increments = map(
-        x -> SSMProblems.logdensity(model.obs, iter, x, observation; kwargs...),
-        state.particles,
-    )
+    log_increments =
+        SSMProblems.logdensity.(
+            Ref(model.obs), Ref(iter), state.particles, Ref(observation); kwargs...
+        )
 
     state.log_weights += log_increments
 
@@ -207,12 +215,12 @@ function predict(
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    state.particles = map(enumerate(state.particles)) do (i, particle)
-        if !isnothing(ref_state) && i == 1
-            ref_state[iter]
-        else
-            SSMProblems.simulate(rng, model.dyn, iter, particle; kwargs...)
-        end
+    state.particles =
+        SSMProblems.simulate.(
+            Ref(rng), Ref(model.dyn), Ref(iter), state.particles; kwargs...
+        )
+    if !isnothing(ref_state)
+        state.particles[1] = ref_state[iter]
     end
 
     return state
@@ -232,4 +240,46 @@ function filter(
         HierarchicalObservations(model.inner_model.obs),
     )
     return filter(rng, ssm, algo, observations; ref_state=ref_state, kwargs...)
+end
+
+# Broadcast wrapper for batched types
+# TODO: this can likely be replaced with a broadcast style
+function Base.Broadcast.broadcasted(
+    ::typeof(SSMProblems.simulate),
+    rng_ref::Base.RefValue,
+    model_dyn_ref::Base.RefValue,
+    iter_ref::Base.RefValue,
+    particles::BatchedVector;
+    kwargs...,
+)
+    # Extract values from Ref and call non-broadcasted version
+    return SSMProblems.simulate(
+        rng_ref[], model_dyn_ref[], iter_ref[], particles; kwargs...
+    )
+end
+function Base.Broadcast.broadcasted(
+    ::typeof(SSMProblems.logdensity),
+    model_obs_ref::Base.RefValue,
+    iter_ref::Base.RefValue,
+    particles::BatchedVector,
+    observation::Base.RefValue;
+    kwargs...,
+)
+    # Extract values from Ref and call non-broadcasted version
+    return SSMProblems.logdensity(
+        model_obs_ref[], iter_ref[], particles, observation[]; kwargs...
+    )
+end
+function Base.Broadcast.broadcasted(
+    ::typeof(SSMProblems.logdensity),
+    model_dyn_ref::Base.RefValue,
+    iter_ref::Base.RefValue,
+    prev_particles::BatchedVector,
+    new_particles::BatchedVector;
+    kwargs...,
+)
+    # Extract values from Ref and call non-broadcasted version
+    return SSMProblems.logdensity(
+        model_dyn_ref[], iter_ref[], prev_particles, new_particles; kwargs...
+    )
 end
