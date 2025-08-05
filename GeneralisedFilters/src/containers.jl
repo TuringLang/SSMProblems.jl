@@ -68,7 +68,7 @@ function marginalise!(state::WeightedParticles)
     log_marginalisation = logsumexp(state.weights.log_weights)
     ll_increment = (log_marginalisation - state.weights.prev_logsumexp)
     state.weights.prev_logsumexp = log_marginalisation
-    return state, ll_increment
+    return ll_increment
 end
 
 ## GAUSSIAN STATES #########################################################################

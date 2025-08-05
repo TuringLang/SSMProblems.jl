@@ -145,7 +145,9 @@ function update(
     )
 
     state = update_weights(state, log_increments)
-    return marginalise!(state)
+    ll_increment = marginalise!(state)
+
+    return state, ll_increment
 end
 
 struct LatentProposal <: AbstractProposal end
