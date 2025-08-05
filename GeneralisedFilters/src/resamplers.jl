@@ -13,8 +13,7 @@ function resample(
     states;
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
-    weights = StatsBase.weights(states)
-    idxs = sample_ancestors(rng, resampler, weights)
+    idxs = sample_ancestors(rng, resampler, weights(states))
     # Set reference trajectory indices
     if !isnothing(ref_state)
         CUDA.@allowscalar idxs[1] = 1

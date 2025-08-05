@@ -55,7 +55,7 @@ StatsBase.weights(state::Particles) = Weights(fill(1 / length(state), length(sta
 StatsBase.weights(state::WeightedParticles) = Weights(softmax(state.weights.log_weights))
 
 function update_weights(state::Particles, log_weights)
-    weights = ParticleWeights(log_weights)
+    weights = ParticleWeights(log_weights, logsumexp(zero(log_weights)))
     return WeightedParticles(state.particles, state.ancestors, weights)
 end
 
