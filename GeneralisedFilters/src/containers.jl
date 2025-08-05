@@ -2,6 +2,15 @@
 
 ## PARTICLES ###############################################################################
 
+mutable struct ParticleWeights{WT<:Real}
+    log_weights::Vector{WT}
+    prev_logsumexp::WT
+end
+
+function ParticleWeights(log_weights::Vector{WT}) where {WT}
+    return ParticleWeights{WT}(log_weights, logsumexp(log_weights))
+end
+
 """
     ParticleDistribution
 
@@ -28,7 +37,7 @@ end
 mutable struct WeightedParticles{PT,WT<:Real} <: ParticleDistribution{PT}
     particles::Vector{PT}
     ancestors::Vector{Int}
-    log_weights::Vector{WT}
+    weights::ParticleWeights{WT}
 end
 
 function Particles(particles::AbstractVector)
@@ -36,30 +45,30 @@ function Particles(particles::AbstractVector)
     return Particles(particles, Vector{Int}(1:N))
 end
 
-function WeightedParticles(particles, log_weights)
+function WeightedParticles(particles::AbstractVector, log_weights::AbstractVector)
     N = length(particles)
-    return WeightedParticles(particles, Vector{Int}(1:N), log_weights)
+    weights = ParticleWeights(log_weights)
+    return WeightedParticles(particles, Vector{Int}(1:N), weights)
 end
 
-StatsBase.weights(state::Particles) = fill(1 / length(state), length(state))
-StatsBase.weights(state::WeightedParticles) = softmax(state.log_weights)
+StatsBase.weights(state::Particles) = Weights(fill(1 / length(state), length(state)))
+StatsBase.weights(state::WeightedParticles) = Weights(softmax(state.weights.log_weights))
 
 function update_weights(state::Particles, log_weights)
-    return WeightedParticles(state.particles, state.ancestors, log_weights)
+    weights = ParticleWeights(log_weights)
+    return WeightedParticles(state.particles, state.ancestors, weights)
 end
 
 function update_weights(state::WeightedParticles, log_weights)
-    state.log_weights += log_weights
+    state.weights.log_weights += log_weights
     return state
 end
 
-function fast_maximum(x::AbstractArray{T}; dims)::T where {T}
-    @fastmath reduce(max, x; dims, init=float(T)(-Inf))
-end
-
-function logmeanexp(x::AbstractArray{T}; dims=:)::T where {T}
-    max_ = fast_maximum(x; dims)
-    @fastmath max_ .+ log.(mean(exp.(x .- max_); dims))
+function marginalise!(state::WeightedParticles)
+    log_marginalisation = logsumexp(state.weights.log_weights)
+    ll_increment = (log_marginalisation - state.weights.prev_logsumexp)
+    state.weights.prev_logsumexp = log_marginalisation
+    return state, ll_increment
 end
 
 ## GAUSSIAN STATES #########################################################################

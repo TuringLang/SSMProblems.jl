@@ -117,13 +117,13 @@ function move(
     callback::CallbackType=nothing,
     kwargs...,
 )
-    state, log_trans_inc = predict(rng, model, algo, iter, state, observation; kwargs...)
+    state = predict(rng, model, algo, iter, state, observation; kwargs...)
     callback(model, algo, iter, state, observation, PostPredict; kwargs...)
 
-    state, log_obs_inc = update(model, algo, iter, state, observation; kwargs...)
+    state, ll_increment = update(model, algo, iter, state, observation; kwargs...)
     callback(model, algo, iter, state, observation, PostUpdate; kwargs...)
 
-    return state, log_marginal(algo, log_trans_inc, log_obs_inc)
+    return state, ll_increment
 end
 
 ## SMOOTHING BASE ##########################################################################
@@ -143,28 +143,6 @@ include("algorithms/particles.jl")
 include("algorithms/kalman.jl")
 include("algorithms/forward.jl")
 include("algorithms/rbpf.jl")
-
-# for particle filtering with a proposal
-function log_marginal(
-    ::AbstractParticleFilter, log_trans_inc::AbstractVector, log_obs_inc::AbstractVector
-)
-    return logmeanexp(log_trans_inc + log_obs_inc)
-end
-
-# for bootstrap filtering
-function log_marginal(::AbstractParticleFilter, ::Nothing, log_obs_inc::AbstractVector)
-    return logmeanexp(log_obs_inc)
-end
-
-# for rao blackwellization
-function log_marginal(
-    ::AbstractParticleFilter, ::AbstractVector{Nothing}, log_obs_inc::AbstractVector
-)
-    return logmeanexp(log_obs_inc)
-end
-
-# for analytical filtering
-log_marginal(::AbstractFilter, ::Nothing, log_obs_inc) = log_obs_inc
 
 # Unit-testing helper module
 include("GFTest/GFTest.jl")

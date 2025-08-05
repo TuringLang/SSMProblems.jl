@@ -26,7 +26,7 @@ function predict(
 )
     μ, Σ = mean_cov(state)
     A, b, Q = calc_params(model.dyn, iter; kwargs...)
-    return GaussianDistribution(A * μ + b, A * Σ * A' + Q), nothing
+    return GaussianDistribution(A * μ + b, A * Σ * A' + Q)
 end
 
 function update(
@@ -81,7 +81,7 @@ function predict(
     As, bs, Qs = batch_calc_params(model.dyn, iter, algo.batch_size; kwargs...)
     μ̂s = NNlib.batched_vec(As, μs) .+ bs
     Σ̂s = NNlib.batched_mul(NNlib.batched_mul(As, Σs), NNlib.batched_transpose(As)) .+ Qs
-    return BatchGaussianDistribution(μ̂s, Σ̂s), nothing
+    return BatchGaussianDistribution(μ̂s, Σ̂s)
 end
 
 function update(

@@ -128,7 +128,7 @@ function predict(
 
     state.particles = proposed_particles
     state = update_weights(state, log_increments)
-    return state, log_increments
+    return state
 end
 
 function update(
@@ -145,7 +145,7 @@ function update(
     )
 
     state = update_weights(state, log_increments)
-    return state, log_increments
+    return marginalise!(state)
 end
 
 struct LatentProposal <: AbstractProposal end
@@ -197,7 +197,7 @@ function predict(
         end
     end
 
-    return state, nothing
+    return state
 end
 
 # Application of particle filter to hierarchical models

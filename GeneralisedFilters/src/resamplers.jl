@@ -27,7 +27,8 @@ function construct_new_state(states::Particles{PT}, idxs) where {PT}
 end
 
 function construct_new_state(states::WeightedParticles{PT,WT}, idxs) where {PT,WT}
-    return WeightedParticles{PT,WT}(states.particles[idxs], idxs, zeros(WT, length(states)))
+    weights = ParticleWeights(zeros(WT, length(states)))
+    return WeightedParticles{PT,WT}(states.particles[idxs], idxs, weights)
 end
 
 ## CONDITIONAL RESAMPLING ##################################################################
