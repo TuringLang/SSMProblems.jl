@@ -25,10 +25,10 @@ function AbstractMCMC.sample(
     outer_dyn, inner_model = model.outer_dyn, model.inner_model
 
     x0 = simulate(rng, model.outer_prior; kwargs...)
-    z0 = simulate(rng, inner_model.prior; new_outer=xs[0], kwargs...)
+    z0 = simulate(rng, inner_model.prior; new_outer=x0, kwargs...)
 
     # Simulate outer dynamics
-    xs = fill(simulate(rng, outer_dyn, t, x0; kwargs...), T)
+    xs = fill(simulate(rng, outer_dyn, 1, x0; kwargs...), T)
     zs = fill(
         simulate(rng, inner_model.dyn, 1, z0; prev_outer=x0, new_outer=xs[1], kwargs...), T
     )
