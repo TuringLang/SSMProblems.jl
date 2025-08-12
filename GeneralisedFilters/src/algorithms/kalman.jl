@@ -24,9 +24,18 @@ function predict(
     observation=nothing;
     kwargs...,
 )
+    params = calc_params(model.dyn, iter; kwargs...)
+    state = kalman_predict(state, params)
+    return state
+end
+
+function kalman_predict(state, params)
     μ, Σ = mean_cov(state)
-    A, b, Q = calc_params(model.dyn, iter; kwargs...)
-    return GaussianDistribution(A * μ + b, A * Σ * A' + Q)
+    A, b, Q = params
+
+    μ̂ = A * μ + b
+    Σ̂ = A * Σ * A' + Q
+    return GaussianDistribution(μ̂, Σ̂)
 end
 
 function update(
@@ -37,8 +46,14 @@ function update(
     observation::AbstractVector;
     kwargs...,
 )
+    params = calc_params(model.obs, iter; kwargs...)
+    state, ll = kalman_update(state, params, observation)
+    return state, ll
+end
+
+function kalman_update(state, params, observation)
     μ, Σ = mean_cov(state)
-    H, c, R = calc_params(model.obs, iter; kwargs...)
+    H, c, R = params
 
     # Update state
     m = H * μ + c
