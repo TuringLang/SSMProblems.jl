@@ -1,6 +1,6 @@
 export KalmanFilter, filter, BatchKalmanFilter
 using CUDA: i32
-import LinearAlgebra: hermitianpart
+import PDMats: PDMat
 
 export KalmanFilter, KF, KalmanSmoother, KS
 
@@ -58,13 +58,15 @@ function kalman_update(state, params, observation)
     # Update state
     m = H * μ + c
     y = observation - m
-    S = hermitianpart(H * Σ * H' + R)
-    K = Σ * H' / S
+    S = H * Σ * H' + R
+    S = (S + S') / 2  # force symmetric; TODO: replace with SA-compatibile hermitianpart
+    S_chol = cholesky(S)
+    K = Σ * H' / S_chol  # Zygote errors when using PDMat in solve
 
     state = GaussianDistribution(μ + K * y, Σ - K * H * Σ)
 
     # Compute log-likelihood
-    ll = logpdf(MvNormal(m, S), observation)
+    ll = logpdf(MvNormal(m, PDMat(S_chol)), observation)
 
     return state, ll
 end

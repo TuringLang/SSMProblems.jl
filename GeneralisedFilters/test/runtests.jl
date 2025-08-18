@@ -48,6 +48,39 @@ include("resamplers.jl")
     end
 end
 
+@testitem "Kalman filter StaticArrays" begin
+    using GeneralisedFilters
+    using SSMProblems
+    using StableRNGs
+    using StaticArrays
+
+    D = 2
+    rng = StableRNG(1234)
+
+    μ0 = @SVector rand(rng, D)
+    Σ0 = @SMatrix rand(rng, D, D)
+    Σ0 = Σ0 * Σ0'
+    A = @SMatrix rand(rng, D, D)
+    b = @SVector rand(rng, D)
+    Q = @SMatrix rand(rng, D, D)
+    Q = Q * Q'
+    H = @SMatrix rand(rng, D, D)
+    c = @SVector rand(rng, D)
+    R = @SMatrix rand(rng, D, D)
+    R = R * R'
+
+    model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
+
+    _, _, ys = sample(rng, model, 2)
+
+    state, _ = GeneralisedFilters.filter(rng, model, KalmanFilter(), ys)
+
+    # Verify returned values are still StaticArrays
+    # @test ys[2] isa SVector{D,Float64}  # TODO: this fails due to use of MvNormal
+    @test state.μ isa SVector{D,Float64}
+    @test state.Σ isa SMatrix{D,D,Float64}
+end
+
 @testitem "Kalman smoother test" begin
     using GeneralisedFilters
     using Distributions
