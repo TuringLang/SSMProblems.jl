@@ -8,48 +8,34 @@ import Base: eltype
 import Random: AbstractRNG, default_rng
 import Distributions: logpdf
 
-export LatentDynamics, ObservationProcess, AbstractStateSpaceModel, StateSpaceModel
+export StatePrior,
+    LatentDynamics, ObservationProcess, AbstractStateSpaceModel, StateSpaceModel
+
+"""
+Initial state prior of a state space model.
+
+Any concrete subtype of `StatePrior` should implement the functions `logdensity` and
+`simulate` as defined below.
+
+Alternatively, you may specify a method for the function `distribution` which will be used
+to define the above methods.
+"""
+abstract type StatePrior end
 
 """
 Latent dynamics of a state space model.
 
 Any concrete subtype of `LatentDynamics` should implement the functions `logdensity` and
-`simulate`, by defining two methods as documented below, one for initialisation and one
-for transitioning. Whether each of these functions need to be implemented depends on the
-exact inference algorithm that is intended to be used.
+`simulate` for transition dynamics. Whether each of these functions need to be implemented
+depends on the exact inference algorithm that is intended to be used.
 
-Alternatively, you may specify methods for the function `distribution` which will be
-used to define the above methods.
+Alternatively, you may specify a method for the function `distribution` which will be used
+to define the above methods.
 
 All of these methods should accept keyword arguments through `kwargs...` to facilitate
 inference-time dependencies of the dynamics as explained in [Control Variables and Keyword Arguments](@ref).
-
-The latent states should be of type `ET` which should be a composed from `T`, the
-arithmetic type used for the dynamics (e.g. Float32, ForwardDiff.Dual).
-
-# Parameters
-- `T`: The arithmetic type of the latent dynamics.
-- `ET`: The element type of the latent dynamics.
 """
-abstract type LatentDynamics{T<:Real,ET} end
-
-"""
-    arithmetic_type(::Type{<:LatentDynamics})
-    arithmetic_type(dyn::LatentDynamics)
-
-Return the arithmetic type of the latent dynamics.
-"""
-arithmetic_type(::Type{<:LatentDynamics{T}}) where {T} = T
-arithmetic_type(dyn::LatentDynamics) = arithmetic_type(typeof(dyn))
-
-"""
-    eltype(::Type{<:LatentDynamics})
-    eltype(dyn::LatentDynamics)
-
-Return the type of the state of the latent dynamics.
-"""
-Base.eltype(::Type{<:LatentDynamics{T,ET}}) where {T,ET} = ET
-Base.eltype(dyn::LatentDynamics) = eltype(typeof(dyn))
+abstract type LatentDynamics end
 
 """
 Observation process of a state space model.
@@ -63,50 +49,25 @@ both of the above methods.
 
 All of these methods should accept keyword arguments through `kwargs...` to facilitate
 inference-time dependencies of the observations as explained in [Control Variables and Keyword Arguments](@ref).
-
-The observations should be of type `ET` which should be a composed from `T`, the
-arithmetic type used for the observations (e.g. Float32, ForwardDiff.Dual).
-
-# Parameters
-- `T`: The arithmetic type of the observation process.
-- `ET`: The element type of the observation process.
 """
-abstract type ObservationProcess{T<:Real,ET} end
+abstract type ObservationProcess end
 
 """
-    arithmetic_type(::Type{<:ObservationProcess})
-    arithmetic_type(obs::ObservationProcess)
+    distribution(prior::StatePrior; kwargs...)
 
-Return the arithmetic type of the observation process.
-"""
-arithmetic_type(::Type{<:ObservationProcess{T}}) where {T} = T
-arithmetic_type(obs::ObservationProcess) = arithmetic_type(typeof(obs))
+Return the transition distribution for the latent dynamics.
 
-"""
-    eltype(::Type{<:ObservationProcess})
-    eltype(obs::ObservationProcess)
+The method should return the distribution of the initial state of the latent dynamics. 
+The returned value should be a `Distributions.Distribution` object that implements sampling
+and log-density calculations. 
 
-Return the type of the observations of the observation process.
-"""
-Base.eltype(::Type{<:ObservationProcess{T,ET}}) where {T,ET} = ET
-Base.eltype(obs::ObservationProcess) = eltype(typeof(obs))
-
-"""
-    distribution(dyn::LatentDynamics; kwargs...)
-
-Return the initialisation distribution for the latent dynamics.
-
-The method should return the distribution of the initial state of the latent dynamics.
-The  returned value should be a `Distributions.Distribution` object that implements
-sampling and log-density calculations.
-
-See also [`LatentDynamics`](@ref).
+See also [`StatePrior`](@ref).
 
 # Returns
 - `Distributions.Distribution`: The distribution of the initial state.
 """
-function distribution(dyn::LatentDynamics; kwargs...)
-    throw(MethodError(distribution, (dyn)))
+function distribution(prior::StatePrior; kwargs...)
+    throw(MethodError(distribution, (prior, kwargs...)))
 end
 
 """
@@ -146,7 +107,7 @@ function distribution(obs::ObservationProcess, step::Integer, state; kwargs...)
 end
 
 """
-    simulate([rng::AbstractRNG], dyn::LatentDynamics; kwargs...)
+    simulate([rng::AbstractRNG], prior::StatePrior; kwargs...)
 
 Simulate an initial state for the latent dynamics.
 
@@ -156,12 +117,12 @@ dynamics.
 The default behaviour is generate a random sample from distribution returned by the
 corresponding `distribution()` method.
 
-See also [`LatentDynamics`](@ref).
+See also [`StatePrior`](@ref).
 """
-function simulate(rng::AbstractRNG, dyn::LatentDynamics; kwargs...)
-    return rand(rng, distribution(dyn; kwargs...))
+function simulate(rng::AbstractRNG, prior::StatePrior; kwargs...)
+    return rand(rng, distribution(prior; kwargs...))
 end
-simulate(dyn::LatentDynamics; kwargs...) = simulate(default_rng(), dyn; kwargs...)
+simulate(prior::StatePrior; kwargs...) = simulate(default_rng(), prior; kwargs...)
 
 """
     simulate([rng::AbstractRNG], dyn::LatentDynamics, step::Integer, prev_state; kwargs...)
@@ -205,23 +166,6 @@ function simulate(
 end
 function simulate(obs::ObservationProcess, step::Integer, state; kwargs...)
     return simulate(default_rng(), obs, step, state; kwargs...)
-end
-
-"""
-    logdensity(dyn::LatentDynamics, new_state; kwargs...)
-
-Compute the log-density of an initial state for the latent dynamics.
-
-The method should return the log-density of the initial state `new_state` for the
-initial time step of the latent dynamics.
-
-The default behaviour is to compute the log-density of the distribution return by the
-corresponding `distribution()` method.
-
-See also [`LatentDynamics`](@ref).
-"""
-function logdensity(dyn::LatentDynamics, new_state; kwargs...)
-    return logpdf(distribution(dyn; kwargs...), new_state)
 end
 
 """
@@ -273,36 +217,24 @@ abstract type AbstractStateSpaceModel <: AbstractMCMC.AbstractModel end
 """
 A state space model.
 
-A vanilla implementation of a state space model, composed of a latent dynamics and an
-observation process.
+A vanilla implementation of a state space model, composed of an initail state prior, latent
+dynamics and an observation process.
 
 # Fields
+- `prior::PT`: The initial state prior fo the state space model.
 - `dyn::LD`: The latent dynamics of the state space model.
 - `obs::OP`: The observation process of the state space model.
 
 # Parameters
-- `T`: The arithmetic type of the state space model, which the latent dynamics and
-        observation process should be consistent with.
+- `PT`: The type of the initial state prior.
 - `LD`: The type of the latent dynamics.
 - `OP`: The type of the observation process.
 """
-struct StateSpaceModel{T<:Real,LD<:LatentDynamics{T},OP<:ObservationProcess{T}} <:
-       AbstractStateSpaceModel
+struct StateSpaceModel{PT,LD,OP} <: AbstractStateSpaceModel
+    prior::PT
     dyn::LD
     obs::OP
-    function StateSpaceModel(dyn::LatentDynamics{T}, obs::ObservationProcess{T}) where {T}
-        return new{T,typeof(dyn),typeof(obs)}(dyn, obs)
-    end
 end
-
-"""
-    arithmetic_type(::Type{<:StateSpaceModel})
-    arithmetic_type(model::StateSpaceModel)
-
-Return the arithmetic type of the state space model.
-"""
-arithmetic_type(model::StateSpaceModel) = arithmetic_type(typeof(model))
-arithmetic_type(::Type{<:StateSpaceModel{T}}) where {T} = T
 
 include("batch_methods.jl")
 include("utils/forward_simulation.jl")

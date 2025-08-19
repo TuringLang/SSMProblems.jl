@@ -1,12 +1,7 @@
 name = "SSMProblems"
 uuid = "26aad666-b158-4e64-9d35-0e672562fa48"
-authors = [
-    "FredericWantiez <frederic.wantiez@gmail.com>",
-    "THargreaves <tim.hargreaves@icloud.com>",
-    "Hong Ge",
-    "Charles Knipp" 
-]
-version = "0.5.2"
+authors = ["FredericWantiez <frederic.wantiez@gmail.com>", "THargreaves <tim.hargreaves@icloud.com>", "Hong Ge", "Charles Knipp <charlesknipp98@gmail.com>"]
+version = "0.6.0"
 
 [deps]
 AbstractMCMC = "80f14c24-f653-4e6a-9b94-39d6b0f70001"
