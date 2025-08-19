@@ -6,20 +6,18 @@ using Test
 
 @testset "Forward Simulation" begin
     @testset "Forward simulation without control" begin
-        struct UncontrolledPrior <: StatePrior end
-        SSMProblems.distribution(::UncontrolledPrior; kwargs...) = Normal(0, 1)
-
-        struct UncontrolledLatentDynamics{T} <: LatentDynamics
+        struct UncontrolledLatentDynamics{T} <: LatentDynamics{T,T}
             μ::T
             σ::T
         end
+        SSMProblems.distribution(::UncontrolledLatentDynamics; kwargs...) = Normal(0, 1)
         function SSMProblems.distribution(
             dyn::UncontrolledLatentDynamics, ::Integer, prev_state; kwargs...
         )
             return Normal(prev_state + dyn.μ, dyn.σ)
         end
 
-        struct UncontrolledObservationProcess{T} <: ObservationProcess
+        struct UncontrolledObservationProcess{T} <: ObservationProcess{T,T}
             σ::T
         end
         function SSMProblems.distribution(
@@ -29,9 +27,7 @@ using Test
         end
 
         model = StateSpaceModel(
-            UncontrolledPrior(),
-            UncontrolledLatentDynamics(0.1, 0.2),
-            UncontrolledObservationProcess(0.3),
+            UncontrolledLatentDynamics(0.1, 0.2), UncontrolledObservationProcess(0.3)
         )
 
         rng = MersenneTwister(1234)
@@ -43,12 +39,12 @@ using Test
     end
 
     @testset "Forward simulation with control" begin
-        struct ControlledPrior <: StatePrior end
-        SSMProblems.distribution(::ControlledPrior; σ_init, kwargs...) = Normal(0, σ_init)
-
-        struct ControlledLatentDynamics{T} <: LatentDynamics
+        struct ControlledLatentDynamics{T} <: LatentDynamics{T,T}
             μ::T
             σ::T
+        end
+        function SSMProblems.distribution(::ControlledLatentDynamics; σ_init, kwargs...)
+            return Normal(0, σ_init)
         end
         function SSMProblems.distribution(
             dyn::ControlledLatentDynamics, step::Integer, prev_state; dts, kwargs...
@@ -57,7 +53,7 @@ using Test
             return Normal(prev_state + dyn.μ * dt, dyn.σ * sqrt(dt))
         end
 
-        struct ControlledObservationProcess{T} <: ObservationProcess
+        struct ControlledObservationProcess{T} <: ObservationProcess{T,T}
             σ::T
         end
         function SSMProblems.distribution(
@@ -67,9 +63,7 @@ using Test
         end
 
         model = StateSpaceModel(
-            ControlledPrior(),
-            ControlledLatentDynamics(0.1, 0.2),
-            ControlledObservationProcess(0.3),
+            ControlledLatentDynamics(0.1, 0.2), ControlledObservationProcess(0.3)
         )
 
         rng = MersenneTwister(1234)
