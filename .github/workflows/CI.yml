@@ -19,34 +19,34 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # SSMProblems: Julia 1.6+ on all platforms
+          # SSMProblems: Julia lts and 1.11 on all platforms
           - pkg: { name: SSMProblems, dir: './SSMProblems', additional_paths: "" }
-            version: '1.6'
+            version: 'lts'
             os: ubuntu-latest
             arch: x64
           - pkg: { name: SSMProblems, dir: './SSMProblems', additional_paths: "" }
-            version: '1'
+            version: '1.11'
             os: ubuntu-latest
             arch: x64
           - pkg: { name: SSMProblems, dir: './SSMProblems', additional_paths: "" }
-            version: '1'
+            version: '1.11'
             os: windows-latest
             arch: x64
           - pkg: { name: SSMProblems, dir: './SSMProblems', additional_paths: "" }
-            version: '1'
+            version: '1.11'
             os: macOS-latest
             arch: x64
-          # GeneralisedFilters: Julia 1.10+ (use 1 for latest) on all platforms
+          # GeneralisedFilters: Julia 1.11 on all platforms (requires 1.10+)
           - pkg: { name: GeneralisedFilters, dir: './GeneralisedFilters', additional_paths: "./SSMProblems" }
-            version: '1'
+            version: '1.11'
             os: ubuntu-latest
             arch: x64
           - pkg: { name: GeneralisedFilters, dir: './GeneralisedFilters', additional_paths: "./SSMProblems" }
-            version: '1'
+            version: '1.11'
             os: windows-latest
             arch: x64
           - pkg: { name: GeneralisedFilters, dir: './GeneralisedFilters', additional_paths: "./SSMProblems" }
-            version: '1'
+            version: '1.11'
             os: macOS-latest
             arch: x64
 
@@ -77,10 +77,10 @@ jobs:
           Pkg.test(coverage=true);'
           
       - uses: julia-actions/julia-processcoverage@v1
-        if: matrix.version == '1' && matrix.os == 'ubuntu-latest'
+        if: matrix.version == '1.11' && matrix.os == 'ubuntu-latest'
         
       - uses: codecov/codecov-action@v4
-        if: matrix.version == '1' && matrix.os == 'ubuntu-latest'
+        if: matrix.version == '1.11' && matrix.os == 'ubuntu-latest'
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -101,7 +101,7 @@ jobs:
       
       - uses: julia-actions/setup-julia@v2
         with:
-          version: '1'
+          version: '1.11'
           
       - uses: julia-actions/cache@v1
       
