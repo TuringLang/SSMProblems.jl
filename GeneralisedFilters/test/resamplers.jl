@@ -42,11 +42,12 @@ end
 
     SEED = 1234
     N = 10^6
+    T = Float32
 
     rng = CUDA.RNG(SEED)
 
-    xs = randn(rng, N)
-    ws = map(x -> pdf(Normal(1, 1), x) / pdf(Normal(0, 1), x), xs)
+    xs = randn(rng, T, N)
+    ws = map(x -> T(pdf(Normal(1, 1), x) / pdf(Normal(0, 1), x)), xs)
     ws ./= sum(ws)
 
     μ0 = sum(ws .* xs)
@@ -57,6 +58,13 @@ end
     @test length(idxs) == N
     μ1 = sum(xs[idxs]) / N
     @test μ0 ≈ μ1 rtol = 1e-1
+    
+    # Type preservation tests
+    @test eltype(xs) == T
+    @test eltype(ws) == T
+    @test typeof(μ0) == T
+    @test typeof(μ1) == T
+    @test eltype(idxs) == Int
 end
 
 @testitem "Test GPU systematic resampling" setup = [GPUResamplingTestSetup] tags = [:gpu] begin
@@ -64,6 +72,13 @@ end
     @test length(idxs) == N
     μ1 = sum(xs[idxs]) / N
     @test μ0 ≈ μ1 rtol = 1e-1
+    
+    # Type preservation tests
+    @test eltype(xs) == T
+    @test eltype(ws) == T
+    @test typeof(μ0) == T
+    @test typeof(μ1) == T
+    @test eltype(idxs) == Int
 end
 
 @testitem "Test GPU stratified resampling" setup = [GPUResamplingTestSetup] tags = [:gpu] begin
@@ -71,6 +86,13 @@ end
     @test length(idxs) == N
     μ1 = sum(xs[idxs]) / N
     @test μ0 ≈ μ1 rtol = 1e-1
+    
+    # Type preservation tests
+    @test eltype(xs) == T
+    @test eltype(ws) == T
+    @test typeof(μ0) == T
+    @test typeof(μ1) == T
+    @test eltype(idxs) == Int
 end
 
 @testitem "Test GPU offspring-to-ancestors" tags = [:gpu] begin
@@ -79,6 +101,12 @@ end
     true_ancestors = CuVector{Int}([2, 2, 4, 5, 5])
     ancestors = GeneralisedFilters.offspring_to_ancestors(offspring)
     @test ancestors == true_ancestors
+    
+    # Type preservation tests
+    @test eltype(offspring) == Int
+    @test eltype(true_ancestors) == Int
+    @test eltype(ancestors) == Int
+    @test ancestors isa CuVector{Int}
 end
 
 @testitem "Test GPU ancestors-to-offspring" tags = [:gpu] begin
@@ -87,4 +115,10 @@ end
     true_offspring = CuVector{Int}([1, 2, 1, 1, 0])
     offspring = GeneralisedFilters.ancestors_to_offspring(ancestors)
     @test offspring == true_offspring
+    
+    # Type preservation tests
+    @test eltype(ancestors) == Int
+    @test eltype(true_offspring) == Int
+    @test eltype(offspring) == Int
+    @test offspring isa CuVector{Int}
 end

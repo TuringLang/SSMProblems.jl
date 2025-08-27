@@ -9,20 +9,21 @@
 
     using CUDA
 
+    T_elem = Float32  # Use Float32 for type preservation
     rng = StableRNG(1234)
     K = 10
     Dx = 2
     Dy = 2
-    μ0s = [rand(rng, Dx) for _ in 1:K]
-    Σ0s = [rand(rng, Dx, Dx) for _ in 1:K]
+    μ0s = [rand(rng, T_elem, Dx) for _ in 1:K]
+    Σ0s = [rand(rng, T_elem, Dx, Dx) for _ in 1:K]
     Σ0s .= Σ0s .* transpose.(Σ0s)
-    As = [rand(rng, Dx, Dx) for _ in 1:K]
-    bs = [rand(rng, Dx) for _ in 1:K]
-    Qs = [rand(rng, Dx, Dx) for _ in 1:K]
+    As = [rand(rng, T_elem, Dx, Dx) for _ in 1:K]
+    bs = [rand(rng, T_elem, Dx) for _ in 1:K]
+    Qs = [rand(rng, T_elem, Dx, Dx) for _ in 1:K]
     Qs .= Qs .* transpose.(Qs)
-    Hs = [rand(rng, Dy, Dx) for _ in 1:K]
-    cs = [rand(rng, Dy) for _ in 1:K]
-    Rs = [rand(rng, Dy, Dy) for _ in 1:K]
+    Hs = [rand(rng, T_elem, Dy, Dx) for _ in 1:K]
+    cs = [rand(rng, T_elem, Dy) for _ in 1:K]
+    Rs = [rand(rng, T_elem, Dy, Dy) for _ in 1:K]
     Rs .= Rs .* transpose.(Rs)
 
     models = [
@@ -32,7 +33,7 @@
     ]
 
     T = 5
-    Ys = [[rand(rng, Dy) for _ in 1:T] for _ in 1:K]
+    Ys = [[rand(rng, T_elem, Dy) for _ in 1:T] for _ in 1:K]
 
     outputs = [
         GeneralisedFilters.filter(rng, models[k], KalmanFilter(), Ys[k]) for k in 1:K
@@ -131,7 +132,7 @@
         BatchLinearGaussianObservations(Hs, cs, Rs),
     )
 
-    Ys_batch = Vector{Matrix{Float64}}(undef, T)
+    Ys_batch = Vector{Matrix{T_elem}}(undef, T)
     for t in 1:T
         Ys_batch[t] = stack(Ys[k][t] for k in 1:K)
     end
@@ -147,4 +148,19 @@
 
     @test Array(batch_output[2])[end] .≈ log_likelihoods[end] rtol = 1e-5
     @test Array(batch_output[1].μs) ≈ stack(getproperty.(states, :μ)) rtol = 1e-5
+    
+    # Type preservation tests
+    @test eltype(batch_output[1].μs) == T_elem
+    @test eltype(batch_output[1].Σs) == T_elem
+    @test eltype(batch_output[2]) == T_elem
+    @test all(eltype(μ0) == T_elem for μ0 in μ0s)
+    @test all(eltype(Σ0) == T_elem for Σ0 in Σ0s)
+    @test all(eltype(A) == T_elem for A in As)
+    @test all(eltype(b) == T_elem for b in bs)
+    @test all(eltype(Q) == T_elem for Q in Qs)
+    @test all(eltype(H) == T_elem for H in Hs)
+    @test all(eltype(c) == T_elem for c in cs)
+    @test all(eltype(R) == T_elem for R in Rs)
+    @test all(all(eltype(y) == T_elem for y in Y) for Y in Ys)
+    @test all(eltype(Y_batch) == T_elem for Y_batch in Ys_batch)
 end

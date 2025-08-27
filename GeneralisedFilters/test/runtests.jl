@@ -304,7 +304,14 @@ end
     @test kf_ll ≈ ll rtol = 1e-2
     @test first(kf_state.μ) ≈ sum(xs[1, :] .* ws) rtol = 1e-1
     @test last(kf_state.μ) ≈ sum(zs.μs[end, :] .* ws) rtol = 1e-2
+    
+    # Type preservation tests
     @test eltype(xs) == ET
+    @test eltype(zs.μs) == ET
+    @test eltype(zs.Σs) == ET
+    @test typeof(ll) == ET
+    @test typeof(kf_ll) == ET
+    @test eltype(ws) == ET
 end
 
 @testitem "RBPF ancestory test" begin
@@ -581,8 +588,14 @@ end
     rbpf = BatchRBPF(BatchKalmanFilter(N_particles), N_particles)
     states, ll = GeneralisedFilters.filter(hier_model, rbpf, ys; ref_state=ref_trajectory)
 
-    # Check returned type
+    # Type preservation tests
     @test typeof(ll) == T
+    @test eltype(states.particles.xs) == T
+    @test eltype(states.particles.zs.μs) == T
+    @test eltype(states.particles.zs.Σs) == T
+    @test eltype(states.log_weights) == T
+    @test all(eltype(ref_traj) == T for ref_traj in ref_trajectory)
+    @test all(eltype(y) == T for y in ys)
 end
 
 @testitem "GPU-RBPF ancestory test" tags = [:gpu] begin
@@ -623,6 +636,17 @@ end
     rbpf = BatchRBPF(BatchKalmanFilter(N_particles), N_particles)
     cb = GeneralisedFilters.ParallelAncestorCallback(tree)
     states, ll = GeneralisedFilters.filter(hier_model, rbpf, ys; callback=cb)
+
+    # Type preservation tests
+    @test typeof(ll) == T
+    @test eltype(states.particles.xs) == T
+    @test eltype(states.particles.zs.μs) == T
+    @test eltype(states.particles.zs.Σs) == T
+    @test eltype(states.log_weights) == T
+    @test eltype(tree.particles.xs) == T
+    @test eltype(tree.particles.zs.μs) == T
+    @test eltype(tree.particles.zs.Σs) == T
+    @test all(eltype(y) == T for y in ys)
 
     # TODO: add proper test comparing to dense storage
     ancestry = GeneralisedFilters.get_ancestry(tree, K)
@@ -702,4 +726,13 @@ end
         @test state.μ[1] ≈ only(mean(x_trajectories)) rtol = 1e-1
         @test state.μ[2] ≈ only(mean(getproperty.(z_trajectories, :μs))) rtol = 1e-1
     end
+
+    # Type preservation tests
+    @test eltype(particle_template.xs) == T
+    @test eltype(particle_template.zs.μs) == T
+    @test eltype(particle_template.zs.Σs) == T
+    @test all(eltype(sample.xs) == T for sample in trajectory_samples if !isnothing(sample))
+    @test all(eltype(getproperty(sample, :zs).μs) == T for sample in trajectory_samples if !isnothing(sample))
+    @test all(eltype(getproperty(sample, :zs).Σs) == T for sample in trajectory_samples if !isnothing(sample))
+    @test all(eltype(y) == T for y in ys)
 end
