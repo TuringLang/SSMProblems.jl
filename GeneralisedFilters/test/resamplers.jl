@@ -58,7 +58,6 @@ end
     @test length(idxs) == N
     μ1 = sum(xs[idxs]) / N
     @test μ0 ≈ μ1 rtol = 1e-1
-    
     # Type preservation tests
     @test eltype(xs) == T
     @test eltype(ws) == T
@@ -72,7 +71,6 @@ end
     @test length(idxs) == N
     μ1 = sum(xs[idxs]) / N
     @test μ0 ≈ μ1 rtol = 1e-1
-    
     # Type preservation tests
     @test eltype(xs) == T
     @test eltype(ws) == T
@@ -86,7 +84,6 @@ end
     @test length(idxs) == N
     μ1 = sum(xs[idxs]) / N
     @test μ0 ≈ μ1 rtol = 1e-1
-    
     # Type preservation tests
     @test eltype(xs) == T
     @test eltype(ws) == T
@@ -101,7 +98,6 @@ end
     true_ancestors = CuVector{Int}([2, 2, 4, 5, 5])
     ancestors = GeneralisedFilters.offspring_to_ancestors(offspring)
     @test ancestors == true_ancestors
-    
     # Type preservation tests
     @test eltype(offspring) == Int
     @test eltype(true_ancestors) == Int
@@ -115,7 +111,6 @@ end
     true_offspring = CuVector{Int}([1, 2, 1, 1, 0])
     offspring = GeneralisedFilters.ancestors_to_offspring(ancestors)
     @test offspring == true_offspring
-    
     # Type preservation tests
     @test eltype(ancestors) == Int
     @test eltype(true_offspring) == Int

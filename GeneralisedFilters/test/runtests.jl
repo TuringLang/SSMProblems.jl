@@ -304,7 +304,6 @@ end
     @test kf_ll ≈ ll rtol = 1e-2
     @test first(kf_state.μ) ≈ sum(xs[1, :] .* ws) rtol = 1e-1
     @test last(kf_state.μ) ≈ sum(zs.μs[end, :] .* ws) rtol = 1e-2
-    
     # Type preservation tests
     @test eltype(xs) == ET
     @test eltype(zs.μs) == ET
@@ -732,7 +731,13 @@ end
     @test eltype(particle_template.zs.μs) == T
     @test eltype(particle_template.zs.Σs) == T
     @test all(eltype(sample.xs) == T for sample in trajectory_samples if !isnothing(sample))
-    @test all(eltype(getproperty(sample, :zs).μs) == T for sample in trajectory_samples if !isnothing(sample))
-    @test all(eltype(getproperty(sample, :zs).Σs) == T for sample in trajectory_samples if !isnothing(sample))
+    @test all(
+        eltype(getproperty(sample, :zs).μs) == T for
+        sample in trajectory_samples if !isnothing(sample)
+    )
+    @test all(
+        eltype(getproperty(sample, :zs).Σs) == T for
+        sample in trajectory_samples if !isnothing(sample)
+    )
     @test all(eltype(y) == T for y in ys)
 end

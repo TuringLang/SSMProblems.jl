@@ -148,7 +148,6 @@
 
     @test Array(batch_output[2])[end] .≈ log_likelihoods[end] rtol = 1e-5
     @test Array(batch_output[1].μs) ≈ stack(getproperty.(states, :μ)) rtol = 1e-5
-    
     # Type preservation tests
     @test eltype(batch_output[1].μs) == T_elem
     @test eltype(batch_output[1].Σs) == T_elem
