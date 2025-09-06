@@ -13,61 +13,45 @@ concurrency:
 
 jobs:
   test:
-    name: ${{ matrix.pkg.name }} Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }}
+    name: ${{ matrix.pkg.name }} - Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # SSMProblems: Julia lts and 1.11 on all platforms
-          - pkg: { name: SSMProblems, dir: './SSMProblems', additional_paths: "" }
-            version: 'lts'
-            os: ubuntu-latest
-            arch: x64
-          - pkg: { name: SSMProblems, dir: './SSMProblems', additional_paths: "" }
-            version: 'lts'
-            os: windows-latest
-            arch: x64
-          - pkg: { name: SSMProblems, dir: './SSMProblems', additional_paths: "" }
-            version: 'lts'
-            os: macOS-latest
-            arch: x64
-          - pkg: { name: SSMProblems, dir: './SSMProblems', additional_paths: "" }
-            version: '1.11'
-            os: ubuntu-latest
-            arch: x64
-          - pkg: { name: SSMProblems, dir: './SSMProblems', additional_paths: "" }
-            version: '1.11'
-            os: windows-latest
-            arch: x64
-          - pkg: { name: SSMProblems, dir: './SSMProblems', additional_paths: "" }
-            version: '1.11'
-            os: macOS-latest
-            arch: x64
-          # GeneralisedFilters: Julia 1.11 on all platforms (requires 1.10+)
-          - pkg: { name: GeneralisedFilters, dir: './GeneralisedFilters', additional_paths: "./SSMProblems" }
-            version: '1.11'
-            os: ubuntu-latest
-            arch: x64
-          - pkg: { name: GeneralisedFilters, dir: './GeneralisedFilters', additional_paths: "./SSMProblems" }
-            version: '1.11'
-            os: windows-latest
-            arch: x64
-          - pkg: { name: GeneralisedFilters, dir: './GeneralisedFilters', additional_paths: "./SSMProblems" }
-            version: '1.11'
-            os: macOS-latest
-            arch: x64
+        version:
+          - '1.6' # LTS version for SSMProblems
+          - '1.10' # Minimum for GeneralisedFilters
+          - '1'   # Latest stable
+          - 'pre' # Nightly
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macOS-latest
+        arch:
+          - x64
+        pkg:
+          - name: SSMProblems
+            dir: './SSMProblems'
+          - name: GeneralisedFilters
+            dir: './GeneralisedFilters'
+        exclude:
+          # GeneralisedFilters requires Julia 1.10+
+          - version: '1.6'
+            pkg:
+              name: GeneralisedFilters
 
     steps:
       - uses: actions/checkout@v4
-      
-      - uses: julia-actions/setup-julia@v2
+
+      - name: Setup Julia
+        uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
-          
-      - uses: julia-actions/cache@v1
-      
+
+      - name: Cache artifacts
+        uses: julia-actions/cache@v2
+
       - name: Install dependencies
         run: |
           julia --project=${{ matrix.pkg.dir }}/ --color=yes -e '
@@ -77,61 +61,58 @@ jobs:
               Pkg.develop(PackageSpec(path="./SSMProblems"));
           end;
           Pkg.instantiate();'
-          
+
       - name: Run tests
-        run: |
-          julia --project=${{ matrix.pkg.dir }}/ --color=yes -e '
-          using Pkg;
-          Pkg.test(coverage=true);'
-          
-      - uses: codecov/codecov-action@v4
-        if: matrix.version == '1.11' && matrix.os == 'ubuntu-latest'
+        uses: julia-actions/julia-runtest@v1
+        with:
+          project: ${{ matrix.pkg.dir }}
+          coverage: ${{ matrix.os == 'ubuntu-latest' && matrix.version == '1' }}
+
+      - name: Process code coverage
+        uses: julia-actions/julia-processcoverage@v1
+        if: matrix.os == 'ubuntu-latest' && matrix.version == '1'
+        with:
+          directories: ${{ matrix.pkg.dir }}
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        if: matrix.os == 'ubuntu-latest' && matrix.version == '1'
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
+          flags: ${{ matrix.pkg.name }}
+          fail_ci_if_error: true
 
   test-gpu:
-    name: ${{ matrix.pkg.name }} GPU compilation check
+    name: GeneralisedFilters - GPU Compilation Check
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        pkg:
-          - name: GeneralisedFilters
-            dir: './GeneralisedFilters'
-    
     steps:
       - uses: actions/checkout@v4
-      
-      - uses: julia-actions/setup-julia@v2
+
+      - name: Setup Julia
+        uses: julia-actions/setup-julia@v2
         with:
-          version: '1.11'
-          
-      - uses: julia-actions/cache@v1
-      
+          version: '1'
+          arch: x64
+
+      - name: Cache artifacts
+        uses: julia-actions/cache@v2
+
       - name: Install dependencies
         run: |
-          julia --project=${{ matrix.pkg.dir }}/ --color=yes -e '
-          using Pkg;
-          Pkg.Registry.update();
-          Pkg.develop(PackageSpec(path="./SSMProblems"));
-          Pkg.instantiate();'
-      
-      # Check if GPU code compiles and CUDA loads
+          julia --project=GeneralisedFilters --color=yes -e '
+            using Pkg;
+            Pkg.Registry.update();
+            Pkg.develop(PackageSpec(path="./SSMProblems"));
+            Pkg.instantiate();'
+
       - name: Check GPU code compilation
         run: |
-          julia --project=${{ matrix.pkg.dir }}/ --color=yes -e '
-          try
-              using CUDA
-              println("CUDA loaded successfully")
-              using GeneralisedFilters
-              println("GeneralisedFilters with CUDA loaded successfully")
-              if CUDA.functional()
-                  println("CUDA is functional")
-              else
-                  println("CUDA is not functional (expected on CI)")
-              end
-          catch e
-              println("GPU compilation check completed with expected limitations: ", e)
-          end'
+          julia --project=GeneralisedFilters --color=yes -e '
+            using Pkg;
+            # Add CUDA manually to check for compilation
+            Pkg.add("CUDA");
+            using CUDA;
+            using GeneralisedFilters;
+            println("GeneralisedFilters with CUDA loaded successfully");
+            println("CUDA functional: ", CUDA.functional())'
