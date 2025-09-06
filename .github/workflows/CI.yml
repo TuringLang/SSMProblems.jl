@@ -19,9 +19,10 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - '1.6' # LTS version for SSMProblems
-          - '1.10' # Minimum for GeneralisedFilters
-          - '1'   # Latest stable
+          # - '1.6' # LTS version for SSMProblems
+          # - '1.10' # Minimum for GeneralisedFilters
+          - '1.11'
+          - 'lts'   # Latest stable
           - 'pre' # Nightly
         os:
           - ubuntu-latest
@@ -66,17 +67,17 @@ jobs:
         uses: julia-actions/julia-runtest@v1
         with:
           project: ${{ matrix.pkg.dir }}
-          coverage: ${{ matrix.os == 'ubuntu-latest' && matrix.version == '1' }}
+          coverage: ${{ matrix.os == 'ubuntu-latest' && matrix.version == 'lts' }}
 
       - name: Process code coverage
         uses: julia-actions/julia-processcoverage@v1
-        if: matrix.os == 'ubuntu-latest' && matrix.version == '1'
+        if: matrix.os == 'ubuntu-latest' && matrix.version == 'lts'
         with:
           directories: ${{ matrix.pkg.dir }}
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
-        if: matrix.os == 'ubuntu-latest' && matrix.version == '1'
+        if: matrix.os == 'ubuntu-latest' && matrix.version == 'lts'
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
