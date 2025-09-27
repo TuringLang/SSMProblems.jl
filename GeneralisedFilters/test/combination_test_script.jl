@@ -100,3 +100,16 @@ println(
     "RBGF Inner: ", @test last(kf_state.μ) ≈ sum(only.(getfield.(zs, :μ)) .* ws) rtol = 1e-2
 )
 println("RBGF LL: ", @test llkf ≈ llrbgf atol = 1e-2)
+
+################################
+#### REFERENCE TRAJECTORIES ####
+################################
+
+# Hard to verify these are correct until the code is faster and we can run a full loop
+# For now we just check they run without error
+
+ref_traj = [randn(rng, 1) for _ in 1:3]
+GeneralisedFilters.filter(rng, model, bf, ys; ref_state=ref_traj)
+GeneralisedFilters.filter(rng, model, gf, ys; ref_state=ref_traj)
+GeneralisedFilters.filter(rng, hier_model, rbbf, ys; ref_state=ref_traj)
+GeneralisedFilters.filter(rng, hier_model, rbgf, ys; ref_state=ref_traj)
