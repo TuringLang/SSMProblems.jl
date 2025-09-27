@@ -6,48 +6,79 @@ import SSMProblems: distribution, simulate, logdensity
 abstract type AbstractProposal end
 
 function SSMProblems.distribution(
-    model::AbstractStateSpaceModel,
-    prop::AbstractProposal,
-    iter::Integer,
-    state,
-    observation;
-    kwargs...,
+    prop::AbstractProposal, iter::Integer, state, observation; kwargs...
 )
-    return throw(
-        MethodError(distribution, (model, prop, iter, state, observation, kwargs...))
-    )
+    return throw(MethodError(distribution, (prop, iter, state, observation, kwargs...)))
 end
 
 function SSMProblems.simulate(
-    rng::AbstractRNG,
-    model::AbstractStateSpaceModel,
-    prop::AbstractProposal,
-    iter::Integer,
-    state,
-    observation;
-    kwargs...,
+    rng::AbstractRNG, prop::AbstractProposal, iter::Integer, state, observation; kwargs...
 )
-    return rand(
-        rng, SSMProblems.distribution(model, prop, iter, state, observation; kwargs...)
-    )
+    return rand(rng, SSMProblems.distribution(prop, iter, state, observation; kwargs...))
 end
 
 function SSMProblems.logdensity(
-    model::AbstractStateSpaceModel,
-    prop::AbstractProposal,
-    iter::Integer,
-    prev_state,
-    new_state,
-    observation;
-    kwargs...,
+    prop::AbstractProposal, iter::Integer, prev_state, new_state, observation; kwargs...
 )
     return logpdf(
-        SSMProblems.distribution(model, prop, iter, prev_state, observation; kwargs...),
-        new_state,
+        SSMProblems.distribution(prop, iter, prev_state, observation; kwargs...), new_state
     )
 end
 
 abstract type AbstractParticleFilter <: AbstractFilter end
+function num_particles end
+function resampler end
+
+function initialise(
+    rng::AbstractRNG,
+    prior::StatePrior,
+    algo::AbstractParticleFilter;
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+    kwargs...,
+)
+    N = num_particles(algo)
+    particles = map(1:N) do i
+        initialise_particle(rng, prior, algo; ref_state, kwargs...)
+    end
+
+    # TODO: need to check this is correct in the GF case
+    prev_logsumexp = logsumexp(map(p -> p.log_w, particles))
+    return ParticleDistribution(particles, prev_logsumexp)
+end
+
+function predict(
+    rng::AbstractRNG,
+    dyn::LatentDynamics,
+    algo::AbstractParticleFilter,
+    iter::Integer,
+    state,
+    observation;
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+    kwargs...,
+)
+    particles = map(state.particles) do particle
+        predict_particle(rng, dyn, algo, iter, particle, observation; ref_state, kwargs...)
+    end
+    state.particles = particles
+    return state
+end
+
+function update(
+    obs::ObservationProcess,
+    algo::AbstractParticleFilter,
+    iter::Integer,
+    state::ParticleDistribution,
+    observation;
+    kwargs...,
+)
+    particles = map(state.particles) do particle
+        update_particle(obs, algo, iter, particle, observation; kwargs...)
+    end
+    state.particles = particles
+    ll_increment = marginalise!(state)
+
+    return state, ll_increment
+end
 
 struct ParticleFilter{RS,PT} <: AbstractParticleFilter
     N::Int
@@ -64,6 +95,51 @@ function ParticleFilter(
     return ParticleFilter{ESSResampler,PT}(N, conditional_resampler, proposal)
 end
 
+num_particles(algo::ParticleFilter) = algo.N
+resampler(algo::ParticleFilter) = algo.resampler
+
+function initialise_particle(
+    rng::AbstractRNG,
+    prior::StatePrior,
+    algo::ParticleFilter;
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+    kwargs...,
+)
+    x = sample_prior(rng, prior, algo; ref_state, kwargs...)
+    # TODO (RB):  determine the correct type for the log_w field or use a NoWeight type
+    return Particle(x, 0.0, 0)
+end
+
+function predict_particle(
+    rng::AbstractRNG,
+    dyn::LatentDynamics,
+    algo::ParticleFilter,
+    iter::Integer,
+    particle::Particle,
+    observation;
+    ref_state,
+    kwargs...,
+)
+    new_x, logw_inc = propogate(
+        rng, dyn, algo, iter, particle.state, observation; ref_state, kwargs...
+    )
+    return Particle(new_x, particle.log_w + logw_inc, particle.ancestor)
+end
+
+function update_particle(
+    obs::ObservationProcess,
+    ::ParticleFilter,
+    iter::Integer,
+    particle::Particle,
+    observation;
+    kwargs...,
+)
+    log_increment = SSMProblems.logdensity(
+        obs, iter, particle.state, observation; kwargs...
+    )
+    return Particle(particle.state, particle.log_w + log_increment, particle.ancestor)
+end
+
 function step(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
@@ -75,80 +151,55 @@ function step(
     callback::CallbackType=nothing,
     kwargs...,
 )
-    state = resample(rng, algo.resampler, state; ref_state)
+    rs = resampler(algo)
+    state = resample(rng, rs, state; ref_state)
     callback(model, algo, iter, state, observation, PostResample; kwargs...)
     return move(rng, model, algo, iter, state, observation; ref_state, callback, kwargs...)
 end
 
-function initialise(
+function sample_prior(
     rng::AbstractRNG,
-    model::StateSpaceModel,
+    prior::StatePrior,
     algo::ParticleFilter;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    particles = map(1:(algo.N)) do i
-        if !isnothing(ref_state) && i == 1
-            ref_state[0]
-        else
-            SSMProblems.simulate(rng, model.prior; kwargs...)
-        end
+    x = if isnothing(ref_state)
+        SSMProblems.simulate(rng, prior; kwargs...)
+    else
+        ref_state[1]
     end
-
-    return Particles(particles)
+    return x
 end
 
-function predict(
+function propogate(
     rng::AbstractRNG,
-    model::StateSpaceModel,
+    dyn,
     algo::ParticleFilter,
     iter::Integer,
-    state,
+    x,
     observation;
-    ref_state::Union{Nothing,AbstractVector}=nothing,
+    ref_state,
     kwargs...,
 )
-    proposed_particles = map(enumerate(state)) do (i, particle)
-        if !isnothing(ref_state) && i == 1
-            ref_state[iter]
-        else
-            simulate(rng, model, algo.proposal, iter, particle, observation; kwargs...)
-        end
+    # TODO: use a trait to compute the sample and logpdf in one go if distribution is defined
+    new_x = if isnothing(ref_state)
+        SSMProblems.simulate(rng, algo.proposal, iter, x, observation; kwargs...)
+    else
+        ref_state[iter]
     end
-
-    log_increments = map(zip(proposed_particles, state)) do (new_state, prev_state)
-        log_f = SSMProblems.logdensity(model.dyn, iter, prev_state, new_state; kwargs...)
-
-        log_q = SSMProblems.logdensity(
-            model, algo.proposal, iter, prev_state, new_state, observation; kwargs...
-        )
-
-        (log_f - log_q)
-    end
-
-    state.particles = proposed_particles
-    state = update_weights(state, log_increments)
-    return state
+    log_p = SSMProblems.logdensity(dyn, iter, x, new_x; kwargs...)
+    log_q = SSMProblems.logdensity(algo.proposal, iter, x, new_x, observation; kwargs...)
+    logw_inc = log_p - log_q
+    return new_x, logw_inc
 end
 
-function update(
-    model::StateSpaceModel,
-    algo::ParticleFilter,
-    iter::Integer,
-    state,
-    observation;
-    kwargs...,
-)
-    log_increments = map(
-        x -> SSMProblems.logdensity(model.obs, iter, x, observation; kwargs...),
-        state.particles,
-    )
-
-    state = update_weights(state, log_increments)
-    ll_increment = marginalise!(state)
-
-    return state, ll_increment
-end
+# function update(
+#     obs, algo::ParticleFilter, iter::Integer, p::Particle, observation; kwargs...
+# )
+#     log_increment = SSMProblems.logdensity(obs, iter, p.state, observation; kwargs...)
+#     return Particle(p.state, p.log_w + log_increment, p.ancestor)
+# end
 
 struct LatentProposal <: AbstractProposal end
 
@@ -180,41 +231,42 @@ function SSMProblems.logdensity(
     return SSMProblems.logdensity(model.dyn, iter, prev_state, new_state; kwargs...)
 end
 
-# overwrite predict for the bootstrap filter to remove redundant computation
-function predict(
+# overwrite propogate for the bootstrap filter to remove redundant computation
+function propogate(
     rng::AbstractRNG,
-    model::StateSpaceModel,
+    dyn,
     algo::BootstrapFilter,
     iter::Integer,
-    state,
-    observation=nothing;
-    ref_state::Union{Nothing,AbstractVector}=nothing,
+    x,
+    observation;
+    ref_state,
     kwargs...,
 )
-    state.particles = map(enumerate(state)) do (i, particle)
-        if !isnothing(ref_state) && i == 1
-            ref_state[iter]
-        else
-            SSMProblems.simulate(rng, model.dyn, iter, particle; kwargs...)
-        end
+    new_x = if isnothing(ref_state)
+        SSMProblems.simulate(rng, dyn, iter, x; kwargs...)
+    else
+        ref_state[iter]
     end
 
-    return state
+    # TODO: make this type consistent
+    # Will have to do a lazy zero or change propogate to accept a particle (in which case
+    # we'll need to construct a particle in the RBPF predict method)
+    return new_x, 0.0
 end
 
 # Application of particle filter to hierarchical models
-function filter(
-    rng::AbstractRNG,
-    model::HierarchicalSSM,
-    algo::ParticleFilter,
-    observations::AbstractVector;
-    ref_state::Union{Nothing,AbstractVector}=nothing,
-    kwargs...,
-)
-    ssm = StateSpaceModel(
-        HierarchicalPrior(model.outer_prior, model.inner_model.prior),
-        HierarchicalDynamics(model.outer_dyn, model.inner_model.dyn),
-        HierarchicalObservations(model.inner_model.obs),
-    )
-    return filter(rng, ssm, algo, observations; ref_state=ref_state, kwargs...)
-end
+# function filter(
+#     rng::AbstractRNG,
+#     model::HierarchicalSSM,
+#     algo::ParticleFilter,
+#     observations::AbstractVector;
+#     ref_state::Union{Nothing,AbstractVector}=nothing,
+#     kwargs...,
+# )
+#     ssm = StateSpaceModel(
+#         HierarchicalPrior(model.outer_prior, model.inner_model.prior),
+#         HierarchicalDynamics(model.outer_dyn, model.inner_model.dyn),
+#         HierarchicalObservations(model.inner_model.obs),
+#     )
+#     return filter(rng, ssm, algo, observations; ref_state=ref_state, kwargs...)
+# end

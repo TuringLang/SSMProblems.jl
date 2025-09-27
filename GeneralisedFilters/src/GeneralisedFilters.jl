@@ -3,6 +3,7 @@ module GeneralisedFilters
 using AbstractMCMC: AbstractMCMC, AbstractSampler
 import Distributions: MvNormal
 import Random: AbstractRNG, default_rng, rand
+import SSMProblems: prior, dyn, obs
 using OffsetArrays
 using SSMProblems
 using StatsBase
@@ -66,7 +67,7 @@ function filter(
     kwargs...,
 )
     # draw from the prior
-    init_state = initialise(rng, model, algo; kwargs...)
+    init_state = initialise(rng, prior(model), algo; kwargs...)
     callback(model, algo, init_state, observations, PostInit; kwargs...)
 
     # iterations starts here for type stability
@@ -117,10 +118,10 @@ function move(
     callback::CallbackType=nothing,
     kwargs...,
 )
-    state = predict(rng, model, algo, iter, state, observation; kwargs...)
+    state = predict(rng, dyn(model), algo, iter, state, observation; kwargs...)
     callback(model, algo, iter, state, observation, PostPredict; kwargs...)
 
-    state, ll_increment = update(model, algo, iter, state, observation; kwargs...)
+    state, ll_increment = update(obs(model), algo, iter, state, observation; kwargs...)
     callback(model, algo, iter, state, observation, PostUpdate; kwargs...)
 
     return state, ll_increment

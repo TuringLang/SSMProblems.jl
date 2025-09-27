@@ -8,23 +8,21 @@ struct KalmanFilter <: AbstractFilter end
 
 KF() = KalmanFilter()
 
-function initialise(
-    rng::AbstractRNG, model::LinearGaussianStateSpaceModel, filter::KalmanFilter; kwargs...
-)
-    μ0, Σ0 = calc_initial(model.prior; kwargs...)
+function initialise(rng::AbstractRNG, prior::GaussianPrior, filter::KalmanFilter; kwargs...)
+    μ0, Σ0 = calc_initial(prior; kwargs...)
     return GaussianDistribution(μ0, Σ0)
 end
 
 function predict(
     rng::AbstractRNG,
-    model::LinearGaussianStateSpaceModel,
+    dyn::LinearGaussianLatentDynamics,
     algo::KalmanFilter,
     iter::Integer,
     state::GaussianDistribution,
     observation=nothing;
     kwargs...,
 )
-    params = calc_params(model.dyn, iter; kwargs...)
+    params = calc_params(dyn, iter; kwargs...)
     state = kalman_predict(state, params)
     return state
 end
@@ -39,14 +37,14 @@ function kalman_predict(state, params)
 end
 
 function update(
-    model::LinearGaussianStateSpaceModel,
+    obs::LinearGaussianObservationProcess,
     algo::KalmanFilter,
     iter::Integer,
     state::GaussianDistribution,
     observation::AbstractVector;
     kwargs...,
 )
-    params = calc_params(model.obs, iter; kwargs...)
+    params = calc_params(obs, iter; kwargs...)
     state, ll = kalman_update(state, params, observation)
     return state, ll
 end

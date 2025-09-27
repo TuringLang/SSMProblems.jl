@@ -10,24 +10,33 @@ abstract type AbstractResampler end
 function resample(
     rng::AbstractRNG,
     resampler::AbstractResampler,
-    states;
+    state;
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
-    idxs = sample_ancestors(rng, resampler, weights(states))
+    weights = softmax(map(p -> p.log_w, state.particles))
+    idxs = sample_ancestors(rng, resampler, weights)
     # Set reference trajectory indices
     if !isnothing(ref_state)
         CUDA.@allowscalar idxs[1] = 1
     end
-    return construct_new_state(states, idxs)
+    return construct_new_state(state, idxs)
 end
 
-function construct_new_state(states::Particles{PT}, idxs) where {PT}
-    return Particles{PT}(states.particles[idxs], idxs)
+function construct_new_state(state, idxs)
+    new_particles = similar(state.particles)
+    for i in 1:length(state.particles)
+        new_particles[i] = resample_ancestor(state.particles[idxs[i]], idxs[i])
+    end
+    return ParticleDistribution(new_particles, log(length(state.particles)))
 end
 
-function construct_new_state(states::WeightedParticles{PT,WT}, idxs) where {PT,WT}
-    weights = ParticleWeights(zeros(WT, length(states)), WT(log(length(states))))
-    return WeightedParticles{PT,WT}(states.particles[idxs], idxs, weights)
+# TODO (RB): this can probably be cleaned up if we allow mutation (I'm just playing it safe
+# whilst developing)
+function resample_ancestor(particle::Particle, ancestor::Int)
+    return Particle(particle.state, 0.0, ancestor)
+end
+function resample_ancestor(particle::RBParticle, ancestor::Int)
+    return RBParticle(particle.x, particle.z, 0.0, ancestor)
 end
 
 ## CONDITIONAL RESAMPLING ##################################################################
@@ -48,17 +57,28 @@ function resample(
     state;
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
-    n = length(state)
-    # TODO: computing weights twice. Should create a wrapper to avoid this
-    weights = StatsBase.weights(state)
+    n = length(state.particles)
+    weights = softmax(map(p -> p.log_w, state.particles))
     ess = inv(sum(abs2, weights))
 
     if cond_resampler.threshold * n ≥ ess
         return resample(rng, cond_resampler.resampler, state; ref_state)
     else
-        state.ancestors = collect(1:n)
-        return state
+        new_particles = similar(state.particles)
+        for i in 1:n
+            new_particles[i] = set_ancestor(state.particles[i], i)
+        end
+        return ParticleDistribution(new_particles, state.prev_logsumexp)
     end
+end
+
+# TODO (RB): this can probably be cleaned up if we allow mutation (I'm just playing it safe
+# whilst developing)
+function set_ancestor(particle::Particle, ancestor::Int)
+    return Particle(particle.state, particle.log_w, ancestor)
+end
+function set_ancestor(particle::RBParticle, ancestor::Int)
+    return RBParticle(particle.x, particle.z, particle.log_w, ancestor)
 end
 
 ## CATEGORICAL RESAMPLE ####################################################################

@@ -7,6 +7,31 @@ struct HierarchicalSSM{PT<:StatePrior,LD<:LatentDynamics,MT<:StateSpaceModel} <:
     outer_dyn::LD
     inner_model::MT
 end
+outer_prior(model::HierarchicalSSM) = model.outer_prior
+inner_prior(model::HierarchicalSSM) = model.inner_model.prior
+outer_dyn(model::HierarchicalSSM) = model.outer_dyn
+inner_dyn(model::HierarchicalSSM) = model.inner_model.dyn
+SSMProblems.obs(model::HierarchicalSSM) = model.inner_model.obs
+
+struct HierarchicalPrior{P1<:StatePrior,P2<:StatePrior} <: StatePrior
+    outer_prior::P1
+    inner_prior::P2
+end
+function SSMProblems.prior(model::HierarchicalSSM)
+    return HierarchicalPrior(model.outer_prior, model.inner_model.prior)
+end
+outer_prior(prior::HierarchicalPrior) = prior.outer_prior
+inner_prior(prior::HierarchicalPrior) = prior.inner_prior
+
+struct HierarchicalDynamics{D1<:LatentDynamics,D2<:LatentDynamics} <: LatentDynamics
+    outer_dyn::D1
+    inner_dyn::D2
+end
+function SSMProblems.dyn(model::HierarchicalSSM)
+    return HierarchicalDynamics(model.outer_dyn, model.inner_model.dyn)
+end
+outer_dyn(dyn::HierarchicalDynamics) = dyn.outer_dyn
+inner_dyn(dyn::HierarchicalDynamics) = dyn.inner_dyn
 
 function HierarchicalSSM(
     outer_prior::StatePrior,
@@ -50,21 +75,11 @@ function AbstractMCMC.sample(
     return x0, z0, xs, zs, ys
 end
 
-## Methods to make HierarchicalSSM compatible with the bootstrap filter
-struct HierarchicalDynamics{D1<:LatentDynamics,D2<:LatentDynamics} <: LatentDynamics
-    outer_dyn::D1
-    inner_dyn::D2
-end
-
-struct HierarchicalPrior{P1<:StatePrior,P2<:StatePrior} <: StatePrior
-    outer_prior::P1
-    inner_prior::P2
-end
-
 function SSMProblems.simulate(rng::AbstractRNG, prior::HierarchicalPrior; kwargs...)
     outer_prior, inner_prior = prior.outer_prior, prior.inner_prior
     x0 = simulate(rng, outer_prior; kwargs...)
     z0 = simulate(rng, inner_prior; new_outer=x0, kwargs...)
+    # TODO (RB): this isn't really RB at all, just hierarchical state
     return RaoBlackwellisedParticle(x0, z0)
 end
 

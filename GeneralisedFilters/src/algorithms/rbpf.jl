@@ -5,93 +5,65 @@ import StatsBase: Weights
 
 export RBPF
 
-struct RBPF{F<:AbstractFilter,RS<:AbstractResampler} <: AbstractParticleFilter
-    inner_algo::F
-    N::Int
-    resampler::RS
+struct RBPF{PFT<:AbstractParticleFilter,AFT<:AbstractFilter} <: AbstractParticleFilter
+    pf::PFT
+    af::AFT
 end
 
-function RBPF(
-    inner_algo::AbstractFilter,
-    N::Integer;
-    threshold::Real=1.0,
-    resampler::AbstractResampler=Systematic(),
-)
-    return RBPF(inner_algo, N, ESSResampler(threshold, resampler))
-end
+num_particles(algo::RBPF) = num_particles(algo.pf)
+resampler(algo::RBPF) = resampler(algo.pf)
 
-function initialise(
+function initialise_particle(
     rng::AbstractRNG,
-    model::HierarchicalSSM{T},
+    prior::HierarchicalPrior,
     algo::RBPF;
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
-) where {T}
-    particles = map(1:(algo.N)) do i
-        x = if !isnothing(ref_state) && i == 1
-            ref_state[0]
-        else
-            SSMProblems.simulate(rng, model.outer_prior; kwargs...)
-        end
-        z = initialise(rng, model.inner_model, algo.inner_algo; new_outer=x, kwargs...)
-        RaoBlackwellisedParticle(x, z)
-    end
-
-    return Particles(particles)
+)
+    x = sample_prior(rng, prior.outer_prior, algo.pf; ref_state, kwargs...)
+    z = initialise(rng, prior.inner_prior, algo.af; new_outer=x, kwargs...)
+    # TODO (RB):  determine the correct type for the log_w field or use a NoWeight type
+    return RBParticle(x, z, 0.0, 0)
 end
 
-function predict(
+function predict_particle(
     rng::AbstractRNG,
-    model::HierarchicalSSM,
+    dyn::HierarchicalDynamics,
     algo::RBPF,
     iter::Integer,
-    state,
+    particle::RBParticle,
     observation;
-    ref_state::Union{Nothing,AbstractVector}=nothing,
+    ref_state,
     kwargs...,
 )
-    state.particles = map(enumerate(state.particles)) do (i, particle)
-        new_x = if !isnothing(ref_state) && i == 1
-            ref_state[iter]
-        else
-            SSMProblems.simulate(rng, model.outer_dyn, iter, particle.x; kwargs...)
-        end
-        new_z = predict(
-            rng,
-            model.inner_model,
-            algo.inner_algo,
-            iter,
-            particle.z,
-            observation;
-            prev_outer=particle.x,
-            new_outer=new_x,
-            kwargs...,
-        )
+    new_x, logw_inc = propogate(
+        rng, dyn.outer_dyn, algo.pf, iter, particle.x, observation; ref_state, kwargs...
+    )
+    new_z = predict(
+        rng,
+        dyn.inner_dyn,
+        algo.af,
+        iter,
+        particle.z,
+        observation;
+        prev_outer=particle.x,
+        new_outer=new_x,
+        kwargs...,
+    )
 
-        RaoBlackwellisedParticle(new_x, new_z)
-    end
-
-    return state
+    return RBParticle(new_x, new_z, particle.log_w + logw_inc, particle.ancestor)
 end
 
-function update(
-    model::HierarchicalSSM, algo::RBPF, iter::Integer, state, observation; kwargs...
+function update_particle(
+    obs::ObservationProcess,
+    algo::RBPF,
+    iter::Integer,
+    particle::RBParticle,
+    observation;
+    kwargs...,
 )
-    log_increments = map(enumerate(state.particles)) do (i, particle)
-        state.particles[i].z, log_increment = update(
-            model.inner_model,
-            algo.inner_algo,
-            iter,
-            particle.z,
-            observation;
-            new_outer=particle.x,
-            kwargs...,
-        )
-        log_increment
-    end
-
-    state = update_weights(state, log_increments)
-    ll_increment = marginalise!(state)
-
-    return state, ll_increment
+    new_z, log_increment = update(
+        obs, algo.af, iter, particle.z, observation; new_outer=particle.x, kwargs...
+    )
+    return RBParticle(particle.x, new_z, particle.log_w + log_increment, particle.ancestor)
 end
