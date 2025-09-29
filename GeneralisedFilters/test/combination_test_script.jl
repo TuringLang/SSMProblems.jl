@@ -15,7 +15,9 @@ println()
 
 rng = StableRNG(1234)
 
-model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, 1, 1)
+model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
+    rng, 1, 1; static_arrays=true
+)
 _, _, ys = sample(rng, model, 3)
 
 bf = BF(10^6; threshold=0.8)
@@ -30,9 +32,11 @@ ws = softmax(log_ws)
 println("BF State: ", @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-3)
 println("BF LL: ", @test llkf ≈ llbf atol = 1e-3)
 
-struct OptimalProposal <: AbstractProposal
-    dyn::LinearGaussianLatentDynamics
-    obs::LinearGaussianObservationProcess
+struct OptimalProposal{
+    LD<:LinearGaussianLatentDynamics,OP<:LinearGaussianObservationProcess
+} <: AbstractProposal
+    dyn::LD
+    obs::OP
     dummy::Bool  # if using dummy hierarchical model
 end
 function SSMProblems.distribution(prop::OptimalProposal, step::Integer, x, y; kwargs...)
@@ -108,8 +112,39 @@ println("RBGF LL: ", @test llkf ≈ llrbgf atol = 1e-2)
 # Hard to verify these are correct until the code is faster and we can run a full loop
 # For now we just check they run without error
 
-ref_traj = [randn(rng, 1) for _ in 1:3]
-GeneralisedFilters.filter(rng, model, bf, ys; ref_state=ref_traj)
-GeneralisedFilters.filter(rng, model, gf, ys; ref_state=ref_traj)
-GeneralisedFilters.filter(rng, hier_model, rbbf, ys; ref_state=ref_traj)
-GeneralisedFilters.filter(rng, hier_model, rbgf, ys; ref_state=ref_traj)
+using OffsetArrays
+ref_traj = [randn(rng, 1) for _ in 0:3];
+ref_traj = OffsetArray(ref_traj, 0:3);
+GeneralisedFilters.filter(rng, model, bf, ys; ref_state=ref_traj);
+GeneralisedFilters.filter(rng, model, gf, ys; ref_state=ref_traj);
+GeneralisedFilters.filter(rng, hier_model, rbbf, ys; ref_state=ref_traj);
+GeneralisedFilters.filter(rng, hier_model, rbgf, ys; ref_state=ref_traj);
+
+####################################
+#### AUXILIARY PARTICLE FILTERS ####
+####################################
+
+kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys);
+
+bf = BF(10^6; threshold=1.0)
+abf = AuxiliaryParticleFilter(bf, MeanPredictive())
+abf_state, llabf = GeneralisedFilters.filter(rng, model, abf, ys);
+xs = getfield.(abf_state.particles, :state)
+log_ws = getfield.(abf_state.particles, :log_w)
+ws = softmax(log_ws)
+println("ABF State: ", @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-3)
+println("ABF LL: ", @test llkf ≈ llabf atol = 1e-3)
+
+kf_state, llkf = GeneralisedFilters.filter(rng, full_model, KF(), ys);
+rbbf = RBPF(bf, KalmanFilter())
+arbf = AuxiliaryParticleFilter(rbbf, MeanPredictive())
+arbf_state, llarbf = GeneralisedFilters.filter(rng, hier_model, arbf, ys);
+xs = getfield.(arbf_state.particles, :x)
+zs = getfield.(arbf_state.particles, :z)
+log_ws = getfield.(arbf_state.particles, :log_w)
+ws = softmax(log_ws)
+println("ARBF Outer: ", @test first(kf_state.μ) ≈ sum(only.(xs) .* ws) rtol = 1e-3)
+println(
+    "ARBF Inner: ", @test last(kf_state.μ) ≈ sum(only.(getfield.(zs, :μ)) .* ws) rtol = 1e-3
+)
+println("ARBF LL: ", @test llkf ≈ llarbf atol = 1e-3)
