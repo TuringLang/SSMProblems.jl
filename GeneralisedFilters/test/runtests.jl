@@ -122,9 +122,10 @@ end
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
         rng, 1, 1; static_arrays=true
     )
-    _, _, ys = sample(rng, model, 3)
+    _, _, ys = sample(rng, model, 4)
 
-    bf = BF(10^6; threshold=0.8)
+    resampler = GeneralisedFilters.GFTest.AlternatingResampler()
+    bf = BF(10^6; resampler=resampler)
     bf_state, llbf = GeneralisedFilters.filter(rng, model, bf, ys)
     kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
 
@@ -146,10 +147,11 @@ end
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
         rng, 1, 1; static_arrays=true
     )
-    _, _, ys = sample(rng, model, 3)
+    _, _, ys = sample(rng, model, 4)
 
     prop = GeneralisedFilters.GFTest.OptimalProposal(model.dyn, model.obs)
-    gf = ParticleFilter(10^6, prop; threshold=1.0)
+    resampler = GeneralisedFilters.GFTest.AlternatingResampler()
+    gf = ParticleFilter(10^6, prop; resampler=resampler)
     gf_state, llgf = GeneralisedFilters.filter(rng, model, gf, ys)
     kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
 
@@ -229,9 +231,10 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, 1, 1, 1; static_arrays=true
     )
-    _, _, ys = sample(rng, hier_model, 3)
+    _, _, ys = sample(rng, hier_model, 4)
 
-    bf = BF(10^6; threshold=0.8)
+    resampler = GeneralisedFilters.GFTest.AlternatingResampler()
+    bf = BF(10^6; resampler=resampler)
     rbbf = RBPF(bf, KalmanFilter())
 
     rbbf_state, llrbbf = GeneralisedFilters.filter(rng, hier_model, rbbf, ys)
@@ -257,10 +260,11 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, 1, 1, 1; static_arrays=true
     )
-    _, _, ys = sample(rng, hier_model, 3)
+    _, _, ys = sample(rng, hier_model, 4)
 
     prop = GeneralisedFilters.GFTest.OverdispersedProposal(dyn(hier_model).outer_dyn, 1.5)
-    gf = ParticleFilter(10^6, prop; threshold=1.0)
+    resampler = GeneralisedFilters.GFTest.AlternatingResampler()
+    gf = ParticleFilter(10^6, prop; resampler=resampler)
     rbgf = RBPF(gf, KalmanFilter())
     rbgf_state, llrbgf = GeneralisedFilters.filter(rng, hier_model, rbgf, ys)
     xs = getfield.(rbgf_state.particles, :x)
@@ -287,9 +291,9 @@ end
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
         rng, 1, 1; static_arrays=true
     )
-    _, _, ys = sample(rng, model, 3)
+    _, _, ys = sample(rng, model, 4)
 
-    bf = BF(10^6; threshold=1.0)
+    bf = BF(10^6; threshold=1.0)  # APF needs resampling every step
     abf = AuxiliaryParticleFilter(bf, MeanPredictive())
     abf_state, llabf = GeneralisedFilters.filter(rng, model, abf, ys)
     kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
@@ -315,9 +319,9 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, 1, 1, 1; static_arrays=true
     )
-    _, _, ys = sample(rng, hier_model, 3)
+    _, _, ys = sample(rng, hier_model, 4)
 
-    bf = BF(10^6; threshold=1.0)
+    bf = BF(10^6; threshold=1.0)  # APF needs resampling every step
     rbbf = RBPF(bf, KalmanFilter())
     arbf = AuxiliaryParticleFilter(rbbf, MeanPredictive())
     arbf_state, llarbf = GeneralisedFilters.filter(rng, hier_model, arbf, ys)
@@ -358,6 +362,7 @@ end
 
 @testitem "BF on hierarchical model test" begin
     using LogExpFunctions
+    using SSMProblems
     using StableRNGs
 
     SEED = 1234
@@ -378,7 +383,7 @@ end
     kf_states, kf_ll = GeneralisedFilters.filter(rng, full_model, KalmanFilter(), ys)
 
     # Rao-Blackwellised particle filtering
-    bf = BF(N_particles)
+    bf = BF(N_particles; threshold=0.8)
     states, ll = GeneralisedFilters.filter(rng, hier_model, bf, ys)
 
     # Extract final filtered states

@@ -13,5 +13,6 @@ include("utils.jl")
 include("models/linear_gaussian.jl")
 include("models/dummy_linear_gaussian.jl")
 include("proposals.jl")
+include("resamplers.jl")
 
 end
