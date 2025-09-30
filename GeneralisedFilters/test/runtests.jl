@@ -141,22 +141,6 @@ end
     using SSMProblems
     using LogExpFunctions
     using StableRNGs
-    using Distributions
-    using LinearAlgebra
-
-    struct OptimalProposal{
-        LD<:LinearGaussianLatentDynamics,OP<:LinearGaussianObservationProcess
-    } <: AbstractProposal
-        dyn::LD
-        obs::OP
-    end
-    function SSMProblems.distribution(prop::OptimalProposal, step::Integer, x, y; kwargs...)
-        A, b, Q = GeneralisedFilters.calc_params(prop.dyn, step; kwargs...)
-        H, c, R = GeneralisedFilters.calc_params(prop.obs, step; kwargs...)
-        Σ = inv(inv(Q) + H' * inv(R) * H)
-        μ = Σ * (inv(Q) * (A * x + b) + H' * inv(R) * (y - c))
-        return MvNormal(μ, Σ)
-    end
 
     rng = StableRNG(1234)
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
@@ -164,8 +148,8 @@ end
     )
     _, _, ys = sample(rng, model, 3)
 
-    proposal = OptimalProposal(model.dyn, model.obs)
-    gf = ParticleFilter(10^6, proposal; threshold=1.0)
+    prop = GeneralisedFilters.GFTest.OptimalProposal(model.dyn, model.obs)
+    gf = ParticleFilter(10^6, prop; threshold=1.0)
     gf_state, llgf = GeneralisedFilters.filter(rng, model, gf, ys)
     kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
 
@@ -264,25 +248,9 @@ end
 end
 
 @testitem "Rao-Blackwellised GF test" begin
-    using Distributions
-    using GeneralisedFilters
-    using LinearAlgebra
     using LogExpFunctions
     using SSMProblems
     using StableRNGs
-
-    struct OverdispersedProposal{LD<:LinearGaussianLatentDynamics} <: AbstractProposal
-        dyn::LD
-        k::Float64
-    end
-    function SSMProblems.distribution(
-        prop::OverdispersedProposal, step::Integer, x, y; kwargs...
-    )
-        A, b, Q = GeneralisedFilters.calc_params(prop.dyn, step; kwargs...)
-        Q = prop.k * Q  # overdisperse
-        μ = A * x + b
-        return MvNormal(μ, Q)
-    end
 
     rng = StableRNG(1234)
 
@@ -291,8 +259,8 @@ end
     )
     _, _, ys = sample(rng, hier_model, 3)
 
-    proposal = OverdispersedProposal(dyn(hier_model).outer_dyn, 1.5)
-    gf = ParticleFilter(10^6, proposal; threshold=1.0)
+    prop = GeneralisedFilters.GFTest.OverdispersedProposal(dyn(hier_model).outer_dyn, 1.5)
+    gf = ParticleFilter(10^6, prop; threshold=1.0)
     rbgf = RBPF(gf, KalmanFilter())
     rbgf_state, llrbgf = GeneralisedFilters.filter(rng, hier_model, rbgf, ys)
     xs = getfield.(rbgf_state.particles, :x)
