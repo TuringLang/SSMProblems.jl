@@ -387,8 +387,8 @@ end
     states, ll = GeneralisedFilters.filter(rng, hier_model, bf, ys)
 
     # Extract final filtered states
-    xs = map(p -> getproperty(p, :x), states.particles)
-    zs = map(p -> getproperty(p, :z), states.particles)
+    xs = map(p -> getproperty(p.state, :x), states.particles)
+    zs = map(p -> getproperty(p.state, :z), states.particles)
     log_ws = getfield.(states.particles, :log_w)
     ws = softmax(log_ws)
 

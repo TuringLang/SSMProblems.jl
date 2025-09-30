@@ -244,22 +244,23 @@ function propogate(
     return new_x, 0.0
 end
 
+# TODO: I feel like we shouldn't need to do this conversion. It should be handled by dispatch
 # Application of particle filter to hierarchical models
-# function filter(
-#     rng::AbstractRNG,
-#     model::HierarchicalSSM,
-#     algo::ParticleFilter,
-#     observations::AbstractVector;
-#     ref_state::Union{Nothing,AbstractVector}=nothing,
-#     kwargs...,
-# )
-#     ssm = StateSpaceModel(
-#         HierarchicalPrior(model.outer_prior, model.inner_model.prior),
-#         HierarchicalDynamics(model.outer_dyn, model.inner_model.dyn),
-#         HierarchicalObservations(model.inner_model.obs),
-#     )
-#     return filter(rng, ssm, algo, observations; ref_state=ref_state, kwargs...)
-# end
+function filter(
+    rng::AbstractRNG,
+    model::HierarchicalSSM,
+    algo::ParticleFilter,
+    observations::AbstractVector;
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+    kwargs...,
+)
+    ssm = StateSpaceModel(
+        HierarchicalPrior(model.outer_prior, model.inner_model.prior),
+        HierarchicalDynamics(model.outer_dyn, model.inner_model.dyn),
+        HierarchicalObservations(model.inner_model.obs),
+    )
+    return filter(rng, ssm, algo, observations; ref_state=ref_state, kwargs...)
+end
 
 abstract type PredictivePosterior end
 
