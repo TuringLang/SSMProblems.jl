@@ -1,4 +1,4 @@
-export KalmanFilter, filter, BatchKalmanFilter
+export KalmanFilter, filter
 using CUDA: i32
 import PDMats: PDMat
 
