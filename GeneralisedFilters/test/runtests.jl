@@ -238,8 +238,8 @@ end
     rbbf = RBPF(bf, KalmanFilter())
 
     rbbf_state, llrbbf = GeneralisedFilters.filter(rng, hier_model, rbbf, ys)
-    xs = getfield.(rbbf_state.particles, :x)
-    zs = getfield.(rbbf_state.particles, :z)
+    xs = getfield.(getfield.(rbbf_state.particles, :state), :x)
+    zs = getfield.(getfield.(rbbf_state.particles, :state), :z)
     log_ws = getfield.(rbbf_state.particles, :log_w)
     ws = softmax(log_ws)
 
@@ -267,8 +267,8 @@ end
     gf = ParticleFilter(10^6, prop; resampler=resampler)
     rbgf = RBPF(gf, KalmanFilter())
     rbgf_state, llrbgf = GeneralisedFilters.filter(rng, hier_model, rbgf, ys)
-    xs = getfield.(rbgf_state.particles, :x)
-    zs = getfield.(rbgf_state.particles, :z)
+    xs = getfield.(getfield.(rbgf_state.particles, :state), :x)
+    zs = getfield.(getfield.(rbgf_state.particles, :state), :z)
     log_ws = getfield.(rbgf_state.particles, :log_w)
     ws = softmax(log_ws)
 
@@ -325,8 +325,8 @@ end
     rbbf = RBPF(bf, KalmanFilter())
     arbf = AuxiliaryParticleFilter(rbbf, MeanPredictive())
     arbf_state, llarbf = GeneralisedFilters.filter(rng, hier_model, arbf, ys)
-    xs = getfield.(arbf_state.particles, :x)
-    zs = getfield.(arbf_state.particles, :z)
+    xs = getfield.(getfield.(arbf_state.particles, :state), :x)
+    zs = getfield.(getfield.(arbf_state.particles, :state), :z)
     log_ws = getfield.(arbf_state.particles, :log_w)
     ws = softmax(log_ws)
 
@@ -352,7 +352,7 @@ end
     _, _, ys = sample(rng, full_model, T)
 
     cb = GeneralisedFilters.AncestorCallback(nothing)
-    rbpf = RBPF(KalmanFilter(), N_particles)
+    rbpf = RBPF(BF(N_particles; threshold=0.8), KalmanFilter())
     GeneralisedFilters.filter(rng, hier_model, rbpf, ys; callback=cb)
 
     # TODO: add proper test comparing to dense storage
@@ -554,11 +554,13 @@ end
             push!(trajectory_samples, deepcopy(ref_traj))
         end
         # Reference trajectory should only be nonlinear state for RBPF
-        ref_traj = getproperty.(ref_traj, :x)
+        ref_traj = getproperty.(getproperty.(ref_traj, :state), :x)
     end
 
     # Extract inner and outer trajectories
-    x_trajectories = getproperty.(getindex.(trajectory_samples, t_smooth), :x)
+    x_trajectories = getproperty.(
+        getproperty.(getindex.(trajectory_samples, t_smooth), :state), :x
+    )
 
     # Manually perform smoothing until we have a cleaner interface
     A = hier_model.inner_model.dyn.A
@@ -567,13 +569,13 @@ end
     Q = hier_model.inner_model.dyn.Q
     z_smoothed_means = Vector{T}(undef, N_sample)
     for i in 1:N_sample
-        μ = trajectory_samples[i][K].z.μ
-        Σ = trajectory_samples[i][K].z.Σ
+        μ = trajectory_samples[i][K].state.z.μ
+        Σ = trajectory_samples[i][K].state.z.Σ
 
         for t in (K - 1):-1:t_smooth
-            μ_filt = trajectory_samples[i][t].z.μ
-            Σ_filt = trajectory_samples[i][t].z.Σ
-            μ_pred = A * μ_filt + b + C * trajectory_samples[i][t].x
+            μ_filt = trajectory_samples[i][t].state.z.μ
+            Σ_filt = trajectory_samples[i][t].state.z.Σ
+            μ_pred = A * μ_filt + b + C * trajectory_samples[i][t].state.x
             Σ_pred = A * Σ_filt * A' + Q
 
             G = Σ_filt * A' * inv(Σ_pred)

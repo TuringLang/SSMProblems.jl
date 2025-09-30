@@ -35,9 +35,6 @@ end
 function resample_ancestor(particle::Particle, ancestor::Int)
     return Particle(particle.state, 0.0, ancestor)
 end
-function resample_ancestor(particle::RBParticle, ancestor::Int)
-    return RBParticle(particle.x, particle.z, 0.0, ancestor)
-end
 
 ## CONDITIONAL RESAMPLING ##################################################################
 
@@ -76,9 +73,6 @@ end
 # whilst developing)
 function set_ancestor(particle::Particle, ancestor::Int)
     return Particle(particle.state, particle.log_w, ancestor)
-end
-function set_ancestor(particle::RBParticle, ancestor::Int)
-    return RBParticle(particle.x, particle.z, particle.log_w, ancestor)
 end
 
 ## CATEGORICAL RESAMPLE ####################################################################

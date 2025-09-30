@@ -5,19 +5,18 @@
 abstract type AbstractParticle{WT} end
 
 # New types
-# TODO (RB): could the RB particle be a regular particle with a RB state?
 mutable struct Particle{ST,WT} <: AbstractParticle{WT}
     state::ST
     log_w::WT
     ancestor::Int
 end
 
-mutable struct RBParticle{XT,ZT,WT} <: AbstractParticle{WT}
+mutable struct RBState{XT,ZT}
     x::XT
     z::ZT
-    log_w::WT
-    ancestor::Int
 end
+
+const RBParticle{XT,ZT,WT} = Particle{RBState{XT,ZT},WT}
 
 mutable struct ParticleDistribution{WT,PT<:AbstractParticle{WT},VT<:AbstractVector{PT}}
     particles::VT

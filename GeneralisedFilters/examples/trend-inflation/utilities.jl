@@ -17,8 +17,10 @@ mean_path(paths, states) = _mean_path(identity, paths, states)
 function mean_path(
     paths::Vector{Vector{T}}, states
 ) where {T<:GeneralisedFilters.RBParticle}
-    zs = _mean_path(z -> getproperty.(getproperty.(z, :z), :μ), paths, states)
-    xs = _mean_path(x -> getproperty.(x, :x), paths, states)
+    zs = _mean_path(
+        z -> getproperty.(getproperty.(getproperty.(z, :state), :z), :μ), paths, states
+    )
+    xs = _mean_path(x -> getproperty.(getproperty.(x, :state), :x), paths, states)
     return zs, xs
 end
 

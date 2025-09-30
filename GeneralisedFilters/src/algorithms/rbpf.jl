@@ -19,7 +19,7 @@ function initialise_particle(
     x = sample_prior(rng, prior.outer_prior, algo.pf, ref_state; kwargs...)
     z = initialise(rng, prior.inner_prior, algo.af; new_outer=x, kwargs...)
     # TODO (RB):  determine the correct type for the log_w field or use a NoWeight type
-    return RBParticle(x, z, 0.0, 0)
+    return Particle(RBState(x, z), 0.0, 0)
 end
 
 function predict_particle(
@@ -34,21 +34,28 @@ function predict_particle(
 )
     # TODO: really we should be conditioning on the current RB state to allow for optimal proposals
     new_x, logw_inc = propogate(
-        rng, dyn.outer_dyn, algo.pf, iter, particle.x, observation, ref_state; kwargs...
+        rng,
+        dyn.outer_dyn,
+        algo.pf,
+        iter,
+        particle.state.x,
+        observation,
+        ref_state;
+        kwargs...,
     )
     new_z = predict(
         rng,
         dyn.inner_dyn,
         algo.af,
         iter,
-        particle.z,
+        particle.state.z,
         observation;
-        prev_outer=particle.x,
+        prev_outer=particle.state.x,
         new_outer=new_x,
         kwargs...,
     )
 
-    return RBParticle(new_x, new_z, particle.log_w + logw_inc, particle.ancestor)
+    return Particle(RBState(new_x, new_z), particle.log_w + logw_inc, particle.ancestor)
 end
 
 function update_particle(
@@ -60,9 +67,17 @@ function update_particle(
     kwargs...,
 )
     new_z, log_increment = update(
-        obs, algo.af, iter, particle.z, observation; new_outer=particle.x, kwargs...
+        obs,
+        algo.af,
+        iter,
+        particle.state.z,
+        observation;
+        new_outer=particle.state.x,
+        kwargs...,
     )
-    return RBParticle(particle.x, new_z, particle.log_w + log_increment, particle.ancestor)
+    return Particle(
+        RBState(particle.state.x, new_z), particle.log_w + log_increment, particle.ancestor
+    )
 end
 
 function predictive_state(
@@ -74,19 +89,21 @@ function predictive_state(
     kwargs...,
 )
     rbpf = apf.pf
-    x_star = predictive_statistic(rng, apf.pp, dyn.outer_dyn, iter, particle.x; kwargs...)
+    x_star = predictive_statistic(
+        rng, apf.pp, dyn.outer_dyn, iter, particle.state.x; kwargs...
+    )
     z_star = predict(
         rng,
         dyn.inner_dyn,
         rbpf.af,
         iter,
-        particle.z,
+        particle.state.z,
         nothing;  # no observation available — maybe we should pass this in
-        prev_outer=particle.x,
+        prev_outer=particle.state.x,
         new_outer=x_star,
         kwargs...,
     )
-    return RBParticle(x_star, z_star, particle.log_w, particle.ancestor)
+    return Particle(RBState(x_star, z_star), particle.log_w, particle.ancestor)
 end
 
 function predictive_loglik(
@@ -98,7 +115,7 @@ function predictive_loglik(
     kwargs...,
 )
     _, log_increment = update(
-        obs, algo.af, iter, p_star.z, observation; new_outer=p_star.x, kwargs...
+        obs, algo.af, iter, p_star.state.z, observation; new_outer=p_star.state.x, kwargs...
     )
     return log_increment
 end
