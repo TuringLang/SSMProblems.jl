@@ -191,13 +191,6 @@ function propogate(
     return new_x, logw_inc
 end
 
-# function update(
-#     obs, algo::ParticleFilter, iter::Integer, p::Particle, observation; kwargs...
-# )
-#     log_increment = SSMProblems.logdensity(obs, iter, p.state, observation; kwargs...)
-#     return Particle(p.state, p.log_w + log_increment, p.ancestor)
-# end
-
 struct LatentProposal <: AbstractProposal end
 
 const BootstrapFilter{RS} = ParticleFilter{RS,LatentProposal}
