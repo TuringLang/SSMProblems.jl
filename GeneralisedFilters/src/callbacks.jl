@@ -79,8 +79,9 @@ end
 function (c::DenseAncestorCallback)(
     model, filter, state, data, ::PostInitCallback; kwargs...
 )
+    particles = state.particles
     c.container = DenseParticleContainer(
-        OffsetVector([deepcopy(state.particles)], -1), Vector{Int}[]
+        OffsetVector([deepcopy(getfield.(particles, :state))], -1), Vector{Int}[]
     )
     return nothing
 end
@@ -88,8 +89,9 @@ end
 function (c::DenseAncestorCallback)(
     model, filter, step, state, data, ::PostUpdateCallback; kwargs...
 )
-    push!(c.container.particles, deepcopy(state.particles))
-    push!(c.container.ancestors, deepcopy(state.ancestors))
+    particles = state.particles
+    push!(c.container.particles, deepcopy(getfield.(particles, :state)))
+    push!(c.container.ancestors, deepcopy(getfield.(particles, :ancestor)))
     return nothing
 end
 
