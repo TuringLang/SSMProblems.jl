@@ -460,7 +460,7 @@ end
     T = Float64
     N_particles = 10
     N_burnin = 1000
-    N_sample = 10000
+    N_sample = 100000
 
     rng = StableRNG(SEED)
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
@@ -484,7 +484,7 @@ end
         )
         log_ws = getfield.(bf_state.particles, :log_w)
         ws = softmax(log_ws)
-        sampled_idx = sample(rng, 1:length(bf_state), Weights(ws))
+        sampled_idx = sample(rng, 1:N_particles, Weights(ws))
         global ref_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
         if i > N_burnin
             push!(trajectory_samples, ref_traj)
@@ -497,8 +497,8 @@ end
     log_recip_likelihood_estimate = logsumexp(-lls) - log(length(lls))
 
     csmc_mean = sum(getindex.(trajectory_samples, t_smooth)) / N_sample
-    @test csmc_mean ≈ state.μ rtol = 1e-2
-    @test log_recip_likelihood_estimate ≈ -ks_ll rtol = 1e-2
+    @test csmc_mean ≈ state.μ rtol = 1e-3
+    @test log_recip_likelihood_estimate ≈ -ks_ll rtol = 1e-3
 end
 
 @testitem "RBCSMC test" begin
@@ -510,6 +510,7 @@ end
     using Random: randexp
     using StatsBase: sample, Weights
     using StaticArrays
+    using Statistics
 
     using OffsetArrays
 
@@ -536,7 +537,7 @@ end
     )
 
     N_steps = N_burnin + N_sample
-    rbpf = RBPF(KalmanFilter(), N_particles; threshold=0.6)
+    rbpf = RBPF(BF(N_particles; threshold=0.8), KalmanFilter())
     ref_traj = nothing
     trajectory_samples = []
 
@@ -547,20 +548,18 @@ end
         )
         log_ws = getfield.(bf_state.particles, :log_w)
         ws = softmax(log_ws)
-        sampled_idx = sample(rng, 1:length(bf_state), Weights(ws))
+        sampled_idx = sample(rng, 1:N_particles, Weights(ws))
 
         global ref_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
         if i > N_burnin
             push!(trajectory_samples, deepcopy(ref_traj))
         end
         # Reference trajectory should only be nonlinear state for RBPF
-        ref_traj = getproperty.(getproperty.(ref_traj, :state), :x)
+        ref_traj = getproperty.(ref_traj, :x)
     end
 
     # Extract inner and outer trajectories
-    x_trajectories = getproperty.(
-        getproperty.(getindex.(trajectory_samples, t_smooth), :state), :x
-    )
+    x_trajectories = getproperty.(getindex.(trajectory_samples, t_smooth), :x)
 
     # Manually perform smoothing until we have a cleaner interface
     A = hier_model.inner_model.dyn.A
@@ -569,13 +568,13 @@ end
     Q = hier_model.inner_model.dyn.Q
     z_smoothed_means = Vector{T}(undef, N_sample)
     for i in 1:N_sample
-        μ = trajectory_samples[i][K].state.z.μ
-        Σ = trajectory_samples[i][K].state.z.Σ
+        μ = trajectory_samples[i][K].z.μ
+        Σ = trajectory_samples[i][K].z.Σ
 
         for t in (K - 1):-1:t_smooth
-            μ_filt = trajectory_samples[i][t].state.z.μ
-            Σ_filt = trajectory_samples[i][t].state.z.Σ
-            μ_pred = A * μ_filt + b + C * trajectory_samples[i][t].state.x
+            μ_filt = trajectory_samples[i][t].z.μ
+            Σ_filt = trajectory_samples[i][t].z.Σ
+            μ_pred = A * μ_filt + b + C * trajectory_samples[i][t].x
             Σ_pred = A * Σ_filt * A' + Q
 
             G = Σ_filt * A' * inv(Σ_pred)
