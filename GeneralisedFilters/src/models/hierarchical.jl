@@ -44,6 +44,16 @@ function HierarchicalSSM(
     return HierarchicalSSM(outer_prior, outer_dyn, inner_model)
 end
 
+"""
+A container for a sampled state from a hierarchical SSM, with separation between the outer
+and inner dimensions. Note this differs from a RBState in the the inner state is a sample
+rather than a conditional distribution.
+"""
+struct HierarchicalState{XT,ZT}
+    x::XT
+    z::ZT
+end
+
 function AbstractMCMC.sample(
     rng::AbstractRNG, model::HierarchicalSSM, T::Integer; kwargs...
 )
@@ -80,14 +90,14 @@ function SSMProblems.simulate(rng::AbstractRNG, prior::HierarchicalPrior; kwargs
     x0 = simulate(rng, outer_prior; kwargs...)
     z0 = simulate(rng, inner_prior; new_outer=x0, kwargs...)
     # TODO (RB): this isn't really RB at all, just hierarchical state
-    return RaoBlackwellisedParticle(x0, z0)
+    return HierarchicalState(x0, z0)
 end
 
 function SSMProblems.simulate(
     rng::AbstractRNG,
     proc::HierarchicalDynamics,
     step::Integer,
-    prev_state::RaoBlackwellisedParticle;
+    prev_state::HierarchicalState;
     kwargs...,
 )
     outer_dyn, inner_dyn = proc.outer_dyn, proc.inner_dyn
@@ -95,7 +105,7 @@ function SSMProblems.simulate(
     z = simulate(
         rng, inner_dyn, step, prev_state.z; prev_outer=prev_state.x, new_outer=x, kwargs...
     )
-    return RaoBlackwellisedParticle(x, z)
+    return HierarchicalState(x, z)
 end
 
 struct HierarchicalObservations{OP<:ObservationProcess} <: ObservationProcess
@@ -103,7 +113,7 @@ struct HierarchicalObservations{OP<:ObservationProcess} <: ObservationProcess
 end
 
 function SSMProblems.distribution(
-    obs::HierarchicalObservations, step::Integer, state::RaoBlackwellisedParticle; kwargs...
+    obs::HierarchicalObservations, step::Integer, state::HierarchicalState; kwargs...
 )
     return distribution(obs.obs, step, state.z; new_outer=state.x, kwargs...)
 end
