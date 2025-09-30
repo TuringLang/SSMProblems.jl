@@ -108,19 +108,6 @@ function mean_cov(state::GaussianDistribution)
     return state.μ, state.Σ
 end
 
-## RAO-BLACKWELLISED PARTICLE ##############################################################
-
-"""
-    RaoBlackwellisedParticle
-
-A container for Rao-Blackwellised states, composed of a marginalised state `z` (e.g. a
-Gaussian or Categorical distribution) and a singular state `x`.
-"""
-mutable struct RaoBlackwellisedParticle{XT,ZT}
-    x::XT
-    z::ZT
-end
-
 ## RAO-BLACKWELLISED PARTICLE DISTRIBUTIONS ################################################
 
 mutable struct BatchRaoBlackwellisedParticles{XT,ZT}
