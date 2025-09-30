@@ -30,12 +30,6 @@ function marginalise!(state::ParticleDistribution)
     return ll_increment
 end
 
-# Old code
-mutable struct ParticleWeights{WT<:Real}
-    log_weights::Vector{WT}
-    prev_logsumexp::WT
-end
-
 # """
 #     ParticleDistribution
 

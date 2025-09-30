@@ -1,26 +1,26 @@
 using CSV, DataFrames
 using CairoMakie
 using Dates
+using LogExpFunctions
 
 fred_data = CSV.read(joinpath(INFL_PATH, "data.csv"), DataFrame)
 
 ## PLOTTING UTILITIES ######################################################################
 
 function _mean_path(f, paths, states)
-    return mean(map(x -> hcat(f(x)...), paths), StatsBase.weights(states))
+    return mean(
+        map(x -> hcat(f(x)...), paths),
+        Weights(softmax(getproperty.(states.particles, :log_w))),
+    )
 end
 
 # for normal collections
 mean_path(paths, states) = _mean_path(identity, paths, states)
 
 # for rao blackwellised particles
-function mean_path(
-    paths::Vector{Vector{T}}, states
-) where {T<:GeneralisedFilters.RBParticle}
-    zs = _mean_path(
-        z -> getproperty.(getproperty.(getproperty.(z, :state), :z), :μ), paths, states
-    )
-    xs = _mean_path(x -> getproperty.(getproperty.(x, :state), :x), paths, states)
+function mean_path(paths::Vector{Vector{T}}, states) where {T<:GeneralisedFilters.RBState}
+    zs = _mean_path(s -> getproperty.(getproperty.(s, :z), :μ), paths, states)
+    xs = _mean_path(s -> getproperty.(s, :x), paths, states)
     return zs, xs
 end
 
