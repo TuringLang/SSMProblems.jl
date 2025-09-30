@@ -116,60 +116,65 @@ end
 @testitem "Bootstrap filter test" begin
     using SSMProblems
     using StableRNGs
-    using StatsBase
+    using LogExpFunctions
 
     rng = StableRNG(1234)
-    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, 1, 1)
-    _, _, ys = sample(rng, model, 10)
+    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
+        rng, 1, 1; static_arrays=true
+    )
+    _, _, ys = sample(rng, model, 3)
 
-    bf = BF(2^12; threshold=0.8)
+    bf = BF(10^6; threshold=0.8)
     bf_state, llbf = GeneralisedFilters.filter(rng, model, bf, ys)
     kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
 
-    xs = bf_state.particles
-    ws = weights(bf_state)
+    xs = getfield.(bf_state.particles, :state)
+    log_ws = getfield.(bf_state.particles, :log_w)
+    ws = softmax(log_ws)
 
     # Compare log-likelihood and states
-    @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
-    @test llkf ≈ llbf atol = 1e-2
+    @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-3
+    @test llkf ≈ llbf atol = 1e-3
 end
 
 @testitem "Guided filter test" begin
     using SSMProblems
-    using StatsBase
+    using LogExpFunctions
     using StableRNGs
     using Distributions
     using LinearAlgebra
 
-    struct LinearGaussianProposal <: GeneralisedFilters.AbstractProposal end
-
-    function SSMProblems.distribution(
-        model::AbstractStateSpaceModel,
-        kernel::LinearGaussianProposal,
-        iter::Integer,
-        state,
-        observation;
-        kwargs...,
-    )
-        A, b, Q = GeneralisedFilters.calc_params(model.dyn, iter; kwargs...)
-        pred = GeneralisedFilters.GaussianDistribution(A * state + b, Q)
-        prop, _ = GeneralisedFilters.update(model, KF(), iter, pred, observation; kwargs...)
-        return MvNormal(prop.μ, hermitianpart(prop.Σ))
+    struct OptimalProposal{
+        LD<:LinearGaussianLatentDynamics,OP<:LinearGaussianObservationProcess
+    } <: AbstractProposal
+        dyn::LD
+        obs::OP
+    end
+    function SSMProblems.distribution(prop::OptimalProposal, step::Integer, x, y; kwargs...)
+        A, b, Q = GeneralisedFilters.calc_params(prop.dyn, step; kwargs...)
+        H, c, R = GeneralisedFilters.calc_params(prop.obs, step; kwargs...)
+        Σ = inv(inv(Q) + H' * inv(R) * H)
+        μ = Σ * (inv(Q) * (A * x + b) + H' * inv(R) * (y - c))
+        return MvNormal(μ, Σ)
     end
 
     rng = StableRNG(1234)
-    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, 1, 1)
-    _, _, ys = sample(rng, model, 10)
+    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
+        rng, 1, 1; static_arrays=true
+    )
+    _, _, ys = sample(rng, model, 3)
 
-    algo = PF(2^10, LinearGaussianProposal(); threshold=0.6)
-    kf_states, kf_ll = GeneralisedFilters.filter(rng, model, KalmanFilter(), ys)
-    pf_states, pf_ll = GeneralisedFilters.filter(rng, model, algo, ys)
-    xs = pf_states.particles
-    ws = weights(pf_states)
+    proposal = OptimalProposal(model.dyn, model.obs)
+    gf = ParticleFilter(10^6, proposal; threshold=1.0)
+    gf_state, llgf = GeneralisedFilters.filter(rng, model, gf, ys)
+    kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
 
-    # Compare log-likelihood and states
-    @test first(kf_states.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
-    @test kf_ll ≈ pf_ll rtol = 1e-2
+    xs = getfield.(gf_state.particles, :state)
+    log_ws = getfield.(gf_state.particles, :log_w)
+    ws = softmax(log_ws)
+
+    @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-3
+    @test llkf ≈ llgf atol = 1e-3
 end
 
 @testitem "Forward algorithm test" begin
@@ -227,83 +232,137 @@ end
     @test ll ≈ log(marginal)
 end
 
-@testitem "Kalman-RBPF test" begin
-    using LogExpFunctions: softmax
-    using StableRNGs
-    using StatsBase
-
-    SEED = 1234
-    D_outer = 2
-    D_inner = 3
-    D_obs = 2
-    T = 5
-    N_particles = 10^4
-
-    rng = StableRNG(SEED)
-
-    full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
-        rng, D_outer, D_inner, D_obs
-    )
-    _, _, ys = sample(rng, full_model, T)
-
-    # Ground truth Kalman filtering
-    kf_states, kf_ll = GeneralisedFilters.filter(rng, full_model, KalmanFilter(), ys)
-
-    # Rao-Blackwellised particle filtering
-    rbpf = RBPF(KalmanFilter(), N_particles)
-    states, ll = GeneralisedFilters.filter(rng, hier_model, rbpf, ys)
-
-    # Extract final filtered states
-    xs = map(p -> getproperty(p, :x), states.particles)
-    zs = map(p -> getproperty(p, :z), states.particles)
-    ws = weights(states)
-
-    @test kf_ll ≈ ll rtol = 1e-2
-
-    # Higher tolerance for outer state since variance is higher
-    @test first(kf_states.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-1
-    @test last(kf_states.μ) ≈ sum(last.(getproperty.(zs, :μ)) .* ws) rtol = 1e-2
-end
-
-@testitem "GPU Kalman-RBPF test" tags = [:gpu] begin
-    using CUDA
+@testitem "Rao-Blackwellised BF test" begin
+    using Distributions
+    using GeneralisedFilters
     using LinearAlgebra
-    using NNlib
+    using LogExpFunctions
     using SSMProblems
     using StableRNGs
-    using StatsBase
 
-    SEED = 1234
-    D_outer = 2
-    D_inner = 3
-    D_obs = 2
-    T = 5
-    N_particles = 10^4
-    ET = Float32
-
-    rng = StableRNG(SEED)
+    rng = StableRNG(1234)
 
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
-        rng, D_outer, D_inner, D_obs, ET
+        rng, 1, 1, 1; static_arrays=true
     )
-    _, _, ys = sample(rng, full_model, T)
+    _, _, ys = sample(rng, hier_model, 3)
 
-    # Ground truth Kalman filtering
-    kf_state, kf_ll = GeneralisedFilters.filter(full_model, KalmanFilter(), ys)
+    bf = BF(10^6; threshold=0.8)
+    rbbf = RBPF(bf, KalmanFilter())
 
-    # Rao-Blackwellised particle filtering
-    rbpf = BatchRBPF(BatchKalmanFilter(N_particles), N_particles)
-    states, ll = GeneralisedFilters.filter(hier_model, rbpf, ys)
+    rbbf_state, llrbbf = GeneralisedFilters.filter(rng, hier_model, rbbf, ys)
+    xs = getfield.(rbbf_state.particles, :x)
+    zs = getfield.(rbbf_state.particles, :z)
+    log_ws = getfield.(rbbf_state.particles, :log_w)
+    ws = softmax(log_ws)
 
-    # Extract final filtered states
-    xs = states.particles.xs
-    zs = states.particles.zs
-    ws = weights(states)
+    kf_state, llkf = GeneralisedFilters.filter(rng, full_model, KF(), ys)
 
-    @test kf_ll ≈ ll rtol = 1e-2
-    @test first(kf_state.μ) ≈ sum(xs[1, :] .* ws) rtol = 1e-1
-    @test last(kf_state.μ) ≈ sum(zs.μs[end, :] .* ws) rtol = 1e-2
-    @test eltype(xs) == ET
+    @test first(kf_state.μ) ≈ sum(only.(xs) .* ws) rtol = 1e-3
+    @test last(kf_state.μ) ≈ sum(only.(getfield.(zs, :μ)) .* ws) rtol = 1e-3
+    @test llkf ≈ llrbbf atol = 1e-3
+end
+
+@testitem "Rao-Blackwellised GF test" begin
+    using Distributions
+    using GeneralisedFilters
+    using LinearAlgebra
+    using LogExpFunctions
+    using SSMProblems
+    using StableRNGs
+
+    struct OverdispersedProposal{LD<:LinearGaussianLatentDynamics} <: AbstractProposal
+        dyn::LD
+        k::Float64
+    end
+    function SSMProblems.distribution(
+        prop::OverdispersedProposal, step::Integer, x, y; kwargs...
+    )
+        A, b, Q = GeneralisedFilters.calc_params(prop.dyn, step; kwargs...)
+        Q = prop.k * Q  # overdisperse
+        μ = A * x + b
+        return MvNormal(μ, Q)
+    end
+
+    rng = StableRNG(1234)
+
+    full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
+        rng, 1, 1, 1; static_arrays=true
+    )
+    _, _, ys = sample(rng, hier_model, 3)
+
+    proposal = OverdispersedProposal(dyn(hier_model).outer_dyn, 1.5)
+    gf = ParticleFilter(10^6, proposal; threshold=1.0)
+    rbgf = RBPF(gf, KalmanFilter())
+    rbgf_state, llrbgf = GeneralisedFilters.filter(rng, hier_model, rbgf, ys)
+    xs = getfield.(rbgf_state.particles, :x)
+    zs = getfield.(rbgf_state.particles, :z)
+    log_ws = getfield.(rbgf_state.particles, :log_w)
+    ws = softmax(log_ws)
+
+    kf_state, llkf = GeneralisedFilters.filter(rng, full_model, KF(), ys)
+
+    @test first(kf_state.μ) ≈ sum(only.(xs) .* ws) rtol = 1e-3
+    @test last(kf_state.μ) ≈ sum(only.(getfield.(zs, :μ)) .* ws) rtol = 1e-3
+    @test llkf ≈ llrbgf atol = 1e-3
+end
+
+@testitem "ABF test" begin
+    using Distributions
+    using GeneralisedFilters
+    using LinearAlgebra
+    using LogExpFunctions
+    using SSMProblems
+    using StableRNGs
+
+    rng = StableRNG(1234)
+    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
+        rng, 1, 1; static_arrays=true
+    )
+    _, _, ys = sample(rng, model, 3)
+
+    bf = BF(10^6; threshold=1.0)
+    abf = AuxiliaryParticleFilter(bf, MeanPredictive())
+    abf_state, llabf = GeneralisedFilters.filter(rng, model, abf, ys)
+    kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
+
+    xs = getfield.(abf_state.particles, :state)
+    log_ws = getfield.(abf_state.particles, :log_w)
+    ws = softmax(log_ws)
+
+    @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-3
+    @test llkf ≈ llabf atol = 1e-3
+end
+
+@testitem "ARBF test" begin
+    using Distributions
+    using GeneralisedFilters
+    using LinearAlgebra
+    using LogExpFunctions
+    using SSMProblems
+    using StableRNGs
+
+    rng = StableRNG(1234)
+
+    full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
+        rng, 1, 1, 1; static_arrays=true
+    )
+    _, _, ys = sample(rng, hier_model, 3)
+
+    bf = BF(10^6; threshold=1.0)
+    rbbf = RBPF(bf, KalmanFilter())
+    arbf = AuxiliaryParticleFilter(rbbf, MeanPredictive())
+    arbf_state, llarbf = GeneralisedFilters.filter(rng, hier_model, arbf, ys)
+    xs = getfield.(arbf_state.particles, :x)
+    zs = getfield.(arbf_state.particles, :z)
+    log_ws = getfield.(arbf_state.particles, :log_w)
+    ws = softmax(log_ws)
+
+    kf_state, llkf = GeneralisedFilters.filter(rng, full_model, KF(), ys)
+
+    @test first(kf_state.μ) ≈ sum(only.(xs) .* ws) rtol = 1e-3
+    @test last(kf_state.μ) ≈ sum(only.(getfield.(zs, :μ)) .* ws) rtol = 1e-3
+    @test llkf ≈ llarbf atol = 1e-3
 end
 
 @testitem "RBPF ancestory test" begin
@@ -330,8 +389,8 @@ end
 end
 
 @testitem "BF on hierarchical model test" begin
+    using LogExpFunctions
     using StableRNGs
-    using StatsBase
 
     SEED = 1234
     D_outer = 1
@@ -357,7 +416,8 @@ end
     # Extract final filtered states
     xs = map(p -> getproperty(p, :x), states.particles)
     zs = map(p -> getproperty(p, :z), states.particles)
-    ws = weights(states)
+    log_ws = getfield.(states.particles, :log_w)
+    ws = softmax(log_ws)
 
     @test kf_ll ≈ ll rtol = 1e-2
 
@@ -415,7 +475,7 @@ end
     using LinearAlgebra
     using LogExpFunctions: softmax, logsumexp
     using Random: randexp
-    using StatsBase
+    using StatsBase: sample, Weights
 
     using OffsetArrays
 
@@ -449,7 +509,9 @@ end
         bf_state, ll = GeneralisedFilters.filter(
             rng, model, bf, ys; ref_state=ref_traj, callback=cb
         )
-        sampled_idx = sample(rng, 1:length(bf_state), weights(bf_state))
+        log_ws = getfield.(bf_state.particles, :log_w)
+        ws = softmax(log_ws)
+        sampled_idx = sample(rng, 1:length(bf_state), Weights(ws))
         global ref_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
         if i > N_burnin
             push!(trajectory_samples, ref_traj)
@@ -473,7 +535,7 @@ end
     using LinearAlgebra
     using LogExpFunctions: softmax
     using Random: randexp
-    using StatsBase
+    using StatsBase: sample, Weights
     using StaticArrays
 
     using OffsetArrays
@@ -510,7 +572,9 @@ end
         bf_state, _ = GeneralisedFilters.filter(
             rng, hier_model, rbpf, ys; ref_state=ref_traj, callback=cb
         )
-        sampled_idx = sample(rng, 1:length(bf_state), StatsBase.weights(bf_state))
+        log_ws = getfield.(bf_state.particles, :log_w)
+        ws = softmax(log_ws)
+        sampled_idx = sample(rng, 1:length(bf_state), Weights(ws))
 
         global ref_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
         if i > N_burnin

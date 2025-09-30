@@ -32,6 +32,7 @@ function predict_particle(
     ref_state;
     kwargs...,
 )
+    # TODO: really we should be conditioning on the current RB state to allow for optimal proposals
     new_x, logw_inc = propogate(
         rng, dyn.outer_dyn, algo.pf, iter, particle.x, observation, ref_state; kwargs...
     )
