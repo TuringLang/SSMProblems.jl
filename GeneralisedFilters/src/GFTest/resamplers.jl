@@ -29,9 +29,7 @@ function GeneralisedFilters.resample(
     if alt_resampler.resample_next
         # Resample using wrapped resampler
         alt_resampler.resample_next = false
-        return GeneralisedFilters.resample(
-            rng, alt_resampler.resampler, state; ref_state
-        )
+        return GeneralisedFilters.resample(rng, alt_resampler.resampler, state; ref_state)
     else
         # Skip resampling - keep particles with their current weights and set ancestors to
         # themselves

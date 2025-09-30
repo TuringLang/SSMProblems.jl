@@ -231,7 +231,7 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, 1, 1, 1; static_arrays=true
     )
-    _, _, ys = sample(rng, hier_model, 4)
+    _, _, ys = sample(rng, full_model, 4)
 
     resampler = GeneralisedFilters.GFTest.AlternatingResampler()
     bf = BF(10^6; resampler=resampler)
@@ -260,7 +260,7 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, 1, 1, 1; static_arrays=true
     )
-    _, _, ys = sample(rng, hier_model, 4)
+    _, _, ys = sample(rng, full_model, 4)
 
     prop = GeneralisedFilters.GFTest.OverdispersedProposal(dyn(hier_model).outer_dyn, 1.5)
     resampler = GeneralisedFilters.GFTest.AlternatingResampler()
