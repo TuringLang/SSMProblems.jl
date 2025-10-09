@@ -116,7 +116,7 @@ end
 @testitem "Bootstrap filter test" begin
     using SSMProblems
     using StableRNGs
-    using LogExpFunctions
+    using StatsBase: weights
 
     rng = StableRNG(1234)
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
@@ -130,8 +130,7 @@ end
     kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
 
     xs = getfield.(bf_state.particles, :state)
-    log_ws = getfield.(bf_state.particles, :log_w)
-    ws = softmax(log_ws)
+    ws = weights(bf_state)
 
     # Compare log-likelihood and states
     @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-3
@@ -140,8 +139,8 @@ end
 
 @testitem "Guided filter test" begin
     using SSMProblems
-    using LogExpFunctions
     using StableRNGs
+    using StatsBase: weights
 
     rng = StableRNG(1234)
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
@@ -156,8 +155,7 @@ end
     kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
 
     xs = getfield.(gf_state.particles, :state)
-    log_ws = getfield.(gf_state.particles, :log_w)
-    ws = softmax(log_ws)
+    ws = weights(gf_state)
 
     @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-3
     @test llkf ≈ llgf atol = 1e-3
@@ -222,9 +220,9 @@ end
     using Distributions
     using GeneralisedFilters
     using LinearAlgebra
-    using LogExpFunctions
     using SSMProblems
     using StableRNGs
+    using StatsBase: weights
 
     rng = StableRNG(1234)
 
@@ -240,8 +238,7 @@ end
     rbbf_state, llrbbf = GeneralisedFilters.filter(rng, hier_model, rbbf, ys)
     xs = getfield.(getfield.(rbbf_state.particles, :state), :x)
     zs = getfield.(getfield.(rbbf_state.particles, :state), :z)
-    log_ws = getfield.(rbbf_state.particles, :log_w)
-    ws = softmax(log_ws)
+    ws = weights(rbbf_state)
 
     kf_state, llkf = GeneralisedFilters.filter(rng, full_model, KF(), ys)
 
@@ -251,9 +248,9 @@ end
 end
 
 @testitem "Rao-Blackwellised GF test" begin
-    using LogExpFunctions
     using SSMProblems
     using StableRNGs
+    using StatsBase: weights
 
     rng = StableRNG(1234)
 
@@ -269,8 +266,7 @@ end
     rbgf_state, llrbgf = GeneralisedFilters.filter(rng, hier_model, rbgf, ys)
     xs = getfield.(getfield.(rbgf_state.particles, :state), :x)
     zs = getfield.(getfield.(rbgf_state.particles, :state), :z)
-    log_ws = getfield.(rbgf_state.particles, :log_w)
-    ws = softmax(log_ws)
+    ws = weights(rbgf_state)
 
     kf_state, llkf = GeneralisedFilters.filter(rng, full_model, KF(), ys)
 
@@ -283,9 +279,9 @@ end
     using Distributions
     using GeneralisedFilters
     using LinearAlgebra
-    using LogExpFunctions
     using SSMProblems
     using StableRNGs
+    using StatsBase: weights
 
     rng = StableRNG(1234)
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
@@ -299,8 +295,7 @@ end
     kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
 
     xs = getfield.(abf_state.particles, :state)
-    log_ws = getfield.(abf_state.particles, :log_w)
-    ws = softmax(log_ws)
+    ws = weights(abf_state)
 
     @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-3
     @test llkf ≈ llabf atol = 1e-3
@@ -310,9 +305,9 @@ end
     using Distributions
     using GeneralisedFilters
     using LinearAlgebra
-    using LogExpFunctions
     using SSMProblems
     using StableRNGs
+    using StatsBase: weights
 
     rng = StableRNG(1234)
 
@@ -327,8 +322,7 @@ end
     arbf_state, llarbf = GeneralisedFilters.filter(rng, hier_model, arbf, ys)
     xs = getfield.(getfield.(arbf_state.particles, :state), :x)
     zs = getfield.(getfield.(arbf_state.particles, :state), :z)
-    log_ws = getfield.(arbf_state.particles, :log_w)
-    ws = softmax(log_ws)
+    ws = weights(arbf_state)
 
     kf_state, llkf = GeneralisedFilters.filter(rng, full_model, KF(), ys)
 
@@ -361,9 +355,9 @@ end
 end
 
 @testitem "BF on hierarchical model test" begin
-    using LogExpFunctions
     using SSMProblems
     using StableRNGs
+    using StatsBase: weights
 
     SEED = 1234
     D_outer = 1
@@ -389,8 +383,7 @@ end
     # Extract final filtered states
     xs = map(p -> getproperty(p.state, :x), states.particles)
     zs = map(p -> getproperty(p.state, :z), states.particles)
-    log_ws = getfield.(states.particles, :log_w)
-    ws = softmax(log_ws)
+    ws = weights(states)
 
     @test kf_ll ≈ ll rtol = 1e-2
 
@@ -404,7 +397,6 @@ end
     using StableRNGs
     using PDMats
     using LinearAlgebra
-    using LogExpFunctions: softmax
     using Random: randexp, AbstractRNG
     using StatsBase: sample, Weights
 
@@ -446,9 +438,9 @@ end
     using StableRNGs
     using PDMats
     using LinearAlgebra
-    using LogExpFunctions: softmax, logsumexp
+    using LogExpFunctions: logsumexp
     using Random: randexp
-    using StatsBase: sample, Weights
+    using StatsBase: sample, weights
 
     using OffsetArrays
 
@@ -482,9 +474,8 @@ end
         bf_state, ll = GeneralisedFilters.filter(
             rng, model, bf, ys; ref_state=ref_traj, callback=cb
         )
-        log_ws = getfield.(bf_state.particles, :log_w)
-        ws = softmax(log_ws)
-        sampled_idx = sample(rng, 1:N_particles, Weights(ws))
+        ws = weights(bf_state)
+        sampled_idx = sample(rng, 1:N_particles, ws)
         global ref_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
         if i > N_burnin
             push!(trajectory_samples, ref_traj)
@@ -506,9 +497,8 @@ end
     using StableRNGs
     using PDMats
     using LinearAlgebra
-    using LogExpFunctions: softmax
     using Random: randexp
-    using StatsBase: sample, Weights
+    using StatsBase: sample, weights
     using StaticArrays
     using Statistics
 
@@ -546,9 +536,8 @@ end
         bf_state, _ = GeneralisedFilters.filter(
             rng, hier_model, rbpf, ys; ref_state=ref_traj, callback=cb
         )
-        log_ws = getfield.(bf_state.particles, :log_w)
-        ws = softmax(log_ws)
-        sampled_idx = sample(rng, 1:N_particles, Weights(ws))
+        ws = weights(bf_state)
+        sampled_idx = sample(rng, 1:N_particles, ws)
 
         global ref_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
         if i > N_burnin
