@@ -8,8 +8,9 @@ import Base: eltype
 import Random: AbstractRNG, default_rng
 import Distributions: logpdf
 
-export StatePrior,
-    LatentDynamics, ObservationProcess, AbstractStateSpaceModel, StateSpaceModel
+export StatePrior, LatentDynamics, ObservationProcess
+export AbstractStateSpaceModel, StateSpaceModel
+export prior, dyn, obs
 
 """
 Initial state prior of a state space model.
@@ -235,6 +236,10 @@ struct StateSpaceModel{PT,LD,OP} <: AbstractStateSpaceModel
     dyn::LD
     obs::OP
 end
+
+prior(model::StateSpaceModel) = model.prior
+dyn(model::StateSpaceModel) = model.dyn
+obs(model::StateSpaceModel) = model.obs
 
 include("batch_methods.jl")
 include("utils/forward_simulation.jl")

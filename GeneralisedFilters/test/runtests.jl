@@ -5,7 +5,6 @@ using TestItemRunner
 @run_package_tests filter = ti -> !(:gpu in ti.tags)
 
 include("Aqua.jl")
-include("batch_kalman_test.jl")
 include("resamplers.jl")
 
 @testitem "Kalman filter test" begin
@@ -117,60 +116,51 @@ end
 @testitem "Bootstrap filter test" begin
     using SSMProblems
     using StableRNGs
-    using StatsBase
+    using LogExpFunctions
 
     rng = StableRNG(1234)
-    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, 1, 1)
-    _, _, ys = sample(rng, model, 10)
+    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
+        rng, 1, 1; static_arrays=true
+    )
+    _, _, ys = sample(rng, model, 4)
 
-    bf = BF(2^12; threshold=0.8)
+    resampler = GeneralisedFilters.GFTest.AlternatingResampler()
+    bf = BF(10^6; resampler=resampler)
     bf_state, llbf = GeneralisedFilters.filter(rng, model, bf, ys)
     kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
 
-    xs = bf_state.particles
-    ws = weights(bf_state)
+    xs = getfield.(bf_state.particles, :state)
+    log_ws = getfield.(bf_state.particles, :log_w)
+    ws = softmax(log_ws)
 
     # Compare log-likelihood and states
-    @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
-    @test llkf ≈ llbf atol = 1e-2
+    @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-3
+    @test llkf ≈ llbf atol = 1e-3
 end
 
 @testitem "Guided filter test" begin
     using SSMProblems
-    using StatsBase
+    using LogExpFunctions
     using StableRNGs
-    using Distributions
-    using LinearAlgebra
-
-    struct LinearGaussianProposal <: GeneralisedFilters.AbstractProposal end
-
-    function SSMProblems.distribution(
-        model::AbstractStateSpaceModel,
-        kernel::LinearGaussianProposal,
-        iter::Integer,
-        state,
-        observation;
-        kwargs...,
-    )
-        A, b, Q = GeneralisedFilters.calc_params(model.dyn, iter; kwargs...)
-        pred = GeneralisedFilters.GaussianDistribution(A * state + b, Q)
-        prop, _ = GeneralisedFilters.update(model, KF(), iter, pred, observation; kwargs...)
-        return MvNormal(prop.μ, hermitianpart(prop.Σ))
-    end
 
     rng = StableRNG(1234)
-    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, 1, 1)
-    _, _, ys = sample(rng, model, 10)
+    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
+        rng, 1, 1; static_arrays=true
+    )
+    _, _, ys = sample(rng, model, 4)
 
-    algo = PF(2^10, LinearGaussianProposal(); threshold=0.6)
-    kf_states, kf_ll = GeneralisedFilters.filter(rng, model, KalmanFilter(), ys)
-    pf_states, pf_ll = GeneralisedFilters.filter(rng, model, algo, ys)
-    xs = pf_states.particles
-    ws = weights(pf_states)
+    prop = GeneralisedFilters.GFTest.OptimalProposal(model.dyn, model.obs)
+    resampler = GeneralisedFilters.GFTest.AlternatingResampler()
+    gf = ParticleFilter(10^6, prop; resampler=resampler)
+    gf_state, llgf = GeneralisedFilters.filter(rng, model, gf, ys)
+    kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
 
-    # Compare log-likelihood and states
-    @test first(kf_states.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
-    @test kf_ll ≈ pf_ll rtol = 1e-2
+    xs = getfield.(gf_state.particles, :state)
+    log_ws = getfield.(gf_state.particles, :log_w)
+    ws = softmax(log_ws)
+
+    @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-3
+    @test llkf ≈ llgf atol = 1e-3
 end
 
 @testitem "Forward algorithm test" begin
@@ -228,83 +218,123 @@ end
     @test ll ≈ log(marginal)
 end
 
-@testitem "Kalman-RBPF test" begin
-    using LogExpFunctions: softmax
-    using StableRNGs
-    using StatsBase
-
-    SEED = 1234
-    D_outer = 2
-    D_inner = 3
-    D_obs = 2
-    T = 5
-    N_particles = 10^4
-
-    rng = StableRNG(SEED)
-
-    full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
-        rng, D_outer, D_inner, D_obs
-    )
-    _, _, ys = sample(rng, full_model, T)
-
-    # Ground truth Kalman filtering
-    kf_states, kf_ll = GeneralisedFilters.filter(rng, full_model, KalmanFilter(), ys)
-
-    # Rao-Blackwellised particle filtering
-    rbpf = RBPF(KalmanFilter(), N_particles)
-    states, ll = GeneralisedFilters.filter(rng, hier_model, rbpf, ys)
-
-    # Extract final filtered states
-    xs = map(p -> getproperty(p, :x), states.particles)
-    zs = map(p -> getproperty(p, :z), states.particles)
-    ws = weights(states)
-
-    @test kf_ll ≈ ll rtol = 1e-2
-
-    # Higher tolerance for outer state since variance is higher
-    @test first(kf_states.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-1
-    @test last(kf_states.μ) ≈ sum(last.(getproperty.(zs, :μ)) .* ws) rtol = 1e-2
-end
-
-@testitem "GPU Kalman-RBPF test" tags = [:gpu] begin
-    using CUDA
+@testitem "Rao-Blackwellised BF test" begin
+    using Distributions
+    using GeneralisedFilters
     using LinearAlgebra
-    using NNlib
+    using LogExpFunctions
     using SSMProblems
     using StableRNGs
-    using StatsBase
 
-    SEED = 1234
-    D_outer = 2
-    D_inner = 3
-    D_obs = 2
-    T = 5
-    N_particles = 10^4
-    ET = Float32
-
-    rng = StableRNG(SEED)
+    rng = StableRNG(1234)
 
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
-        rng, D_outer, D_inner, D_obs, ET
+        rng, 1, 1, 1; static_arrays=true
     )
-    _, _, ys = sample(rng, full_model, T)
+    _, _, ys = sample(rng, full_model, 4)
 
-    # Ground truth Kalman filtering
-    kf_state, kf_ll = GeneralisedFilters.filter(full_model, KalmanFilter(), ys)
+    resampler = GeneralisedFilters.GFTest.AlternatingResampler()
+    bf = BF(10^6; resampler=resampler)
+    rbbf = RBPF(bf, KalmanFilter())
 
-    # Rao-Blackwellised particle filtering
-    rbpf = BatchRBPF(BatchKalmanFilter(N_particles), N_particles)
-    states, ll = GeneralisedFilters.filter(hier_model, rbpf, ys)
+    rbbf_state, llrbbf = GeneralisedFilters.filter(rng, hier_model, rbbf, ys)
+    xs = getfield.(getfield.(rbbf_state.particles, :state), :x)
+    zs = getfield.(getfield.(rbbf_state.particles, :state), :z)
+    log_ws = getfield.(rbbf_state.particles, :log_w)
+    ws = softmax(log_ws)
 
-    # Extract final filtered states
-    xs = states.particles.xs
-    zs = states.particles.zs
-    ws = weights(states)
+    kf_state, llkf = GeneralisedFilters.filter(rng, full_model, KF(), ys)
 
-    @test kf_ll ≈ ll rtol = 1e-2
-    @test first(kf_state.μ) ≈ sum(xs[1, :] .* ws) rtol = 1e-1
-    @test last(kf_state.μ) ≈ sum(zs.μs[end, :] .* ws) rtol = 1e-2
-    @test eltype(xs) == ET
+    @test first(kf_state.μ) ≈ sum(only.(xs) .* ws) rtol = 1e-3
+    @test last(kf_state.μ) ≈ sum(only.(getfield.(zs, :μ)) .* ws) rtol = 1e-3
+    @test llkf ≈ llrbbf atol = 1e-3
+end
+
+@testitem "Rao-Blackwellised GF test" begin
+    using LogExpFunctions
+    using SSMProblems
+    using StableRNGs
+
+    rng = StableRNG(1234)
+
+    full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
+        rng, 1, 1, 1; static_arrays=true
+    )
+    _, _, ys = sample(rng, full_model, 4)
+
+    prop = GeneralisedFilters.GFTest.OverdispersedProposal(dyn(hier_model).outer_dyn, 1.5)
+    resampler = GeneralisedFilters.GFTest.AlternatingResampler()
+    gf = ParticleFilter(10^6, prop; resampler=resampler)
+    rbgf = RBPF(gf, KalmanFilter())
+    rbgf_state, llrbgf = GeneralisedFilters.filter(rng, hier_model, rbgf, ys)
+    xs = getfield.(getfield.(rbgf_state.particles, :state), :x)
+    zs = getfield.(getfield.(rbgf_state.particles, :state), :z)
+    log_ws = getfield.(rbgf_state.particles, :log_w)
+    ws = softmax(log_ws)
+
+    kf_state, llkf = GeneralisedFilters.filter(rng, full_model, KF(), ys)
+
+    @test first(kf_state.μ) ≈ sum(only.(xs) .* ws) rtol = 1e-3
+    @test last(kf_state.μ) ≈ sum(only.(getfield.(zs, :μ)) .* ws) rtol = 1e-3
+    @test llkf ≈ llrbgf atol = 1e-3
+end
+
+@testitem "ABF test" begin
+    using Distributions
+    using GeneralisedFilters
+    using LinearAlgebra
+    using LogExpFunctions
+    using SSMProblems
+    using StableRNGs
+
+    rng = StableRNG(1234)
+    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
+        rng, 1, 1; static_arrays=true
+    )
+    _, _, ys = sample(rng, model, 4)
+
+    bf = BF(10^6; threshold=1.0)  # APF needs resampling every step
+    abf = AuxiliaryParticleFilter(bf, MeanPredictive())
+    abf_state, llabf = GeneralisedFilters.filter(rng, model, abf, ys)
+    kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
+
+    xs = getfield.(abf_state.particles, :state)
+    log_ws = getfield.(abf_state.particles, :log_w)
+    ws = softmax(log_ws)
+
+    @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-3
+    @test llkf ≈ llabf atol = 1e-3
+end
+
+@testitem "ARBF test" begin
+    using Distributions
+    using GeneralisedFilters
+    using LinearAlgebra
+    using LogExpFunctions
+    using SSMProblems
+    using StableRNGs
+
+    rng = StableRNG(1234)
+
+    full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
+        rng, 1, 1, 1; static_arrays=true
+    )
+    _, _, ys = sample(rng, hier_model, 4)
+
+    bf = BF(10^6; threshold=1.0)  # APF needs resampling every step
+    rbbf = RBPF(bf, KalmanFilter())
+    arbf = AuxiliaryParticleFilter(rbbf, MeanPredictive())
+    arbf_state, llarbf = GeneralisedFilters.filter(rng, hier_model, arbf, ys)
+    xs = getfield.(getfield.(arbf_state.particles, :state), :x)
+    zs = getfield.(getfield.(arbf_state.particles, :state), :z)
+    log_ws = getfield.(arbf_state.particles, :log_w)
+    ws = softmax(log_ws)
+
+    kf_state, llkf = GeneralisedFilters.filter(rng, full_model, KF(), ys)
+
+    @test first(kf_state.μ) ≈ sum(only.(xs) .* ws) rtol = 1e-3
+    @test last(kf_state.μ) ≈ sum(only.(getfield.(zs, :μ)) .* ws) rtol = 1e-3
+    @test llkf ≈ llarbf atol = 1e-3
 end
 
 @testitem "RBPF ancestory test" begin
@@ -322,7 +352,7 @@ end
     _, _, ys = sample(rng, full_model, T)
 
     cb = GeneralisedFilters.AncestorCallback(nothing)
-    rbpf = RBPF(KalmanFilter(), N_particles)
+    rbpf = RBPF(BF(N_particles; threshold=0.8), KalmanFilter())
     GeneralisedFilters.filter(rng, hier_model, rbpf, ys; callback=cb)
 
     # TODO: add proper test comparing to dense storage
@@ -331,8 +361,9 @@ end
 end
 
 @testitem "BF on hierarchical model test" begin
+    using LogExpFunctions
+    using SSMProblems
     using StableRNGs
-    using StatsBase
 
     SEED = 1234
     D_outer = 1
@@ -352,13 +383,14 @@ end
     kf_states, kf_ll = GeneralisedFilters.filter(rng, full_model, KalmanFilter(), ys)
 
     # Rao-Blackwellised particle filtering
-    bf = BF(N_particles)
+    bf = BF(N_particles; threshold=0.8)
     states, ll = GeneralisedFilters.filter(rng, hier_model, bf, ys)
 
     # Extract final filtered states
-    xs = map(p -> getproperty(p, :x), states.particles)
-    zs = map(p -> getproperty(p, :z), states.particles)
-    ws = weights(states)
+    xs = map(p -> getproperty(p.state, :x), states.particles)
+    zs = map(p -> getproperty(p.state, :z), states.particles)
+    log_ws = getfield.(states.particles, :log_w)
+    ws = softmax(log_ws)
 
     @test kf_ll ≈ ll rtol = 1e-2
 
@@ -416,7 +448,7 @@ end
     using LinearAlgebra
     using LogExpFunctions: softmax, logsumexp
     using Random: randexp
-    using StatsBase
+    using StatsBase: sample, Weights
 
     using OffsetArrays
 
@@ -428,7 +460,7 @@ end
     T = Float64
     N_particles = 10
     N_burnin = 1000
-    N_sample = 10000
+    N_sample = 100000
 
     rng = StableRNG(SEED)
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
@@ -450,7 +482,9 @@ end
         bf_state, ll = GeneralisedFilters.filter(
             rng, model, bf, ys; ref_state=ref_traj, callback=cb
         )
-        sampled_idx = sample(rng, 1:length(bf_state), weights(bf_state))
+        log_ws = getfield.(bf_state.particles, :log_w)
+        ws = softmax(log_ws)
+        sampled_idx = sample(rng, 1:N_particles, Weights(ws))
         global ref_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
         if i > N_burnin
             push!(trajectory_samples, ref_traj)
@@ -463,8 +497,8 @@ end
     log_recip_likelihood_estimate = logsumexp(-lls) - log(length(lls))
 
     csmc_mean = sum(getindex.(trajectory_samples, t_smooth)) / N_sample
-    @test csmc_mean ≈ state.μ rtol = 1e-2
-    @test log_recip_likelihood_estimate ≈ -ks_ll rtol = 1e-2
+    @test csmc_mean ≈ state.μ rtol = 1e-3
+    @test log_recip_likelihood_estimate ≈ -ks_ll rtol = 1e-3
 end
 
 @testitem "RBCSMC test" begin
@@ -474,8 +508,9 @@ end
     using LinearAlgebra
     using LogExpFunctions: softmax
     using Random: randexp
-    using StatsBase
+    using StatsBase: sample, Weights
     using StaticArrays
+    using Statistics
 
     using OffsetArrays
 
@@ -502,7 +537,7 @@ end
     )
 
     N_steps = N_burnin + N_sample
-    rbpf = RBPF(KalmanFilter(), N_particles; threshold=0.6)
+    rbpf = RBPF(BF(N_particles; threshold=0.8), KalmanFilter())
     ref_traj = nothing
     trajectory_samples = []
 
@@ -511,7 +546,9 @@ end
         bf_state, _ = GeneralisedFilters.filter(
             rng, hier_model, rbpf, ys; ref_state=ref_traj, callback=cb
         )
-        sampled_idx = sample(rng, 1:length(bf_state), StatsBase.weights(bf_state))
+        log_ws = getfield.(bf_state.particles, :log_w)
+        ws = softmax(log_ws)
+        sampled_idx = sample(rng, 1:N_particles, Weights(ws))
 
         global ref_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
         if i > N_burnin
@@ -551,155 +588,4 @@ end
     # Compare to ground truth
     @test state.μ[1] ≈ only(mean(x_trajectories)) rtol = 1e-2
     @test state.μ[2] ≈ mean(z_smoothed_means) rtol = 1e-3
-end
-
-@testitem "GPU Conditional Kalman-RBPF execution test" tags = [:gpu] begin
-    using CUDA
-    using OffsetArrays
-    using SSMProblems
-    using StableRNGs
-
-    SEED = 1234
-    D_outer = 2
-    D_inner = 3
-    D_obs = 2
-    K = 5
-    T = Float32
-    N_particles = 1000
-
-    rng = StableRNG(1234)
-
-    full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
-        rng, D_outer, D_inner, D_obs, T
-    )
-    _, _, ys = sample(rng, full_model, K)
-
-    # Generate random reference trajectory
-    ref_trajectory = [CuArray(rand(rng, T, D_outer, 1)) for _ in 0:K]
-    ref_trajectory = OffsetVector(ref_trajectory, -1)
-
-    rbpf = BatchRBPF(BatchKalmanFilter(N_particles), N_particles)
-    states, ll = GeneralisedFilters.filter(hier_model, rbpf, ys; ref_state=ref_trajectory)
-
-    # Check returned type
-    @test typeof(ll) == T
-end
-
-@testitem "GPU-RBPF ancestory test" tags = [:gpu] begin
-    using GeneralisedFilters
-    using CUDA
-    using LinearAlgebra
-    using SSMProblems
-    using StableRNGs
-
-    SEED = 1234
-    D_outer = 2
-    D_inner = 3
-    D_obs = 2
-    K = 5
-    T = Float32
-    N_particles = 10^5
-
-    rng = StableRNG(1234)
-
-    full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
-        rng, D_outer, D_inner, D_obs, T
-    )
-    _, _, ys = sample(rng, full_model, K)
-
-    # Manually create tree to force expansion on second step
-    M = N_particles * 2 - 1
-    tree = GeneralisedFilters.ParallelParticleTree(
-        GeneralisedFilters.BatchRaoBlackwellisedParticles(
-            CuArray{T}(undef, D_outer, N_particles),
-            GeneralisedFilters.BatchGaussianDistribution(
-                CuArray{T}(undef, D_inner, N_particles),
-                CuArray{T}(undef, D_inner, D_inner, N_particles),
-            ),
-        ),
-        M,
-    )
-
-    rbpf = BatchRBPF(BatchKalmanFilter(N_particles), N_particles)
-    cb = GeneralisedFilters.ParallelAncestorCallback(tree)
-    states, ll = GeneralisedFilters.filter(hier_model, rbpf, ys; callback=cb)
-
-    # TODO: add proper test comparing to dense storage
-    ancestry = GeneralisedFilters.get_ancestry(tree, K)
-end
-
-@testitem "GPU Conditional Kalman-RBPF validity test" tags = [:gpu, :long] begin
-    using GeneralisedFilters
-    using CUDA
-    using NNlib
-    using OffsetArrays
-    using StableRNGs
-    using StatsBase
-
-    SEED = 1234
-    D_outer = 1
-    D_inner = 1
-    D_obs = 1
-    K = 3
-    t_smooth = 2
-    T = Float32
-    N_particles = 10000
-    N_burnin = 100
-    N_sample = 2000
-
-    rng = StableRNG(1234)
-
-    full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
-        rng, D_outer, D_inner, D_obs, T
-    )
-    _, _, ys = sample(rng, full_model, K)
-
-    # Kalman smoother
-    state, _ = GeneralisedFilters.smooth(
-        rng, full_model, KalmanSmoother(), ys; t_smooth=t_smooth
-    )
-
-    particle_template = GeneralisedFilters.BatchRaoBlackwellisedParticles(
-        CuArray{T}(undef, D_outer, N_particles),
-        GeneralisedFilters.BatchGaussianDistribution(
-            CuArray{T}(undef, D_inner, N_particles),
-            CuArray{T}(undef, D_inner, D_inner, N_particles),
-        ),
-    )
-    particle_type = typeof(particle_template)
-
-    N_steps = N_burnin + N_sample
-    M = floor(Int64, N_particles * log(N_particles))
-    rbpf = BatchRBPF(BatchKalmanFilter(N_particles), N_particles; threshold=1.0)
-    ref_traj = nothing
-    trajectory_samples = Vector{OffsetArray{particle_type,1,Vector{particle_type}}}(
-        undef, N_sample
-    )
-
-    for i in 1:N_steps
-        tree = GeneralisedFilters.ParallelParticleTree(deepcopy(particle_template), M)
-        cb = GeneralisedFilters.ParallelAncestorCallback(tree)
-        rbpf_state, _ = GeneralisedFilters.filter(
-            hier_model, rbpf, ys; ref_state=ref_traj, callback=cb
-        )
-        weights = softmax(rbpf_state.log_weights)
-        ancestors = GeneralisedFilters.sample_ancestors(rng, Multinomial(), weights)
-        sampled_idx = CUDA.@allowscalar ancestors[1]
-        global ref_traj = GeneralisedFilters.get_ancestry(tree, sampled_idx, K)
-        if i > N_burnin
-            trajectory_samples[i - N_burnin] = ref_traj
-        end
-        # Reference trajectory should only be nonlinear state for RBPF
-        ref_traj = getproperty.(ref_traj, :xs)
-    end
-
-    # Extract inner and outer trajectories
-    x_trajectories = getproperty.(getindex.(trajectory_samples, t_smooth), :xs)
-    z_trajectories = getproperty.(getindex.(trajectory_samples, t_smooth), :zs)
-
-    # Compare to ground truth
-    CUDA.@allowscalar begin
-        @test state.μ[1] ≈ only(mean(x_trajectories)) rtol = 1e-1
-        @test state.μ[2] ≈ only(mean(getproperty.(z_trajectories, :μs))) rtol = 1e-1
-    end
 end

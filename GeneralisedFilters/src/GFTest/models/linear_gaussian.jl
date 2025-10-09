@@ -1,10 +1,13 @@
+using StaticArrays
+
 function create_linear_gaussian_model(
     rng::AbstractRNG,
     Dx::Integer,
     Dy::Integer,
     T::Type{<:Real}=Float64,
     process_noise_scale=T(0.1),
-    obs_noise_scale=T(1.0),
+    obs_noise_scale=T(1.0);
+    static_arrays::Bool=false,
 )
     μ0 = rand(rng, T, Dx)
     Σ0 = rand_cov(rng, T, Dx)
@@ -14,6 +17,17 @@ function create_linear_gaussian_model(
     H = rand(rng, T, Dy, Dx)
     c = rand(rng, T, Dy)
     R = rand_cov(rng, T, Dy; scale=obs_noise_scale)
+
+    if static_arrays
+        μ0 = SVector{Dx,T}(μ0)
+        Σ0 = SMatrix{Dx,Dx,T}(Σ0)
+        A = SMatrix{Dx,Dx,T}(A)
+        b = SVector{Dx,T}(b)
+        Q = SMatrix{Dx,Dx,T}(Q)
+        H = SMatrix{Dy,Dx,T}(H)
+        c = SVector{Dy,T}(c)
+        R = SMatrix{Dy,Dy,T}(R)
+    end
 
     return create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
 end

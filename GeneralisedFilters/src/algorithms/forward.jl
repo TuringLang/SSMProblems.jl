@@ -3,38 +3,36 @@ export ForwardAlgorithm, FW
 struct ForwardAlgorithm <: AbstractFilter end
 const FW = ForwardAlgorithm
 
-function initialise(
-    rng::AbstractRNG, model::DiscreteStateSpaceModel, ::ForwardAlgorithm; kwargs...
-)
-    return calc_α0(model.prior; kwargs...)
+function initialise(rng::AbstractRNG, prior::DiscretePrior, ::ForwardAlgorithm; kwargs...)
+    return calc_α0(prior; kwargs...)
 end
 
 function predict(
     rng::AbstractRNG,
-    model::DiscreteStateSpaceModel,
+    dyn::DiscreteLatentDynamics,
     filter::ForwardAlgorithm,
     step::Integer,
     states::AbstractVector,
     observation;
     kwargs...,
 )
-    P = calc_P(model.dyn, step; kwargs...)
+    P = calc_P(dyn, step; kwargs...)
     return (states' * P)'
 end
 
 function update(
-    model::DiscreteStateSpaceModel{T},
+    obs::ObservationProcess,
     filter::ForwardAlgorithm,
     step::Integer,
     states::AbstractVector,
     observation;
     kwargs...,
-) where {T}
+)
     # Compute emission probability vector
     # TODO: should we define density as part of the interface or run the whole algorithm in
     # log space?
     b = map(
-        x -> exp(SSMProblems.logdensity(model.obs, step, x, observation; kwargs...)),
+        x -> exp(SSMProblems.logdensity(obs, step, x, observation; kwargs...)),
         eachindex(states),
     )
     filtered_states = b .* states

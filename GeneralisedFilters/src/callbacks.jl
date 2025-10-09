@@ -79,8 +79,9 @@ end
 function (c::DenseAncestorCallback)(
     model, filter, state, data, ::PostInitCallback; kwargs...
 )
+    particles = state.particles
     c.container = DenseParticleContainer(
-        OffsetVector([deepcopy(state.particles)], -1), Vector{Int}[]
+        OffsetVector([deepcopy(getfield.(particles, :state))], -1), Vector{Int}[]
     )
     return nothing
 end
@@ -88,8 +89,9 @@ end
 function (c::DenseAncestorCallback)(
     model, filter, step, state, data, ::PostUpdateCallback; kwargs...
 )
-    push!(c.container.particles, deepcopy(state.particles))
-    push!(c.container.ancestors, deepcopy(state.ancestors))
+    particles = state.particles
+    push!(c.container.particles, deepcopy(getfield.(particles, :state)))
+    push!(c.container.ancestors, deepcopy(getfield.(particles, :ancestor)))
     return nothing
 end
 
@@ -344,7 +346,8 @@ end
 function (c::ParallelAncestorCallback)(
     model, filter, step, state, data, ::PostInitCallback; kwargs...
 )
-    @inbounds c.tree.states[1:(filter.N)] = deepcopy(state.particles)
+    N = num_particles(filter)
+    @inbounds c.tree.states[1:N] = deepcopy(state.particles)
     return nothing
 end
 
@@ -352,7 +355,8 @@ function (c::ParallelAncestorCallback)(
     model, filter, step, state, data, ::PostUpdateCallback; kwargs...
 )
     # insert! implicitly deepcopies
-    insert!(c.tree, state.particles, state.ancestors)
+    particles = state.particles
+    insert!(c.tree, getfield.(particles, :state), getfield.(particles, :ancestor))
     return nothing
 end
 
@@ -369,15 +373,17 @@ mutable struct AncestorCallback <: AbstractCallback
 end
 
 function (c::AncestorCallback)(model, filter, state, data, ::PostInitCallback; kwargs...)
-    c.tree = ParticleTree(state.particles, floor(Int64, filter.N * log(filter.N)))
+    N = num_particles(filter)
+    c.tree = ParticleTree(getfield.(state.particles, :state), floor(Int64, N * log(N)))
     return nothing
 end
 
 function (c::AncestorCallback)(
     model, filter, step, state, data, ::PostPredictCallback; kwargs...
 )
-    prune!(c.tree, get_offspring(state.ancestors))
-    insert!(c.tree, state.particles, state.ancestors)
+    particles = state.particles
+    prune!(c.tree, getfield.(particles, :ancestor))
+    insert!(c.tree, getfield.(particles, :state), getfield.(particles, :ancestor))
     return nothing
 end
 
@@ -392,14 +398,16 @@ mutable struct ResamplerCallback <: AbstractCallback
 end
 
 function (c::ResamplerCallback)(model, filter, state, data, ::PostInitCallback; kwargs...)
-    c.tree = ParticleTree(collect(1:N), floor(Int64, filter.N * log(filter.N)))
+    N = num_particles(filter)
+    c.tree = ParticleTree(collect(1:N), floor(Int64, N * log(N)))
     return nothing
 end
 
 function (c::ResamplerCallback)(
     model, filter, step, state, data, ::PostResampleCallback; kwargs...
 )
+    N = num_particles(filter)
     prune!(c.tree, get_offspring(state.ancestors))
-    insert!(c.tree, collect(1:(filter.N)), state.ancestors)
+    insert!(c.tree, collect(1:N), state.ancestors)
     return nothing
 end

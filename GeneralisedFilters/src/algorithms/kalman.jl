@@ -1,4 +1,4 @@
-export KalmanFilter, filter, BatchKalmanFilter
+export KalmanFilter, filter
 using CUDA: i32
 import PDMats: PDMat
 
@@ -8,23 +8,21 @@ struct KalmanFilter <: AbstractFilter end
 
 KF() = KalmanFilter()
 
-function initialise(
-    rng::AbstractRNG, model::LinearGaussianStateSpaceModel, filter::KalmanFilter; kwargs...
-)
-    μ0, Σ0 = calc_initial(model.prior; kwargs...)
+function initialise(rng::AbstractRNG, prior::GaussianPrior, filter::KalmanFilter; kwargs...)
+    μ0, Σ0 = calc_initial(prior; kwargs...)
     return GaussianDistribution(μ0, Σ0)
 end
 
 function predict(
     rng::AbstractRNG,
-    model::LinearGaussianStateSpaceModel,
+    dyn::LinearGaussianLatentDynamics,
     algo::KalmanFilter,
     iter::Integer,
     state::GaussianDistribution,
     observation=nothing;
     kwargs...,
 )
-    params = calc_params(model.dyn, iter; kwargs...)
+    params = calc_params(dyn, iter; kwargs...)
     state = kalman_predict(state, params)
     return state
 end
@@ -39,14 +37,14 @@ function kalman_predict(state, params)
 end
 
 function update(
-    model::LinearGaussianStateSpaceModel,
+    obs::LinearGaussianObservationProcess,
     algo::KalmanFilter,
     iter::Integer,
     state::GaussianDistribution,
     observation::AbstractVector;
     kwargs...,
 )
-    params = calc_params(model.obs, iter; kwargs...)
+    params = calc_params(obs, iter; kwargs...)
     state, ll = kalman_update(state, params, observation)
     return state, ll
 end
@@ -69,81 +67,6 @@ function kalman_update(state, params, observation)
     ll = logpdf(MvNormal(m, PDMat(S_chol)), observation)
 
     return state, ll
-end
-
-struct BatchKalmanFilter <: AbstractBatchFilter
-    batch_size::Int
-end
-
-function initialise(
-    rng::AbstractRNG,
-    model::LinearGaussianStateSpaceModel,
-    algo::BatchKalmanFilter;
-    kwargs...,
-)
-    μ0s, Σ0s = batch_calc_initial(model.prior, algo.batch_size; kwargs...)
-    return BatchGaussianDistribution(μ0s, Σ0s)
-end
-
-function predict(
-    rng::AbstractRNG,
-    model::LinearGaussianStateSpaceModel,
-    algo::BatchKalmanFilter,
-    iter::Integer,
-    state::BatchGaussianDistribution,
-    observation;
-    kwargs...,
-)
-    μs, Σs = state.μs, state.Σs
-    As, bs, Qs = batch_calc_params(model.dyn, iter, algo.batch_size; kwargs...)
-    μ̂s = NNlib.batched_vec(As, μs) .+ bs
-    Σ̂s = NNlib.batched_mul(NNlib.batched_mul(As, Σs), NNlib.batched_transpose(As)) .+ Qs
-    return BatchGaussianDistribution(μ̂s, Σ̂s)
-end
-
-function update(
-    model::LinearGaussianStateSpaceModel,
-    algo::BatchKalmanFilter,
-    iter::Integer,
-    state::BatchGaussianDistribution,
-    observation;
-    kwargs...,
-)
-    # T = Float32 # temporary fix!!!
-    μs, Σs = state.μs, state.Σs
-    Hs, cs, Rs = batch_calc_params(model.obs, iter, algo.batch_size; kwargs...)
-    D = size(observation, 1)
-
-    m = NNlib.batched_vec(Hs, μs) .+ cs
-    y_res = cu(observation) .- m
-    S = NNlib.batched_mul(Hs, NNlib.batched_mul(Σs, NNlib.batched_transpose(Hs))) .+ Rs
-
-    ΣH_T = NNlib.batched_mul(Σs, NNlib.batched_transpose(Hs))
-
-    S_inv = CUDA.similar(S)
-    d_ipiv, _, d_S = CUDA.CUBLAS.getrf_strided_batched(S, true)
-    CUDA.CUBLAS.getri_strided_batched!(d_S, S_inv, d_ipiv)
-
-    diags = CuArray{eltype(S)}(undef, size(S, 1), size(S, 3))
-    for i in 1:size(S, 1)
-        diags[i, :] .= d_S[i, i, :]
-    end
-
-    log_dets = sum(log ∘ abs, diags; dims=1)
-
-    K = NNlib.batched_mul(ΣH_T, S_inv)
-
-    μ_filt = μs .+ NNlib.batched_vec(K, y_res)
-    Σ_filt = Σs .- NNlib.batched_mul(K, NNlib.batched_mul(Hs, Σs))
-
-    inv_term = NNlib.batched_vec(S_inv, y_res)
-    log_likes = -NNlib.batched_vec(reshape(y_res, 1, D, size(S, 3)), inv_term)
-    log_likes = (log_likes .- (log_dets .+ D * convert(eltype(log_likes), log(2π)))) ./ 2
-
-    # HACK: only errors seems to be from numerical stability so will just overwrite
-    log_likes[isnan.(log_likes)] .= -Inf
-
-    return BatchGaussianDistribution(μ_filt, Σ_filt), dropdims(log_likes; dims=1)
 end
 
 ## KALMAN SMOOTHER #########################################################################

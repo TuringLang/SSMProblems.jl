@@ -135,7 +135,7 @@ sparse_ancestry = GF.AncestorCallback(nothing);
 states, ll = GF.filter(
     rng,
     UCSV(0.2),
-    RBPF(KalmanFilter(), 2^12; threshold=1.0),
+    RBPF(BF(2^12), KalmanFilter()),
     [[pce] for pce in fred_data.value];
     callback=sparse_ancestry,
 );
@@ -238,7 +238,7 @@ sparse_ancestry = GF.AncestorCallback(nothing)
 states, ll = GF.filter(
     rng,
     UCSVO(0.2, 0.05),
-    RBPF(KalmanFilter(), 2^12; threshold=1.0),
+    RBPF(BF(2^12), KalmanFilter()),
     [[pce] for pce in fred_data.value];
     callback=sparse_ancestry,
 );
