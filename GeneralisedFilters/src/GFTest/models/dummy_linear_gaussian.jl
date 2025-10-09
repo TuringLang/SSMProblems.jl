@@ -44,44 +44,6 @@ function GeneralisedFilters.calc_b(dyn::InnerDynamics, ::Integer; prev_outer, kw
 end
 GeneralisedFilters.calc_Q(dyn::InnerDynamics, ::Integer; kwargs...) = dyn.Q
 
-# GPU methods
-function GeneralisedFilters.batch_calc_μ0s(prior::InnerPrior, N; kwargs...)
-    # μ0s = CuArray{T}(undef, length(prior.μ0), N)
-    # return μ0s[:, :] .= cu(prior.μ0)
-    return repeat(cu(prior.μ0), 1, N)
-end
-
-function GeneralisedFilters.batch_calc_Σ0s(prior::InnerPrior, N::Integer; kwargs...)
-    # Σ0s = CuArray{T}(undef, size(dyn.Σ0)..., N)
-    # return Σ0s[:, :, :] .= cu(dyn.Σ0)
-    return repeat(cu(prior.Σ0), 1, N)
-end
-
-function GeneralisedFilters.batch_calc_As(
-    dyn::InnerDynamics, ::Integer, N::Integer; kwargs...
-)
-    # As = CuArray{T}(undef, size(dyn.A)..., N)
-    # As[:, :, :] .= cu(dyn.A)
-    return repeat(cu(dyn.A), 1, N)
-end
-
-function GeneralisedFilters.batch_calc_bs(
-    dyn::InnerDynamics, ::Integer, N::Integer; prev_outer, kwargs...
-)
-    # Cs = CuArray{T}(undef, size(dyn.C)..., N)
-    # Cs[:, :, :] .= cu(dyn.C)
-    Cs = repeat(cu(dyn.C), 1, N)
-    return NNlib.batched_vec(Cs, prev_outer) .+ cu(dyn.b)
-end
-
-function GeneralisedFilters.batch_calc_Qs(
-    dyn::InnerDynamics, ::Integer, N::Integer; kwargs...
-)
-    # Q = CuArray{T}(undef, size(dyn.Q)..., N)
-    # return Q[:, :, :] .= cu(dyn.Q)
-    return repeat(cu(dyn.Q), 1, N)
-end
-
 function create_dummy_linear_gaussian_model(
     rng::AbstractRNG,
     D_outer::Integer,

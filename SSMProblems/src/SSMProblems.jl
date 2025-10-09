@@ -241,7 +241,6 @@ prior(model::StateSpaceModel) = model.prior
 dyn(model::StateSpaceModel) = model.dyn
 obs(model::StateSpaceModel) = model.obs
 
-include("batch_methods.jl")
 include("utils/forward_simulation.jl")
 
 end

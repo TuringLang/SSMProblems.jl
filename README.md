@@ -12,6 +12,11 @@
 A minimalist framework to define state space models (SSMs) and their associated
 log-densities to feed into inference algorithms.
 
+> [!TIP]
+> We are currently refactoring the GPU implementation of our filters to make
+> them both more flexible and performant. Whilst this is ongoing, we have
+> removed the legacy GPU batching interface, but this can still be found
+> pre-v0.3.1 or by viewing the repository at [this state](https://github.com/TuringLang/SSMProblems.jl/tree/b7f53f1cd4ec7aabe48a9d223b34ebfb8db56a49)
 
 ## Talk at [LAFI 2025](https://popl25.sigplan.org/details/lafi-2025/11/State-Space-Model-Programming-in-Turing-jl)
 
