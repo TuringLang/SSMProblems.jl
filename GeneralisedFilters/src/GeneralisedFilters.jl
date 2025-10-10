@@ -22,7 +22,7 @@ include("resamplers.jl")
 ## FILTERING BASE ##########################################################################
 
 abstract type AbstractFilter <: AbstractSampler end
-abstract type AbstractBackwardFilter <: AbstractSampler end
+abstract type AbstractBackwardPredictor <: AbstractSampler end
 
 """
     initialise([rng,] model, algo; kwargs...)

@@ -3,7 +3,7 @@ using CUDA: i32
 import PDMats: PDMat
 
 export KalmanFilter, KF, KalmanSmoother, KS
-export BackwardInformationFilter
+export BackwardInformationPredictor
 export backward_initialise, backward_predict, backward_update
 
 struct KalmanFilter <: AbstractFilter end
@@ -169,14 +169,26 @@ end
 
 ## BACKWARD INFORMATION FILTER #############################################################
 
-# https://arxiv.org/pdf/1505.06357
-# Recursively computes the predictive likelihood p(y_{t:T} | x_t) in information form
-struct BackwardInformationFilter <: AbstractBackwardFilter end
+"""
+    BackwardInformationPredictor
 
+An algorithm to recursively compute the predictive likelihood p(y_{t:T} | x_t) of a linear
+Gaussian state space model in information form.
+
+This implementation is based on https://arxiv.org/pdf/1505.06357
+"""
+struct BackwardInformationPredictor <: AbstractBackwardPredictor end
+
+"""
+    backward_initialise(rng, obs, algo, iter, y; kwargs...)
+
+Initialise a backward predictor at time `T` with observation `y`, forming the likelihood 
+p(y_T | x_T).
+"""
 function backward_initialise(
     rng::AbstractRNG,
     obs::LinearGaussianObservationProcess,
-    filter::BackwardInformationFilter,
+    filter::BackwardInformationPredictor,
     iter::Integer,
     y;
     kwargs...,
@@ -188,10 +200,15 @@ function backward_initialise(
     return InformationDistribution(λ, Ω)
 end
 
+"""
+    backward_predict(rng, dyn, algo, iter, state; prev_outer=nothing, next_outer=nothing, kwargs...)
+
+Perform a backward prediction step to compute p(y_{t+1:T} | x_t) from p(y_{t:T} | x_{t+1}).
+"""
 function backward_predict(
     rng::AbstractRNG,
     dyn::LinearGaussianLatentDynamics,
-    algo::BackwardInformationFilter,
+    algo::BackwardInformationPredictor,
     iter::Integer,
     state::InformationDistribution;
     kwargs...,
@@ -209,9 +226,14 @@ function backward_predict(
     return InformationDistribution(λ̂, Ω̂)
 end
 
+"""
+    backward_update(obs, algo, iter, state, y; kwargs...)
+
+Incorporate an observation `y` at time `t` to compute p(y_{t:T} | x_t) from p(y_{t+1:T} | x_t).
+"""
 function backward_update(
     obs::LinearGaussianObservationProcess,
-    algo::BackwardInformationFilter,
+    algo::BackwardInformationPredictor,
     iter::Integer,
     state::InformationDistribution,
     y;

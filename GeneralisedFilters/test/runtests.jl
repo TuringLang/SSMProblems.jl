@@ -64,7 +64,7 @@ end
         _, _, ys = sample(rng, model, T)
 
         # Perform backward information filtering
-        BIF = BackwardInformationFilter()
+        BIF = BackwardInformationPredictor()
         predictive_likelihood = backward_initialise(rng, model.obs, BIF, T, ys[T])
         predictive_likelihood = backward_predict(
             rng, model.dyn, BIF, T - 1, predictive_likelihood
@@ -732,21 +732,25 @@ end
         ref_traj = getproperty.(ref_traj, :x)
 
         pred_lik = backward_initialise(
-            rng, hier_model.inner_model.obs, BackwardInformationFilter(), K, ys[K]
+            rng, hier_model.inner_model.obs, BackwardInformationPredictor(), K, ys[K]
         )
         predictive_likelihoods[K] = deepcopy(pred_lik)
         for t in (K - 1):-1:1
             pred_lik = backward_predict(
                 rng,
                 hier_model.inner_model.dyn,
-                BackwardInformationFilter(),
+                BackwardInformationPredictor(),
                 t,
                 pred_lik;
                 prev_outer=ref_traj[t],
                 next_outer=ref_traj[t + 1],
             )
             pred_lik = backward_update(
-                hier_model.inner_model.obs, BackwardInformationFilter(), t, pred_lik, ys[t]
+                hier_model.inner_model.obs,
+                BackwardInformationPredictor(),
+                t,
+                pred_lik,
+                ys[t],
             )
             predictive_likelihoods[t] = deepcopy(pred_lik)
         end
