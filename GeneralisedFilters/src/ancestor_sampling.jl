@@ -38,10 +38,24 @@ function ancestor_weight(
         kwargs...,
     )
 
-    # Apply two filter formula to get p(y_{t+1:T} | y_{1:t}, x_{1:t})
-    # Or is it p(y_{t+1:T} | y_{1:t}, x_{1:T})?
-    μ, Σ = mean_cov(pred_dist)
-    λ, Ω = natural_params(back_info)
+    marginal_pred_lik = compute_marginal_predictive_likelihood(pred_dist, back_info)
+    return trans_weight + marginal_pred_lik
+end
+
+"""
+    compute_marginal_predictive_likelihood(forward_dist, backward_dist)
+
+Compute the marginal predictive likelihood p(y_{t:T} | y_{1:t-1}) given a one-step predicted
+filtering distribution p(x_{t+1} | y_{1:t}) and a backward predictive likelihood
+p(y_{t+1:T} | x_{t+1}).
+
+This Gaussian implementation is based on Lemma 1 of https://arxiv.org/pdf/1505.06357
+"""
+function compute_marginal_predictive_likelihood(
+    forward_dist::GaussianDistribution, backward_dist::InformationDistribution
+)
+    μ, Σ = mean_cov(forward_dist)
+    λ, Ω = natural_params(backward_dist)
     Γ = cholesky(Σ).L
 
     # Apply two-filter smoother style formula
@@ -50,5 +64,5 @@ function ancestor_weight(
     M = Γ' * (λ - Ω * μ)
     ζ = μ' * Ω * μ - 2 * λ' * μ - M' * inv(Λ) * M
 
-    return trans_weight + -0.5 * (logdet(Λ) + ζ)
+    return -0.5 * (logdet(Λ) + ζ)
 end
