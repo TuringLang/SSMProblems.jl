@@ -57,7 +57,7 @@ function initialise(model, algo; kwargs...)
 end
 
 function predict(model, algo, step, filtered, observation; kwargs...)
-    return predict(default_rng(), model, algo, step, filtered; kwargs...)
+    return predict(default_rng(), model, algo, step, filtered, observation; kwargs...)
 end
 
 function filter(
@@ -146,6 +146,8 @@ include("algorithms/particles.jl")
 include("algorithms/kalman.jl")
 include("algorithms/forward.jl")
 include("algorithms/rbpf.jl")
+
+include("ancestor_sampling.jl")
 
 # Unit-testing helper module
 include("GFTest/GFTest.jl")
