@@ -3,6 +3,8 @@ using CUDA: i32
 import PDMats: PDMat
 
 export KalmanFilter, KF, KalmanSmoother, KS
+export BackwardInformationFilter
+export backward_initialise, backward_predict, backward_update
 
 struct KalmanFilter <: AbstractFilter end
 
@@ -163,4 +165,64 @@ function backward(
     Σ = Σ_filt .+ G * (Σ .- Σ_pred) * G'
 
     return GaussianDistribution(μ, Σ)
+end
+
+## BACKWARD INFORMATION FILTER #############################################################
+
+# https://arxiv.org/pdf/1505.06357
+# Recursively computes the predictive likelihood p(y_{t:T} | x_t) in information form
+struct BackwardInformationFilter <: AbstractBackwardFilter end
+
+function backward_initialise(
+    rng::AbstractRNG,
+    obs::LinearGaussianObservationProcess,
+    filter::BackwardInformationFilter,
+    iter::Integer,
+    y;
+    kwargs...,
+)
+    H, c, R = calc_params(obs, iter; kwargs...)
+    R_inv = inv(R)
+    λ = H' * R_inv * (y - c)
+    Ω = H' * R_inv * H
+    return InformationDistribution(λ, Ω)
+end
+
+function backward_predict(
+    rng::AbstractRNG,
+    dyn::LinearGaussianLatentDynamics,
+    algo::BackwardInformationFilter,
+    iter::Integer,
+    state::InformationDistribution;
+    kwargs...,
+)
+    λ, Ω = natural_params(state)
+    A, b, Q = calc_params(dyn, iter; kwargs...)
+    F = cholesky(Q).L
+
+    m = λ - Ω * b
+    Λ = F' * Ω * F + I
+
+    Ω̂ = A' * (I - Ω * F * inv(Λ) * F') * Ω * A
+    λ̂ = A' * (I - Ω * F * inv(Λ) * F') * m
+
+    return InformationDistribution(λ̂, Ω̂)
+end
+
+function backward_update(
+    obs::LinearGaussianObservationProcess,
+    algo::BackwardInformationFilter,
+    iter::Integer,
+    state::InformationDistribution,
+    y;
+    kwargs...,
+)
+    λ, Ω = natural_params(state)
+    H, c, R = calc_params(obs, iter; kwargs...)
+    R_inv = inv(R)
+
+    λ̂ = λ + H' * R_inv * (y - c)
+    Ω̂ = Ω + H' * R_inv * H
+
+    return InformationDistribution(λ̂, Ω̂)
 end

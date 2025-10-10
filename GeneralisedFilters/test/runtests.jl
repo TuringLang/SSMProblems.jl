@@ -47,6 +47,61 @@ include("resamplers.jl")
     end
 end
 
+@testitem "Backward information filter test" begin
+    using GeneralisedFilters
+    using Distributions
+    using LinearAlgebra
+    using StableRNGs
+
+    SEED = 1234
+    Dx = 3
+    Dys = [2, 3, 4]
+    T = 4
+
+    for Dy in Dys
+        rng = StableRNG(1234)
+        model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
+        _, _, ys = sample(rng, model, T)
+
+        # Perform backward information filtering
+        BIF = BackwardInformationFilter()
+        predictive_likelihood = backward_initialise(rng, model.obs, BIF, T, ys[T])
+        predictive_likelihood = backward_predict(
+            rng, model.dyn, BIF, T - 1, predictive_likelihood
+        )
+        predictive_likelihood = backward_update(
+            model.obs, BIF, T - 1, predictive_likelihood, ys[T - 1]
+        )
+        predictive_likelihood = backward_predict(
+            rng, model.dyn, BIF, T - 2, predictive_likelihood
+        )
+        predictive_likelihood = backward_update(
+            model.obs, BIF, T - 2, predictive_likelihood, ys[T - 2]
+        )
+
+        # Assuming homogenous
+        A, b, Q = GeneralisedFilters.calc_params(model.dyn, T - 1)
+        H, c, R = GeneralisedFilters.calc_params(model.obs, T;)
+        F = [H; H * A; H * A^2]
+        g = [c; H * b + c; H * (A * b + b) + c]
+
+        #! format: off
+        Σ = [
+            R               zeros(Dy, Dy)    zeros(Dy, Dy);
+            zeros(Dy, Dy)   H * Q * H' + R   H * Q * A' * H';
+            zeros(Dy, Dy)   H * A * Q * H'   H * (A * Q * A' + Q) * H' + R
+        ]
+        #! format: on
+
+        λ_true = F' * inv(Σ) * (vcat(ys[(T - 2):T]...) .- g)
+        Ω_true = F' * inv(Σ) * F
+        λ, Ω = GeneralisedFilters.natural_params(predictive_likelihood)
+
+        @test λ ≈ λ_true
+        @test Ω ≈ Ω_true
+    end
+end
+
 @testitem "Kalman filter StaticArrays" begin
     using GeneralisedFilters
     using SSMProblems

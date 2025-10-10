@@ -12,6 +12,8 @@ using StatsBase
 using CUDA
 using NNlib
 
+export initialise, predict, update
+
 # Filtering utilities
 include("callbacks.jl")
 include("containers.jl")
@@ -20,6 +22,7 @@ include("resamplers.jl")
 ## FILTERING BASE ##########################################################################
 
 abstract type AbstractFilter <: AbstractSampler end
+abstract type AbstractBackwardFilter <: AbstractSampler end
 
 """
     initialise([rng,] model, algo; kwargs...)
