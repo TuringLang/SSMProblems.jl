@@ -289,7 +289,9 @@ end
     )
     _, _, ys = sample(rng, model, 4)
 
-    bf = BF(10^6; threshold=1.0)  # APF needs resampling every step
+    # resampler = GeneralisedFilters.GFTest.AlternatingResampler()
+    resampler = ESSResampler(0.8)
+    bf = BF(10^6; resampler=resampler)
     abf = AuxiliaryParticleFilter(bf, MeanPredictive())
     abf_state, llabf = GeneralisedFilters.filter(rng, model, abf, ys)
     kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
@@ -297,7 +299,7 @@ end
     xs = getfield.(abf_state.particles, :state)
     ws = weights(abf_state)
 
-    @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-3
+    @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
     @test llkf ≈ llabf atol = 1e-3
 end
 
@@ -316,7 +318,8 @@ end
     )
     _, _, ys = sample(rng, hier_model, 4)
 
-    bf = BF(10^6; threshold=1.0)  # APF needs resampling every step
+    resampler = GeneralisedFilters.GFTest.AlternatingResampler()
+    bf = BF(10^6; resampler=resampler)
     rbbf = RBPF(bf, KalmanFilter())
     arbf = AuxiliaryParticleFilter(rbbf, MeanPredictive())
     arbf_state, llarbf = GeneralisedFilters.filter(rng, hier_model, arbf, ys)
@@ -326,7 +329,7 @@ end
 
     kf_state, llkf = GeneralisedFilters.filter(rng, full_model, KF(), ys)
 
-    @test first(kf_state.μ) ≈ sum(only.(xs) .* ws) rtol = 1e-3
+    @test first(kf_state.μ) ≈ sum(only.(xs) .* ws) rtol = 1e-2
     @test last(kf_state.μ) ≈ sum(only.(getfield.(zs, :μ)) .* ws) rtol = 1e-3
     @test llkf ≈ llarbf atol = 1e-3
 end

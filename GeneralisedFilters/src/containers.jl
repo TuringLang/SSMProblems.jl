@@ -37,10 +37,16 @@ const RBParticle{XT,ZT,WT} = Particle{RBState{XT,ZT},WT}
 
 A container for particle filters which composes a collection of weighted particles (with
 their ancestories) into a distibution-like object.
+
+# Fields
+- `particles::VT`: Vector of weighted particles
+- `ll_baseline::WT`: Baseline for computing log-likelihood increment. A scalar that caches
+  the unnormalized logsumexp of weights before update (for standard PF/guided filters)
+  or a modified value that includes APF first-stage correction (for auxiliary PF).
 """
 mutable struct ParticleDistribution{WT,PT<:Particle{<:Any,WT},VT<:AbstractVector{PT}}
     particles::VT
-    prev_logsumexp::WT
+    ll_baseline::WT
 end
 
 # Helper functions to make ParticleDistribution behave like a collection
@@ -61,14 +67,32 @@ end
 """
     marginalise!(state::ParticleDistribution)
 
-Compute the current log marginal likelihood and store for the next iteration. In the
-process, return the increment in log marginal likelihood. Note that `state.prev_logsumexp`
-also gets reset when resampling occurs.
+Compute the log-likelihood increment and normalize particle weights. This function:
+1. Computes LSE of current (post-observation) log-weights
+2. Calculates ll_increment = LSE_after - ll_baseline
+3. Normalizes weights by subtracting LSE_after
+4. Resets ll_baseline to 0.0
+
+The ll_baseline field handles both standard particle filter and auxiliary particle filter
+cases through a single-scalar caching mechanism. For standard PF, ll_baseline equals the
+LSE before adding observation weights. For APF with resampling, it includes first-stage
+correction terms computed during the APF resampling step.
 """
 function marginalise!(state::ParticleDistribution)
-    log_marginalisation = logsumexp(map(p -> p.log_w, state.particles))
-    ll_increment = (log_marginalisation - state.prev_logsumexp)
-    state.prev_logsumexp = log_marginalisation
+    # Compute logsumexp after adding observation likelihoods
+    LSE_after = logsumexp(map(p -> p.log_w, state.particles))
+
+    # Compute log-likelihood increment: works for both PF and APF cases
+    ll_increment = LSE_after - state.ll_baseline
+
+    # Normalize weights
+    for p in state.particles
+        p.log_w -= LSE_after
+    end
+
+    # Reset baseline for next iteration
+    state.ll_baseline = 0.0
+
     return ll_increment
 end
 
