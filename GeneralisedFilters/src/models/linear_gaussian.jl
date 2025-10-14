@@ -3,6 +3,9 @@ export LinearGaussianLatentDynamics
 export LinearGaussianObservationProcess
 export LinearGaussianStateSpaceModel
 export create_homogeneous_linear_gaussian_model
+export HomogeneousGaussianPrior
+export HomogeneousLinearGaussianLatentDynamics
+export HomogeneousLinearGaussianObservationProcess
 
 import SSMProblems: distribution
 import Distributions: MvNormal
@@ -36,7 +39,7 @@ function calc_c end
 function calc_R end
 function calc_params(obs::LinearGaussianObservationProcess, step::Integer; kwargs...)
     return (
-        GeneralisedFilters.calc_H(obs, step; kwargs...),
+        calc_H(obs, step; kwargs...),
         calc_c(obs, step; kwargs...),
         calc_R(obs, step; kwargs...),
     )

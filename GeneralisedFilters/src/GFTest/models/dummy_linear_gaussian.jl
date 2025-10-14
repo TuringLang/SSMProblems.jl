@@ -79,11 +79,9 @@ function create_dummy_linear_gaussian_model(
     full_model = create_homogeneous_linear_gaussian_model(μ0, Σ0s, A, b, Q, H, c, R)
 
     # Create hierarchical model
-    outer_prior = GeneralisedFilters.HomogeneousGaussianPrior(
-        μ0[1:D_outer], Σ0s[1:D_outer, 1:D_outer]
-    )
+    outer_prior = HomogeneousGaussianPrior(μ0[1:D_outer], Σ0s[1:D_outer, 1:D_outer])
 
-    outer_dyn = GeneralisedFilters.HomogeneousLinearGaussianLatentDynamics(
+    outer_dyn = HomogeneousLinearGaussianLatentDynamics(
         A[1:D_outer, 1:D_outer], b[1:D_outer], Q[1:D_outer, 1:D_outer]
     )
 
@@ -110,9 +108,7 @@ function create_dummy_linear_gaussian_model(
         prior, dyn
     end
 
-    obs = GeneralisedFilters.HomogeneousLinearGaussianObservationProcess(
-        H[:, (D_outer + 1):end], c, R
-    )
+    obs = HomogeneousLinearGaussianObservationProcess(H[:, (D_outer + 1):end], c, R)
     hier_model = HierarchicalSSM(outer_prior, outer_dyn, inner_prior, inner_dyn, obs)
 
     return full_model, hier_model
