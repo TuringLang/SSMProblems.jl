@@ -33,17 +33,21 @@ as the following:
 
 ```julia
 # Wrapper for model dynamics and observation process
+abstract type StatePrior end
 abstract type LatentDynamics end
 abstract type ObservationDynamics end
 
-# Define the initialisation/transition distribution for the latent dynamics
+# Define the initial distribution for the latent states
+function distribution(prior::StatePrior, ...) end
+
+# Define the transition distribution for the latent dynamics
 function distribution(dyn::LatentDynamics, ...) end
 
 # Define the observation distribution
 function distribution(obs::ObservationProcess, ...) end
 
 # Combine the latent dynamics and observation process to form a SSM
-model = StateSpaceModel(dyn, obs)
+model = StateSpaceModel(prior, dyn, obs)
 ```
 
 For specific details on the interface, please refer to the package [documentation](https://turinglang.github.io/SSMProblems.jl/dev).
@@ -62,19 +66,24 @@ using SSMProblems, Distributions
 # Model parameters
 sig_u, sig_v  = 0.1, 0.2
 
-struct LinearGaussianLatentDynamics <: LatentDynamics end
+struct LinearGaussianStatePrior <: StatePrior end
 
-# Initialisation distribution
-function distribution(dyn::LinearGaussianLatentDynamics, extra::Nothing)
-    return Normal(0.0, sig_u)
+# Initial distribution
+function distribution(
+    prior::LinearGaussianStatePrior;
+    kwargs...
+)
+    return Normal(0.0, 1.0)
 end
+
+struct LinearGaussianLatentDynamics <: LatentDynamics end
 
 # Transition distribution
 function distribution(
     dyn::LinearGaussianLatentDynamics,
     step::Int,
-    state::Float64,
-    extra::Nothing
+    state::Float64;
+    kwargs...
 )
     return Normal(state, sig_u)
 end
@@ -85,8 +94,8 @@ struct LinearGaussianObservationProcess <: ObservationProcess end
 function distribution(
     obs::LinearGaussianObservationProcess,
     step::Int,
-    state::Float64,
-    extra::Nothing
+    state::Float64;
+    kwargs...
 )
     return Normal(state, sig_v)
 end
