@@ -106,3 +106,26 @@ end
 function mean_cov(state::GaussianDistribution)
     return state.μ, state.Σ
 end
+
+struct InformationDistribution{λT,ΩT}
+    λ::λT
+    Ω::ΩT
+end
+
+function natural_params(state::InformationDistribution)
+    return state.λ, state.Ω
+end
+
+# Conversions — explicit since these may fail if the covariance/precision is not invertible
+function GaussianDistribution(state::InformationDistribution)
+    λ, Ω = natural_params(state)
+    Σ = inv(Ω)
+    μ = Σ * λ
+    return GaussianDistribution(μ, Σ)
+end
+function InformationDistribution(state::GaussianDistribution)
+    μ, Σ = mean_cov(state)
+    Ω = inv(Σ)
+    λ = Ω * μ
+    return InformationDistribution(λ, Ω)
+end

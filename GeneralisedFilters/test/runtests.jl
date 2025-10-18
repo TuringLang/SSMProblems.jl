@@ -47,6 +47,61 @@ include("resamplers.jl")
     end
 end
 
+@testitem "Backward information filter test" begin
+    using GeneralisedFilters
+    using Distributions
+    using LinearAlgebra
+    using StableRNGs
+
+    SEED = 1234
+    Dx = 3
+    Dys = [2, 3, 4]
+    T = 4
+
+    for Dy in Dys
+        rng = StableRNG(1234)
+        model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
+        _, _, ys = sample(rng, model, T)
+
+        # Perform backward information filtering
+        BIF = BackwardInformationPredictor()
+        predictive_likelihood = backward_initialise(rng, model.obs, BIF, T, ys[T])
+        predictive_likelihood = backward_predict(
+            rng, model.dyn, BIF, T - 1, predictive_likelihood
+        )
+        predictive_likelihood = backward_update(
+            model.obs, BIF, T - 1, predictive_likelihood, ys[T - 1]
+        )
+        predictive_likelihood = backward_predict(
+            rng, model.dyn, BIF, T - 2, predictive_likelihood
+        )
+        predictive_likelihood = backward_update(
+            model.obs, BIF, T - 2, predictive_likelihood, ys[T - 2]
+        )
+
+        # Assuming homogenous
+        A, b, Q = GeneralisedFilters.calc_params(model.dyn, T - 1)
+        H, c, R = GeneralisedFilters.calc_params(model.obs, T;)
+        F = [H; H * A; H * A^2]
+        g = [c; H * b + c; H * (A * b + b) + c]
+
+        #! format: off
+        Σ = [
+            R               zeros(Dy, Dy)    zeros(Dy, Dy);
+            zeros(Dy, Dy)   H * Q * H' + R   H * Q * A' * H';
+            zeros(Dy, Dy)   H * A * Q * H'   H * (A * Q * A' + Q) * H' + R
+        ]
+        #! format: on
+
+        λ_true = F' * inv(Σ) * (vcat(ys[(T - 2):T]...) .- g)
+        Ω_true = F' * inv(Σ) * F
+        λ, Ω = GeneralisedFilters.natural_params(predictive_likelihood)
+
+        @test λ ≈ λ_true
+        @test Ω ≈ Ω_true
+    end
+end
+
 @testitem "Kalman filter StaticArrays" begin
     using GeneralisedFilters
     using SSMProblems
@@ -453,7 +508,7 @@ end
     K = 10
     t_smooth = 2
     T = Float64
-    N_particles = 10
+    N_particles = 10  # Use small particle number so impact of ref state is significant
     N_burnin = 1000
     N_sample = 100000
 
@@ -514,9 +569,9 @@ end
     K = 5
     t_smooth = 2
     T = Float64
-    N_particles = 100
-    N_burnin = 200
-    N_sample = 2000
+    N_particles = 10  # Use small particle number so impact of ref state is significant
+    N_burnin = 1000
+    N_sample = 10000
 
     rng = StableRNG(SEED)
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
@@ -548,6 +603,160 @@ end
         end
         # Reference trajectory should only be nonlinear state for RBPF
         ref_traj = getproperty.(ref_traj, :x)
+    end
+
+    # Extract inner and outer trajectories
+    x_trajectories = getproperty.(getindex.(trajectory_samples, t_smooth), :x)
+
+    # Manually perform smoothing until we have a cleaner interface
+    A = hier_model.inner_model.dyn.A
+    b = hier_model.inner_model.dyn.b
+    C = hier_model.inner_model.dyn.C
+    Q = hier_model.inner_model.dyn.Q
+    z_smoothed_means = Vector{T}(undef, N_sample)
+    for i in 1:N_sample
+        μ = trajectory_samples[i][K].z.μ
+        Σ = trajectory_samples[i][K].z.Σ
+
+        for t in (K - 1):-1:t_smooth
+            μ_filt = trajectory_samples[i][t].z.μ
+            Σ_filt = trajectory_samples[i][t].z.Σ
+            μ_pred = A * μ_filt + b + C * trajectory_samples[i][t].x
+            Σ_pred = A * Σ_filt * A' + Q
+
+            G = Σ_filt * A' * inv(Σ_pred)
+            μ = μ_filt .+ G * (μ .- μ_pred)
+            Σ = Σ_filt .+ G * (Σ .- Σ_pred) * G'
+        end
+
+        z_smoothed_means[i] = only(μ)
+    end
+
+    # Compare to ground truth
+    @test state.μ[1] ≈ only(mean(x_trajectories)) rtol = 1e-2
+    @test state.μ[2] ≈ mean(z_smoothed_means) rtol = 1e-3
+end
+
+@testitem "RBCSMC-AS test" begin
+    using GeneralisedFilters
+    using StableRNGs
+    using PDMats
+    using LinearAlgebra
+    using Random: randexp
+    using StatsBase: sample, weights
+    using StaticArrays
+    using Statistics
+    using LogExpFunctions
+
+    import SSMProblems: prior, dyn, obs
+    import GeneralisedFilters: resampler, resample, move, RBState, InformationDistribution
+
+    using OffsetArrays
+
+    SEED = 1234
+    D_outer = 1
+    D_inner = 1
+    D_obs = 1
+    K = 5
+    t_smooth = 2
+    T = Float64
+    N_particles = 10
+    N_burnin = 200
+    N_sample = 10000
+
+    rng = StableRNG(SEED)
+    full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
+        rng, D_outer, D_inner, D_obs, T; static_arrays=false
+    )
+    _, _, ys = sample(rng, full_model, K)
+
+    # Kalman smoother
+    state, _ = GeneralisedFilters.smooth(
+        rng, full_model, KalmanSmoother(), ys; t_smooth=t_smooth
+    )
+
+    N_steps = N_burnin + N_sample
+    rbpf = RBPF(BF(N_particles; threshold=0.8), KalmanFilter())
+    ref_traj = nothing
+    predictive_likelihoods = Vector{InformationDistribution{Vector{T},Matrix{T}}}(undef, K)
+    trajectory_samples = []
+
+    for i in 1:N_steps
+        global predictive_likelihoods
+        cb = GeneralisedFilters.DenseAncestorCallback(nothing)
+
+        # Manual filtering with ancestor resampling
+        bf_state = initialise(rng, prior(hier_model), rbpf; ref_state=ref_traj)
+
+        # Post-Init callback
+        cb(hier_model, rbpf, bf_state, ys, PostInit)
+
+        for t in 1:K
+            bf_state = resample(rng, resampler(rbpf), bf_state; ref_state=ref_traj)
+
+            if !isnothing(ref_traj)
+                ancestor_weights = Vector{Float64}(undef, N_particles)
+                for j in 1:N_particles
+                    ancestor_weights[j] =
+                        bf_state.particles[j].log_w + ancestor_weight(
+                            dyn(hier_model),
+                            rbpf,
+                            t,
+                            bf_state.particles[j].state,
+                            RBState(ref_traj[t], predictive_likelihoods[t]),
+                        )
+                end
+                ancestor_idx = sample(
+                    rng, 1:N_particles, weights(softmax(ancestor_weights))
+                )
+            end
+
+            bf_state, ll = move(
+                rng, hier_model, rbpf, t, bf_state, ys[t]; ref_state=ref_traj
+            )
+
+            # Set ancestor index
+            if !isnothing(ref_traj)
+                bf_state.particles[end].ancestor = ancestor_idx
+            end
+
+            # Manually trigger callback
+            cb(hier_model, rbpf, t, bf_state, ys[t], PostUpdate)
+        end
+
+        ws = weights(bf_state)
+        sampled_idx = sample(rng, 1:N_particles, ws)
+
+        global ref_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
+        if i > N_burnin
+            push!(trajectory_samples, deepcopy(ref_traj))
+        end
+        # Reference trajectory should only be nonlinear state for RBPF
+        ref_traj = getproperty.(ref_traj, :x)
+
+        pred_lik = backward_initialise(
+            rng, hier_model.inner_model.obs, BackwardInformationPredictor(), K, ys[K]
+        )
+        predictive_likelihoods[K] = deepcopy(pred_lik)
+        for t in (K - 1):-1:1
+            pred_lik = backward_predict(
+                rng,
+                hier_model.inner_model.dyn,
+                BackwardInformationPredictor(),
+                t,
+                pred_lik;
+                prev_outer=ref_traj[t],
+                next_outer=ref_traj[t + 1],
+            )
+            pred_lik = backward_update(
+                hier_model.inner_model.obs,
+                BackwardInformationPredictor(),
+                t,
+                pred_lik,
+                ys[t],
+            )
+            predictive_likelihoods[t] = deepcopy(pred_lik)
+        end
     end
 
     # Extract inner and outer trajectories
