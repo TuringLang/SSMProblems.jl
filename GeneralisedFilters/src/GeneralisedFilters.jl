@@ -12,7 +12,7 @@ using StatsBase
 using CUDA
 using NNlib
 
-export initialise, predict, update
+export initialise, step, predict, update, filter
 
 # Filtering utilities
 include("callbacks.jl")

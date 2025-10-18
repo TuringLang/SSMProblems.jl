@@ -4,8 +4,43 @@ using Distributions
 using AcceleratedKernels: searchsortedfirst
 
 export Multinomial, Systematic, Stratified, Metropolis, Rejection
+export ESSResampler
 
 abstract type AbstractResampler end
+
+"""
+    will_resample(resampler::AbstractResampler, state::ParticleDistribution)
+
+Determine whether a resampler will trigger resampling given the current particle state.
+For uncondition resamplers, always returns `true`. For conditional resamplers (e.g.,
+`ESSResampler`), checks the resampling condition.
+"""
+function will_resample(::AbstractResampler, state)
+    # Default: unconditional resamplers always resample
+    return true
+end
+
+"""
+    maybe_resample(
+        rng::AbstractRNG,
+        resampler::AbstractResampler,
+        state::ParticleDistribution;
+        ref_state::Union{Nothing,AbstractVector}=nothing,
+    ) -> ParticleDistribution
+
+Perform resampling if the resampler's condition is met (for conditional resamplers),
+otherwise return the input state unchanged (but with ancestors set to self).
+"""
+
+function maybe_resample(
+    rng::AbstractRNG,
+    resampler::AbstractResampler,
+    state;
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+)
+    # Default: unconditional resamplers always resample
+    return resample(rng, resampler, state; ref_state)
+end
 
 function resample(
     rng::AbstractRNG,
@@ -27,7 +62,8 @@ function construct_new_state(state, idxs)
     for i in 1:length(state.particles)
         new_particles[i] = resample_ancestor(state.particles[idxs[i]], idxs[i])
     end
-    return ParticleDistribution(new_particles, log(length(state.particles)))
+    # After resampling, weights are equal, so ll_baseline = 0.0
+    return ParticleDistribution(new_particles, 0.0)
 end
 
 # TODO (RB): this can probably be cleaned up if we allow mutation (I'm just playing it safe
@@ -40,6 +76,25 @@ end
 
 abstract type AbstractConditionalResampler <: AbstractResampler end
 
+function maybe_resample(
+    rng::AbstractRNG,
+    cond_resampler::AbstractConditionalResampler,
+    state;
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+)
+    if will_resample(cond_resampler, state)
+        return resample(rng, cond_resampler, state; ref_state)
+    else
+        # Not resampling: preserve ll_baseline and set ancestors to self
+        n = length(state.particles)
+        new_particles = similar(state.particles)
+        for i in 1:n
+            new_particles[i] = set_ancestor(state.particles[i], i)
+        end
+        return ParticleDistribution(new_particles, state.ll_baseline)
+    end
+end
+
 struct ESSResampler <: AbstractConditionalResampler
     threshold::Float64
     resampler::AbstractResampler
@@ -48,25 +103,20 @@ struct ESSResampler <: AbstractConditionalResampler
     end
 end
 
+function will_resample(cond_resampler::ESSResampler, state)
+    n = length(state.particles)
+    weights = softmax(map(p -> p.log_w, state.particles))
+    ess = inv(sum(abs2, weights))
+    return cond_resampler.threshold * n ≥ ess
+end
+
 function resample(
     rng::AbstractRNG,
     cond_resampler::ESSResampler,
     state;
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
-    n = length(state.particles)
-    weights = softmax(map(p -> p.log_w, state.particles))
-    ess = inv(sum(abs2, weights))
-
-    if cond_resampler.threshold * n ≥ ess
-        return resample(rng, cond_resampler.resampler, state; ref_state)
-    else
-        new_particles = similar(state.particles)
-        for i in 1:n
-            new_particles[i] = set_ancestor(state.particles[i], i)
-        end
-        return ParticleDistribution(new_particles, state.prev_logsumexp)
-    end
+    return resample(rng, cond_resampler.resampler, state; ref_state)
 end
 
 # TODO (RB): this can probably be cleaned up if we allow mutation (I'm just playing it safe

@@ -44,9 +44,14 @@ function initialise(
         initialise_particle(rng, prior, algo, ref; kwargs...)
     end
 
-    # TODO: need to check this is correct in the GF case
-    prev_logsumexp = logsumexp(map(p -> p.log_w, particles))
-    return ParticleDistribution(particles, prev_logsumexp)
+    # Set equal weights: log_w = -log(N) so weights sum to 1
+    log_weight = -log(N)
+    for p in particles
+        p.log_w = log_weight
+    end
+
+    # Initialize with ll_baseline = 0.0
+    return ParticleDistribution(particles, 0.0)
 end
 
 function predict(
@@ -65,6 +70,13 @@ function predict(
         predict_particle(rng, dyn, algo, iter, particle, observation, ref; kwargs...)
     end
     state.particles = particles
+
+    # Accumulate the baseline with LSE of weights after prediction (before update)
+    # For plain PF/guided: ll_baseline is 0.0 on entry, becomes LSE_before
+    # For APF with resample: ll_baseline already stores negative correction; add LSE_before
+    LSE_before = logsumexp(map(p -> p.log_w, state.particles))
+    state.ll_baseline += LSE_before
+
     return state
 end
 
@@ -153,7 +165,7 @@ function step(
     kwargs...,
 )
     rs = resampler(algo)
-    state = resample(rng, rs, state; ref_state)
+    state = maybe_resample(rng, rs, state; ref_state)
     callback(model, algo, iter, state, observation, PostResample; kwargs...)
     return move(rng, model, algo, iter, state, observation; ref_state, callback, kwargs...)
 end
@@ -294,29 +306,47 @@ function step(
     callback::CallbackType=nothing,
     kwargs...,
 )
-    # Incorporate lookahead weights to form first-stage weights
+    # Compute lookahead weights approximating log p(y_{t+1} | x_{t}^(i))
     log_ξs = map(state.particles) do particle
         p_star = predictive_state(rng, dyn(model), algo, iter, particle; kwargs...)
         predictive_loglik(obs(model), algo.pf, iter, p_star, observation; kwargs...)
     end
-    # Normalise
-    log_ξs .-= logsumexp(log_ξs)
+
+    # Log normalizer for current weights
+    LSE_w = logsumexp(map(p -> p.log_w, state.particles))
+
+    # Incorporate lookahead weights into current weights
     for (i, particle) in enumerate(state.particles)
         particle.log_w += log_ξs[i]
     end
 
-    # Resample as usual
-    state = resample(rng, resampler(algo), state; ref_state)
+    # Compute lookahead evidence
+    LSE_lookahead = logsumexp(map(p -> p.log_w, state.particles)) - LSE_w
 
-    # Compensate for lookahead weights in the final weights
-    for particle in state.particles
-        particle.log_w += -log_ξs[particle.ancestor]
+    resample_flag = will_resample(resampler(algo), state)
+    if resample_flag
+        state = resample(rng, resampler(algo), state; ref_state)
+    else
+        # Not resampling: preserve ll_baseline and set ancestors to self
+        n = length(state.particles)
+        new_particles = similar(state.particles)
+        for i in 1:n
+            new_particles[i] = set_ancestor(state.particles[i], i)
+        end
+        state = ParticleDistribution(new_particles, state.ll_baseline)
     end
 
-    # Bit ugly looking. Maybe we should store the prev logsumexp with -log(N)
-    state.prev_logsumexp = 2 * log(num_particles(algo))
+    # Compensate for lookahead weights
+    for particle in state.particles
+        particle.log_w -= log_ξs[particle.ancestor]
+    end
 
-    # Dispatch to wrapped filter for predict and update
+    # Compute compensation log normalizer
+    if resample_flag
+        LSE_comp = logsumexp(map(p -> p.log_w, state.particles))
+        state.ll_baseline = -(LSE_lookahead + (LSE_comp - log(num_particles(algo))))
+    end
+
     callback(model, algo, iter, state, observation, PostResample; kwargs...)
     return move(
         rng, model, algo.pf, iter, state, observation; ref_state, callback, kwargs...

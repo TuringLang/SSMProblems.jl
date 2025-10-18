@@ -18,26 +18,16 @@ mutable struct AlternatingResampler <: GeneralisedFilters.AbstractConditionalRes
     end
 end
 
+function GeneralisedFilters.will_resample(alt_resampler::AlternatingResampler, state)
+    return alt_resampler.resample_next
+end
+
 function GeneralisedFilters.resample(
     rng::AbstractRNG,
     alt_resampler::AlternatingResampler,
     state;
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
-    n = length(state.particles)
-
-    if alt_resampler.resample_next
-        # Resample using wrapped resampler
-        alt_resampler.resample_next = false
-        return GeneralisedFilters.resample(rng, alt_resampler.resampler, state; ref_state)
-    else
-        # Skip resampling - keep particles with their current weights and set ancestors to
-        # themselves
-        alt_resampler.resample_next = true
-        new_particles = similar(state.particles)
-        for i in 1:n
-            new_particles[i] = GeneralisedFilters.set_ancestor(state.particles[i], i)
-        end
-        return GeneralisedFilters.ParticleDistribution(new_particles, state.prev_logsumexp)
-    end
+    alt_resampler.resample_next = !alt_resampler.resample_next
+    return GeneralisedFilters.resample(rng, alt_resampler.resampler, state; ref_state)
 end
