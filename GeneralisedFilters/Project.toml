@@ -1,7 +1,12 @@
 name = "GeneralisedFilters"
 uuid = "3ef92589-7ab8-43f9-b5b9-a3a0c86ecbb7"
-authors = ["THargreaves <th542@cam.ac.uk>"]
 version = "0.3.1"
+authors = [
+    "THargreaves <tim.hargreaves@icloud.com>", 
+    "Charles Knipp <charlesknipp98@gmail.com>",
+    "FredericWantiez <frederic.wantiez@gmail.com>",
+    "Hong Ge <hg344@cam.ac.uk>"
+]
 
 [deps]
 AbstractMCMC = "80f14c24-f653-4e6a-9b94-39d6b0f70001"
