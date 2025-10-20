@@ -49,11 +49,6 @@ const LinearGaussianStateSpaceModel = StateSpaceModel{
     <:GaussianPrior,<:LinearGaussianLatentDynamics,<:LinearGaussianObservationProcess
 }
 
-function rb_eltype(model::LinearGaussianStateSpaceModel)
-    μ0, Σ0 = calc_initial(model.prior)
-    return Gaussian{typeof(μ0),typeof(Σ0)}
-end
-
 #######################
 #### DISTRIBUTIONS ####
 #######################
