@@ -11,6 +11,7 @@ import Distributions: logpdf
 export StatePrior, LatentDynamics, ObservationProcess
 export AbstractStateSpaceModel, StateSpaceModel
 export prior, dyn, obs
+export simulate_from_dist
 
 """
 Initial state prior of a state space model.
@@ -108,6 +109,19 @@ function distribution(obs::ObservationProcess, step::Integer, state; kwargs...)
 end
 
 """
+    simulate_from_dist(rng::AbstractRNG, dist)
+
+Sample from a distribution object. This is a fallback method that can be overridden for
+custom distributions or to provide optimized sampling for specific types.
+
+The default implementation simply calls `rand(rng, dist)`. A common use case is to provide
+specialized sampling that returns static arrays instead of regular vectors.
+"""
+function simulate_from_dist(rng::AbstractRNG, dist)
+    return rand(rng, dist)
+end
+
+"""
     simulate([rng::AbstractRNG], prior::StatePrior; kwargs...)
 
 Simulate an initial state for the latent dynamics.
@@ -121,7 +135,7 @@ corresponding `distribution()` method.
 See also [`StatePrior`](@ref).
 """
 function simulate(rng::AbstractRNG, prior::StatePrior; kwargs...)
-    return rand(rng, distribution(prior; kwargs...))
+    return simulate_from_dist(rng, distribution(prior; kwargs...))
 end
 simulate(prior::StatePrior; kwargs...) = simulate(default_rng(), prior; kwargs...)
 
@@ -141,7 +155,7 @@ See also [`LatentDynamics`](@ref).
 function simulate(
     rng::AbstractRNG, dyn::LatentDynamics, step::Integer, prev_state; kwargs...
 )
-    return rand(rng, distribution(dyn, step, prev_state; kwargs...))
+    return simulate_from_dist(rng, distribution(dyn, step, prev_state; kwargs...))
 end
 function simulate(dynamics::LatentDynamics, prev_state, step; kwargs...)
     return simulate(default_rng(), dynamics, prev_state, step; kwargs...)
@@ -163,7 +177,7 @@ See also [`ObservationProcess`](@ref).
 function simulate(
     rng::AbstractRNG, obs::ObservationProcess, step::Integer, state; kwargs...
 )
-    return rand(rng, distribution(obs, step, state; kwargs...))
+    return simulate_from_dist(rng, distribution(obs, step, state; kwargs...))
 end
 function simulate(obs::ObservationProcess, step::Integer, state; kwargs...)
     return simulate(default_rng(), obs, step, state; kwargs...)

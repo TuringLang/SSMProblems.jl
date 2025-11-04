@@ -56,7 +56,7 @@ function create_dummy_linear_gaussian_model(
 )
     # Generate model matrices/vectors
     μ0 = rand(rng, T, D_outer + D_inner)
-    Σ0s = [
+    Σ0 = [
         rand_cov(rng, T, D_outer) zeros(T, D_outer, D_inner)
         zeros(T, D_inner, D_outer) rand_cov(rng, T, D_inner)
     ]
@@ -76,39 +76,63 @@ function create_dummy_linear_gaussian_model(
     R = rand_cov(rng, T, Dy; scale=obs_noise_scale)
 
     # Create full model
-    full_model = create_homogeneous_linear_gaussian_model(μ0, Σ0s, A, b, Q, H, c, R)
-
-    # Create hierarchical model
-    outer_prior = HomogeneousGaussianPrior(μ0[1:D_outer], Σ0s[1:D_outer, 1:D_outer])
-
-    outer_dyn = HomogeneousLinearGaussianLatentDynamics(
-        A[1:D_outer, 1:D_outer], b[1:D_outer], Q[1:D_outer, 1:D_outer]
+    full_model = create_homogeneous_linear_gaussian_model(
+        μ0, PDMat(Σ0), A, b, PDMat(Q), H, c, PDMat(R)
     )
+
+    outer_prior, outer_dyn = if static_arrays
+        prior = HomogeneousGaussianPrior(
+            SVector{D_outer,T}(μ0[1:D_outer]),
+            PDMat(SMatrix{D_outer,D_outer,T}(Σ0[1:D_outer, 1:D_outer])),
+        )
+        dyn = HomogeneousLinearGaussianLatentDynamics(
+            SMatrix{D_outer,D_outer,T}(A[1:D_outer, 1:D_outer]),
+            SVector{D_outer,T}(b[1:D_outer]),
+            PDMat(SMatrix{D_outer,D_outer,T}(Q[1:D_outer, 1:D_outer])),
+        )
+        prior, dyn
+    else
+        prior = HomogeneousGaussianPrior(μ0[1:D_outer], PDMat(Σ0[1:D_outer, 1:D_outer]))
+        dyn = HomogeneousLinearGaussianLatentDynamics(
+            A[1:D_outer, 1:D_outer], b[1:D_outer], PDMat(Q[1:D_outer, 1:D_outer])
+        )
+        prior, dyn
+    end
 
     inner_prior, inner_dyn = if static_arrays
         prior = InnerPrior(
             SVector{D_inner,T}(μ0[(D_outer + 1):end]),
-            SMatrix{D_inner,D_inner,T}(Σ0s[(D_outer + 1):end, (D_outer + 1):end]),
+            PDMat(SMatrix{D_inner,D_inner,T}(Σ0[(D_outer + 1):end, (D_outer + 1):end])),
         )
         dyn = InnerDynamics(
             SMatrix{D_inner,D_outer,T}(A[(D_outer + 1):end, (D_outer + 1):end]),
             SVector{D_inner,T}(b[(D_outer + 1):end]),
             SMatrix{D_inner,D_outer,T}(A[(D_outer + 1):end, 1:D_outer]),
-            SMatrix{D_inner,D_inner,T}(Q[(D_outer + 1):end, (D_outer + 1):end]),
+            PDMat(SMatrix{D_inner,D_inner,T}(Q[(D_outer + 1):end, (D_outer + 1):end])),
         )
         prior, dyn
     else
-        prior = InnerPrior(μ0[(D_outer + 1):end], Σ0s[(D_outer + 1):end, (D_outer + 1):end])
+        prior = InnerPrior(
+            μ0[(D_outer + 1):end], PDMat(Σ0[(D_outer + 1):end, (D_outer + 1):end])
+        )
         dyn = InnerDynamics(
             A[(D_outer + 1):end, (D_outer + 1):end],
             b[(D_outer + 1):end],
             A[(D_outer + 1):end, 1:D_outer],
-            Q[(D_outer + 1):end, (D_outer + 1):end],
+            PDMat(Q[(D_outer + 1):end, (D_outer + 1):end]),
         )
         prior, dyn
     end
 
-    obs = HomogeneousLinearGaussianObservationProcess(H[:, (D_outer + 1):end], c, R)
+    obs = if static_arrays
+        HomogeneousLinearGaussianObservationProcess(
+            SMatrix{Dy,D_inner,T}(H[:, (D_outer + 1):end]),
+            SVector{Dy,T}(c),
+            PDMat(SMatrix{Dy,Dy,T}(R)),
+        )
+    else
+        HomogeneousLinearGaussianObservationProcess(H[:, (D_outer + 1):end], c, PDMat(R))
+    end
     hier_model = HierarchicalSSM(outer_prior, outer_dyn, inner_prior, inner_dyn, obs)
 
     return full_model, hier_model
