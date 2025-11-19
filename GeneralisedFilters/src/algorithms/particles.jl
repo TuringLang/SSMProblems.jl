@@ -303,39 +303,18 @@ function step(
         predictive_loglik(obs(model), algo.pf, iter, p_star, observation; kwargs...)
     end
 
-    # Log normalizer for current weights
-    LSE_w = logsumexp(log_weights(state))
+    aux_weights = log_weights(state) + log_ξs
+    LSE_lookahead = logsumexp(aux_weights) - logsumexp(log_weights(state))
 
-    # Incorporate lookahead weights into current weights
-    for (i, particle) in enumerate(state.particles)
-        particle.log_w += log_ξs[i]
-    end
-
-    # Compute lookahead evidence
-    LSE_lookahead = logsumexp(map(p -> p.log_w, state.particles)) - LSE_w
-
-    resample_flag = will_resample(resampler(algo), state)
-    if resample_flag
-        state = resample(rng, resampler(algo), state; ref_state)
+    # TODO: make an auxiliary resampler which includes log_ξs and resamples with non-zero weights
+    if will_resample(resampler(algo), state, softmax(aux_weights))
+        state = resample(rng, resampler(algo), state, softmax(aux_weights); ref_state)
+        LSE_comp = logsumexp(log_weights(state))
+        state = ParticleDistribution(
+            state.particles, -(LSE_lookahead + (LSE_comp - log(num_particles(algo))))
+        )
     else
-        # Not resampling: preserve ll_baseline and set ancestors to self
-        n = length(state.particles)
-        new_particles = similar(state.particles)
-        for i in 1:n
-            new_particles[i] = set_ancestor(state.particles[i], i)
-        end
-        state = ParticleDistribution(new_particles, state.ll_baseline)
-    end
-
-    # Compensate for lookahead weights
-    for particle in state.particles
-        particle.log_w -= log_ξs[particle.ancestor]
-    end
-
-    # Compute compensation log normalizer
-    if resample_flag
-        LSE_comp = logsumexp(map(p -> p.log_w, state.particles))
-        state.ll_baseline = -(LSE_lookahead + (LSE_comp - log(num_particles(algo))))
+        state = preserve_sample(state)
     end
 
     callback(model, algo, iter, state, observation, PostResample; kwargs...)

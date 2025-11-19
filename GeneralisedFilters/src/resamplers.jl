@@ -15,7 +15,7 @@ Determine whether a resampler will trigger resampling given the current particle
 For uncondition resamplers, always returns `true`. For conditional resamplers (e.g.,
 `ESSResampler`), checks the resampling condition.
 """
-function will_resample(::AbstractResampler, state)
+function will_resample(::AbstractResampler, state, weights)
     # Default: unconditional resamplers always resample
     return true
 end
@@ -35,20 +35,21 @@ otherwise return the input state unchanged (but with ancestors set to self).
 function maybe_resample(
     rng::AbstractRNG,
     resampler::AbstractResampler,
-    state;
+    state,
+    weights;
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
     # Default: unconditional resamplers always resample
-    return resample(rng, resampler, state; ref_state)
+    return resample(rng, resampler, state, weights; ref_state)
 end
 
 function resample(
     rng::AbstractRNG,
     resampler::AbstractResampler,
-    state;
+    state,
+    weights;
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
-    weights = softmax(log_weights(state))
     idxs = sample_ancestors(rng, resampler, weights)
     # Set reference trajectory indices
     if !isnothing(ref_state)
@@ -72,9 +73,29 @@ function resample_ancestor(particle::Particle{ST,WT}, ancestor::Int) where {ST,W
     return Particle(particle.state, zero(WT), ancestor)
 end
 
-# function resample_ancestor(particle::UnweightedParticle, ancestor::Int)
-#     return UnweightedParticle(particle.state, ancestor)
-# end
+## GENERIC VERSIONS ########################################################################
+
+function will_resample(resampler::AbstractResampler, state)
+    return will_resample(resampler, state, get_weights(state))
+end
+
+function resample(
+    rng::AbstractRNG,
+    resampler::AbstractResampler,
+    state;
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+)
+    return resample(rng, resampler, state, get_weights(state); ref_state)
+end
+
+function maybe_resample(
+    rng::AbstractRNG,
+    resampler::AbstractResampler,
+    state;
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+)
+    return maybe_resample(rng, resampler, state, get_weights(state); ref_state)
+end
 
 ## CONDITIONAL RESAMPLING ##################################################################
 
@@ -92,11 +113,12 @@ end
 function maybe_resample(
     rng::AbstractRNG,
     cond_resampler::AbstractConditionalResampler,
-    state;
+    state,
+    weights;
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
-    if will_resample(cond_resampler, state)
-        return resample(rng, cond_resampler, state; ref_state)
+    if will_resample(cond_resampler, state, weights)
+        return resample(rng, cond_resampler, state, weights; ref_state)
     else
         return preserve_sample(state)
     end
@@ -110,31 +132,33 @@ struct ESSResampler <: AbstractConditionalResampler
     end
 end
 
-function will_resample(cond_resampler::ESSResampler, state::ParticleDistribution)
-    n = length(state.particles)
-    weights = softmax(log_weights(state))
+function will_resample(cond_resampler::ESSResampler, state, weights)
+    n = length(state)
     ess = inv(sum(abs2, weights))
     return cond_resampler.threshold * n ≥ ess
 end
 
-# function will_resample(cond_resampler::ESSResampler, ::UniformParticles)
-#     return cond_resampler.threshold ≥ 1
-# end
-
 function resample(
     rng::AbstractRNG,
     cond_resampler::ESSResampler,
-    state;
+    state,
+    weights=get_weights(state);
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
-    return resample(rng, cond_resampler.resampler, state; ref_state)
+    return resample(rng, cond_resampler.resampler, state, weights; ref_state)
+end
+
+# TODO: should probably remove this and restructure the resampler logic a little bit
+function sample_ancestors(
+    rng::AbstractRNG, cond_resampler::ESSResampler, weights, n::Int64=length(weights)
+)
+    return sample_ancestors(rng, cond_resampler.resampler, weights, n)
 end
 
 # TODO (RB): this can probably be cleaned up if we allow mutation (I'm just playing it safe
 # whilst developing)
 function set_ancestor(particle::Particle, ancestor::Int)
     return Particle(particle.state, log_weight(particle), ancestor)
-    # return Particle(particle.state, particle.log_w, ancestor)
 end
 
 ## CATEGORICAL RESAMPLE ####################################################################

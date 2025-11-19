@@ -330,33 +330,33 @@ end
     @test llkf ≈ llrbgf atol = 1e-3
 end
 
-# @testitem "ABF test" begin
-#     using Distributions
-#     using GeneralisedFilters
-#     using LinearAlgebra
-#     using SSMProblems
-#     using StableRNGs
-#     using StatsBase: weights
+@testitem "ABF test" begin
+    using Distributions
+    using GeneralisedFilters
+    using LinearAlgebra
+    using SSMProblems
+    using StableRNGs
+    using StatsBase: weights
 
-#     rng = StableRNG(1234)
-#     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
-#         rng, 1, 1; static_arrays=true
-#     )
-#     _, _, ys = sample(rng, model, 4)
+    rng = StableRNG(1234)
+    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
+        rng, 1, 1; static_arrays=true
+    )
+    _, _, ys = sample(rng, model, 4)
 
-#     # resampler = GeneralisedFilters.GFTest.AlternatingResampler()
-#     resampler = ESSResampler(0.8)
-#     bf = BF(10^6; resampler=resampler)
-#     abf = AuxiliaryParticleFilter(bf, MeanPredictive())
-#     abf_state, llabf = GeneralisedFilters.filter(rng, model, abf, ys)
-#     kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
+    # resampler = GeneralisedFilters.GFTest.AlternatingResampler()
+    resampler = ESSResampler(0.8)
+    bf = BF(10^6; resampler=resampler)
+    abf = AuxiliaryParticleFilter(bf, MeanPredictive())
+    abf_state, llabf = GeneralisedFilters.filter(rng, model, abf, ys)
+    kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
 
-#     xs = getfield.(abf_state.particles, :state)
-#     ws = weights(abf_state)
+    xs = getfield.(abf_state.particles, :state)
+    ws = weights(abf_state)
 
-#     @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
-#     @test llkf ≈ llabf atol = 1e-3
-# end
+    @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
+    @test llkf ≈ llabf atol = 1e-3
+end
 
 # @testitem "ARBF test" begin
 #     using Distributions
@@ -463,9 +463,9 @@ end
     struct DummyResampler <: GeneralisedFilters.AbstractResampler end
 
     function GeneralisedFilters.sample_ancestors(
-        rng::AbstractRNG, resampler::DummyResampler, weights::AbstractVector
+        ::AbstractRNG, ::DummyResampler, weights::AbstractVector, n::Int64=length(weights)
     )
-        return [mod1(a - 1, length(weights)) for a in 1:length(weights)]
+        return [mod1(a - 1, length(weights)) for a in 1:n]
     end
 
     SEED = 1234

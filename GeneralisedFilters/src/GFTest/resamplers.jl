@@ -18,16 +18,23 @@ mutable struct AlternatingResampler <: GeneralisedFilters.AbstractConditionalRes
     end
 end
 
-function GeneralisedFilters.will_resample(alt_resampler::AlternatingResampler, state)
+function GeneralisedFilters.will_resample(alt_resampler::AlternatingResampler, state, weights)
     return alt_resampler.resample_next
 end
 
 function GeneralisedFilters.resample(
     rng::AbstractRNG,
     alt_resampler::AlternatingResampler,
-    state;
+    state,
+    weights;
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
     alt_resampler.resample_next = !alt_resampler.resample_next
-    return GeneralisedFilters.resample(rng, alt_resampler.resampler, state; ref_state)
+    return GeneralisedFilters.resample(rng, alt_resampler.resampler, state, weights; ref_state)
+end
+
+function GeneralisedFilters.sample_ancestors(
+    rng::AbstractRNG, alt_resampler::AlternatingResampler, weights, n::Int64=length(weights)
+)
+    return GeneralisedFilters.sample_ancestors(rng, alt_resampler.resampler, weights, n)
 end

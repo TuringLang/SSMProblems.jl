@@ -47,6 +47,7 @@ mutable struct RBState{XT,ZT}
     z::ZT
 end
 
+abstract type AbstractParticleDistribution end
 
 """
     ParticleDistribution
@@ -60,20 +61,20 @@ their ancestories) into a distibution-like object.
   the unnormalized logsumexp of weights before update (for standard PF/guided filters)
   or a modified value that includes APF first-stage correction (for auxiliary PF).
 """
-mutable struct ParticleDistribution{WT,PT<:AbstractParticle,VT<:AbstractVector{PT}}
+mutable struct ParticleDistribution{WT,PT<:AbstractParticle,VT<:AbstractVector{PT}} <: AbstractParticleDistribution
     particles::VT
     ll_baseline::WT
 end
 
 # Helper functions to make ParticleDistribution behave like a collection
-Base.collect(state::ParticleDistribution) = state.particles
-Base.length(state::ParticleDistribution) = length(state.particles)
-Base.keys(state::ParticleDistribution) = LinearIndices(state.particles)
-Base.iterate(state::ParticleDistribution, i) = iterate(state.particles, i)
-Base.iterate(state::ParticleDistribution) = iterate(state.particles)
+Base.collect(state::AbstractParticleDistribution) = state.particles
+Base.length(state::AbstractParticleDistribution) = length(state.particles)
+Base.keys(state::AbstractParticleDistribution) = LinearIndices(state.particles)
+Base.iterate(state::AbstractParticleDistribution, i) = iterate(state.particles, i)
+Base.iterate(state::AbstractParticleDistribution) = iterate(state.particles)
 
 # Not sure if this is kosher, since it doesn't follow the convention of Base.getindex
-Base.@propagate_inbounds Base.getindex(state::ParticleDistribution, i) = state.particles[i]
+Base.@propagate_inbounds Base.getindex(state::AbstractParticleDistribution, i) = state.particles[i]
 
 # Helpers for StatsBase compatibility
 function StatsBase.weights(state::ParticleDistribution)
@@ -81,6 +82,7 @@ function StatsBase.weights(state::ParticleDistribution)
 end
 
 log_weights(state::ParticleDistribution) = map(p -> log_weight(p), state.particles)
+get_weights(state::ParticleDistribution) = softmax(log_weights(state))
 
 """
     marginalise!(state::ParticleDistribution)
