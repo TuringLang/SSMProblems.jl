@@ -44,14 +44,7 @@ function initialise(
         initialise_particle(rng, prior, algo, ref; kwargs...)
     end
 
-    # Set equal weights: log_w = -log(N) so weights sum to 1
-    log_weight = -log(N)
-    for p in particles
-        p.log_w = log_weight
-    end
-
-    # Initialize with ll_baseline = 0.0
-    return ParticleDistribution(particles, 0.0)
+    return ParticleDistribution(particles, 0)
 end
 
 function predict(
@@ -69,15 +62,13 @@ function predict(
         ref = !isnothing(ref_state) && i == 1 ? ref_state[iter] : nothing
         predict_particle(rng, dyn, algo, iter, particle, observation, ref; kwargs...)
     end
-    state.particles = particles
 
     # Accumulate the baseline with LSE of weights after prediction (before update)
     # For plain PF/guided: ll_baseline is 0.0 on entry, becomes LSE_before
     # For APF with resample: ll_baseline already stores negative correction; add LSE_before
-    LSE_before = logsumexp(map(p -> p.log_w, state.particles))
-    state.ll_baseline += LSE_before
-
-    return state
+    return ParticleDistribution(
+        particles, logsumexp(log_weights(state)) + state.ll_baseline
+    )
 end
 
 function update(
@@ -91,10 +82,9 @@ function update(
     particles = map(state.particles) do particle
         update_particle(obs, algo, iter, particle, observation; kwargs...)
     end
-    state.particles = particles
-    ll_increment = marginalise!(state)
+    new_state, ll_increment = marginalise!(state, particles)
 
-    return state, ll_increment
+    return new_state, ll_increment
 end
 
 struct ParticleFilter{RS,PT} <: AbstractParticleFilter
@@ -119,8 +109,9 @@ function initialise_particle(
     rng::AbstractRNG, prior::StatePrior, algo::ParticleFilter, ref_state; kwargs...
 )
     x = sample_prior(rng, prior, algo, ref_state; kwargs...)
-    # TODO (RB):  determine the correct type for the log_w field or use a NoWeight type
-    return Particle(x, 0.0, 0)
+    # TODO: this assumes F64
+    # return Particle(x, -log(num_particles(algo)), 0)
+    return Particle(x, 0)
 end
 
 function predict_particle(
@@ -128,29 +119,29 @@ function predict_particle(
     dyn::LatentDynamics,
     algo::ParticleFilter,
     iter::Integer,
-    particle::Particle,
+    particle::AbstractParticle,
     observation,
     ref_state;
     kwargs...,
 )
-    new_x, logw_inc = propogate(
+    new_x, log_increment = propogate(
         rng, dyn, algo, iter, particle.state, observation, ref_state; kwargs...
     )
-    return Particle(new_x, particle.log_w + logw_inc, particle.ancestor)
+    return Particle(new_x, log_weight(particle) + log_increment, particle.ancestor)
 end
 
 function update_particle(
     obs::ObservationProcess,
     ::ParticleFilter,
     iter::Integer,
-    particle::Particle,
+    particle::AbstractParticle,
     observation;
     kwargs...,
 )
     log_increment = SSMProblems.logdensity(
         obs, iter, particle.state, observation; kwargs...
     )
-    return Particle(particle.state, particle.log_w + log_increment, particle.ancestor)
+    return Particle(particle.state, log_weight(particle) + log_increment, particle.ancestor)
 end
 
 function step(
@@ -253,7 +244,7 @@ function propogate(
     # TODO: make this type consistent
     # Will have to do a lazy zero or change propogate to accept a particle (in which case
     # we'll need to construct a particle in the RBPF predict method)
-    return new_x, 0.0
+    return new_x, 0
 end
 
 # TODO: I feel like we shouldn't need to do this conversion. It should be handled by dispatch
@@ -313,7 +304,7 @@ function step(
     end
 
     # Log normalizer for current weights
-    LSE_w = logsumexp(map(p -> p.log_w, state.particles))
+    LSE_w = logsumexp(log_weights(state))
 
     # Incorporate lookahead weights into current weights
     for (i, particle) in enumerate(state.particles)
@@ -323,18 +314,7 @@ function step(
     # Compute lookahead evidence
     LSE_lookahead = logsumexp(map(p -> p.log_w, state.particles)) - LSE_w
 
-    resample_flag = will_resample(resampler(algo), state)
-    if resample_flag
-        state = resample(rng, resampler(algo), state; ref_state)
-    else
-        # Not resampling: preserve ll_baseline and set ancestors to self
-        n = length(state.particles)
-        new_particles = similar(state.particles)
-        for i in 1:n
-            new_particles[i] = set_ancestor(state.particles[i], i)
-        end
-        state = ParticleDistribution(new_particles, state.ll_baseline)
-    end
+    state = maybe_resample(rng, resampler(algo), state; ref_state)
 
     # Compensate for lookahead weights
     for particle in state.particles
@@ -386,11 +366,11 @@ function predictive_state(
     dyn::LatentDynamics,
     apf::AuxiliaryParticleFilter{<:AbstractParticleFilter},
     iter::Integer,
-    particle::Particle;
+    particle::AbstractParticle;
     kwargs...,
 )
     x_star = predictive_statistic(rng, apf.pp, dyn, iter, particle.state; kwargs...)
-    return Particle(x_star, particle.log_w, particle.ancestor)
+    return Particle(x_star, log_weight(particle), particle.ancestor)
 end
 
 function predictive_loglik(

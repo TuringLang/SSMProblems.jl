@@ -2,17 +2,34 @@
 
 ## PARTICLES ###############################################################################
 
+abstract type AbstractParticle{T} end
+
 """
     Particle
 
 A container representing a single particle in a particle filter distribution, composed of a
 weighted sampled (stored as a log weight) and its ancestor index.
 """
-mutable struct Particle{ST,WT,AT<:Integer}
+mutable struct Particle{ST,WT,AT<:Integer} <: AbstractParticle{ST}
     state::ST
     log_w::WT
     ancestor::AT
 end
+
+# # should never be used outside of initialization
+# mutable struct UnweightedParticle{ST,AT} <: AbstractParticle{ST}
+#     state::ST
+#     ancestor::AT
+# end
+
+# # try doing something a little different, with uninitialized weights
+# const UnweightedParticle{ST,AT} = Particle{ST,Nothing,AT}
+
+Particle(particle, ancestor) = Particle(particle, 0, ancestor)
+Particle(particle::AbstractParticle, ancestor) = Particle(particle.state, ancestor)
+
+log_weight(p::Particle) = p.log_w
+# log_weight(::UnweightedParticle) = 0
 
 """
     RBState
@@ -30,7 +47,6 @@ mutable struct RBState{XT,ZT}
     z::ZT
 end
 
-const RBParticle{XT,ZT,WT} = Particle{RBState{XT,ZT},WT}
 
 """
     ParticleDistribution
@@ -44,7 +60,7 @@ their ancestories) into a distibution-like object.
   the unnormalized logsumexp of weights before update (for standard PF/guided filters)
   or a modified value that includes APF first-stage correction (for auxiliary PF).
 """
-mutable struct ParticleDistribution{WT,PT<:Particle{<:Any,WT},VT<:AbstractVector{PT}}
+mutable struct ParticleDistribution{WT,PT<:AbstractParticle,VT<:AbstractVector{PT}}
     particles::VT
     ll_baseline::WT
 end
@@ -64,6 +80,8 @@ function StatsBase.weights(state::ParticleDistribution)
     return Weights(softmax(map(p -> p.log_w, state.particles)))
 end
 
+log_weights(state::ParticleDistribution) = map(p -> log_weight(p), state.particles)
+
 """
     marginalise!(state::ParticleDistribution)
 
@@ -78,22 +96,21 @@ cases through a single-scalar caching mechanism. For standard PF, ll_baseline eq
 LSE before adding observation weights. For APF with resampling, it includes first-stage
 correction terms computed during the APF resampling step.
 """
-function marginalise!(state::ParticleDistribution)
+function marginalise!(state::ParticleDistribution, particles)
     # Compute logsumexp after adding observation likelihoods
-    LSE_after = logsumexp(map(p -> p.log_w, state.particles))
+    LSE_after = logsumexp(log_weight.(particles))
 
     # Compute log-likelihood increment: works for both PF and APF cases
     ll_increment = LSE_after - state.ll_baseline
 
     # Normalize weights
-    for p in state.particles
+    for p in particles
         p.log_w -= LSE_after
     end
 
     # Reset baseline for next iteration
-    state.ll_baseline = 0.0
-
-    return ll_increment
+    new_state = ParticleDistribution(particles, zero(ll_increment))
+    return new_state, ll_increment
 end
 
 ## GAUSSIAN STATES #########################################################################

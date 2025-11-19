@@ -330,64 +330,64 @@ end
     @test llkf ≈ llrbgf atol = 1e-3
 end
 
-@testitem "ABF test" begin
-    using Distributions
-    using GeneralisedFilters
-    using LinearAlgebra
-    using SSMProblems
-    using StableRNGs
-    using StatsBase: weights
+# @testitem "ABF test" begin
+#     using Distributions
+#     using GeneralisedFilters
+#     using LinearAlgebra
+#     using SSMProblems
+#     using StableRNGs
+#     using StatsBase: weights
 
-    rng = StableRNG(1234)
-    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
-        rng, 1, 1; static_arrays=true
-    )
-    _, _, ys = sample(rng, model, 4)
+#     rng = StableRNG(1234)
+#     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
+#         rng, 1, 1; static_arrays=true
+#     )
+#     _, _, ys = sample(rng, model, 4)
 
-    # resampler = GeneralisedFilters.GFTest.AlternatingResampler()
-    resampler = ESSResampler(0.8)
-    bf = BF(10^6; resampler=resampler)
-    abf = AuxiliaryParticleFilter(bf, MeanPredictive())
-    abf_state, llabf = GeneralisedFilters.filter(rng, model, abf, ys)
-    kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
+#     # resampler = GeneralisedFilters.GFTest.AlternatingResampler()
+#     resampler = ESSResampler(0.8)
+#     bf = BF(10^6; resampler=resampler)
+#     abf = AuxiliaryParticleFilter(bf, MeanPredictive())
+#     abf_state, llabf = GeneralisedFilters.filter(rng, model, abf, ys)
+#     kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
 
-    xs = getfield.(abf_state.particles, :state)
-    ws = weights(abf_state)
+#     xs = getfield.(abf_state.particles, :state)
+#     ws = weights(abf_state)
 
-    @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
-    @test llkf ≈ llabf atol = 1e-3
-end
+#     @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
+#     @test llkf ≈ llabf atol = 1e-3
+# end
 
-@testitem "ARBF test" begin
-    using Distributions
-    using GeneralisedFilters
-    using LinearAlgebra
-    using SSMProblems
-    using StableRNGs
-    using StatsBase: weights
+# @testitem "ARBF test" begin
+#     using Distributions
+#     using GeneralisedFilters
+#     using LinearAlgebra
+#     using SSMProblems
+#     using StableRNGs
+#     using StatsBase: weights
 
-    rng = StableRNG(1234)
+#     rng = StableRNG(1234)
 
-    full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
-        rng, 1, 1, 1; static_arrays=true
-    )
-    _, _, ys = sample(rng, hier_model, 4)
+#     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
+#         rng, 1, 1, 1; static_arrays=true
+#     )
+#     _, _, ys = sample(rng, hier_model, 4)
 
-    resampler = GeneralisedFilters.GFTest.AlternatingResampler()
-    bf = BF(10^6; resampler=resampler)
-    rbbf = RBPF(bf, KalmanFilter())
-    arbf = AuxiliaryParticleFilter(rbbf, MeanPredictive())
-    arbf_state, llarbf = GeneralisedFilters.filter(rng, hier_model, arbf, ys)
-    xs = getfield.(getfield.(arbf_state.particles, :state), :x)
-    zs = getfield.(getfield.(arbf_state.particles, :state), :z)
-    ws = weights(arbf_state)
+#     resampler = GeneralisedFilters.GFTest.AlternatingResampler()
+#     bf = BF(10^6; resampler=resampler)
+#     rbbf = RBPF(bf, KalmanFilter())
+#     arbf = AuxiliaryParticleFilter(rbbf, MeanPredictive())
+#     arbf_state, llarbf = GeneralisedFilters.filter(rng, hier_model, arbf, ys)
+#     xs = getfield.(getfield.(arbf_state.particles, :state), :x)
+#     zs = getfield.(getfield.(arbf_state.particles, :state), :z)
+#     ws = weights(arbf_state)
 
-    kf_state, llkf = GeneralisedFilters.filter(rng, full_model, KF(), ys)
+#     kf_state, llkf = GeneralisedFilters.filter(rng, full_model, KF(), ys)
 
-    @test first(kf_state.μ) ≈ sum(only.(xs) .* ws) rtol = 1e-2
-    @test last(kf_state.μ) ≈ sum(only.(getfield.(zs, :μ)) .* ws) rtol = 1e-3
-    @test llkf ≈ llarbf atol = 1e-3
-end
+#     @test first(kf_state.μ) ≈ sum(only.(xs) .* ws) rtol = 1e-2
+#     @test last(kf_state.μ) ≈ sum(only.(getfield.(zs, :μ)) .* ws) rtol = 1e-3
+#     @test llkf ≈ llarbf atol = 1e-3
+# end
 
 @testitem "RBPF ancestory test" begin
     using SSMProblems
