@@ -314,7 +314,18 @@ function step(
     # Compute lookahead evidence
     LSE_lookahead = logsumexp(map(p -> p.log_w, state.particles)) - LSE_w
 
-    state = maybe_resample(rng, resampler(algo), state; ref_state)
+    resample_flag = will_resample(resampler(algo), state)
+    if resample_flag
+        state = resample(rng, resampler(algo), state; ref_state)
+    else
+        # Not resampling: preserve ll_baseline and set ancestors to self
+        n = length(state.particles)
+        new_particles = similar(state.particles)
+        for i in 1:n
+            new_particles[i] = set_ancestor(state.particles[i], i)
+        end
+        state = ParticleDistribution(new_particles, state.ll_baseline)
+    end
 
     # Compensate for lookahead weights
     for particle in state.particles
