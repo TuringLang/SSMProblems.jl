@@ -16,20 +16,15 @@ mutable struct Particle{ST,WT,AT<:Integer} <: AbstractParticle{ST}
     ancestor::AT
 end
 
-# # should never be used outside of initialization
-# mutable struct UnweightedParticle{ST,AT} <: AbstractParticle{ST}
-#     state::ST
-#     ancestor::AT
-# end
-
 # # try doing something a little different, with uninitialized weights
 # const UnweightedParticle{ST,AT} = Particle{ST,Nothing,AT}
 
-Particle(particle, ancestor) = Particle(particle, 0, ancestor)
+# TODO: replace this with UnweightedParticle
+Particle(particle, ancestor) = Particle(particle, 0.0f0, ancestor)
 Particle(particle::AbstractParticle, ancestor) = Particle(particle.state, ancestor)
 
 log_weight(p::Particle) = p.log_w
-# log_weight(::UnweightedParticle) = 0
+# log_weight(::UnweightedParticle) = nothing
 
 """
     RBState
@@ -46,8 +41,6 @@ mutable struct RBState{XT,ZT}
     x::XT
     z::ZT
 end
-
-abstract type AbstractParticleDistribution end
 
 """
     ParticleDistribution
@@ -67,23 +60,24 @@ mutable struct ParticleDistribution{WT,PT<:AbstractParticle,VT<:AbstractVector{P
     ll_baseline::WT
 end
 
+# TODO: make a uniform
+# const UniformParticles{WT,PT,VT} = ParticleDistribution{WT,PT<:UnweightedParticle,VT}
+
 # Helper functions to make ParticleDistribution behave like a collection
-Base.collect(state::AbstractParticleDistribution) = state.particles
-Base.length(state::AbstractParticleDistribution) = length(state.particles)
-Base.keys(state::AbstractParticleDistribution) = LinearIndices(state.particles)
-Base.iterate(state::AbstractParticleDistribution, i) = iterate(state.particles, i)
-Base.iterate(state::AbstractParticleDistribution) = iterate(state.particles)
+Base.collect(state::ParticleDistribution) = state.particles
+Base.length(state::ParticleDistribution) = length(state.particles)
+Base.keys(state::ParticleDistribution) = LinearIndices(state.particles)
+Base.iterate(state::ParticleDistribution, i) = iterate(state.particles, i)
+Base.iterate(state::ParticleDistribution) = iterate(state.particles)
 
 # Not sure if this is kosher, since it doesn't follow the convention of Base.getindex
-Base.@propagate_inbounds Base.getindex(state::AbstractParticleDistribution, i) = state.particles[i]
-
-# Helpers for StatsBase compatibility
-function StatsBase.weights(state::ParticleDistribution)
-    return Weights(softmax(map(p -> p.log_w, state.particles)))
-end
+Base.@propagate_inbounds Base.getindex(state::ParticleDistribution, i) = state.particles[i]
 
 log_weights(state::ParticleDistribution) = map(p -> log_weight(p), state.particles)
 get_weights(state::ParticleDistribution) = softmax(log_weights(state))
+
+# Helpers for StatsBase compatibility
+StatsBase.weights(state::ParticleDistribution) = StatsBase.Weights(get_weights(state))
 
 """
     marginalise!(state::ParticleDistribution)

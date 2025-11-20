@@ -57,7 +57,7 @@ function predict(
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    particles = map(1:length(state.particles)) do i
+    particles = map(1:num_particles(algo)) do i
         particle = state.particles[i]
         ref = !isnothing(ref_state) && i == 1 ? ref_state[iter] : nothing
         predict_particle(rng, dyn, algo, iter, particle, observation, ref; kwargs...)
@@ -109,8 +109,6 @@ function initialise_particle(
     rng::AbstractRNG, prior::StatePrior, algo::ParticleFilter, ref_state; kwargs...
 )
     x = sample_prior(rng, prior, algo, ref_state; kwargs...)
-    # TODO: this assumes F64
-    # return Particle(x, -log(num_particles(algo)), 0)
     return Particle(x, 0)
 end
 
