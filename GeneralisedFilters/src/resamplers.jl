@@ -60,9 +60,7 @@ function resample(
 end
 
 function construct_new_state(
-    state::ParticleDistribution{WT},
-    idxs,
-    log_weights
+    state::ParticleDistribution{WT}, idxs, log_weights
 ) where {WT<:Real}
     new_particles = map(eachindex(state.particles)) do i
         particle = state.particles[idxs[i]]

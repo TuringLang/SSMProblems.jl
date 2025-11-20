@@ -18,7 +18,9 @@ mutable struct AlternatingResampler <: GeneralisedFilters.AbstractConditionalRes
     end
 end
 
-function GeneralisedFilters.will_resample(alt_resampler::AlternatingResampler, state, weights)
+function GeneralisedFilters.will_resample(
+    alt_resampler::AlternatingResampler, state, weights
+)
     return alt_resampler.resample_next
 end
 
@@ -30,7 +32,9 @@ function GeneralisedFilters.resample(
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
     alt_resampler.resample_next = !alt_resampler.resample_next
-    return GeneralisedFilters.resample(rng, alt_resampler.resampler, state, weights; ref_state)
+    return GeneralisedFilters.resample(
+        rng, alt_resampler.resampler, state, weights; ref_state
+    )
 end
 
 function GeneralisedFilters.sample_ancestors(

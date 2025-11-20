@@ -57,7 +57,9 @@ function predict_particle(
         kwargs...,
     )
 
-    return Particle(RBState(new_x, new_z), log_weight(particle) + logw_inc, particle.ancestor)
+    return Particle(
+        RBState(new_x, new_z), log_weight(particle) + logw_inc, particle.ancestor
+    )
 end
 
 function update_particle(
@@ -78,7 +80,9 @@ function update_particle(
         kwargs...,
     )
     return Particle(
-        RBState(particle.state.x, new_z), log_weight(particle) + log_increment, particle.ancestor
+        RBState(particle.state.x, new_z),
+        log_weight(particle) + log_increment,
+        particle.ancestor,
     )
 end
 

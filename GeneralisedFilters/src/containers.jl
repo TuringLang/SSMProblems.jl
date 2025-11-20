@@ -61,7 +61,8 @@ their ancestories) into a distibution-like object.
   the unnormalized logsumexp of weights before update (for standard PF/guided filters)
   or a modified value that includes APF first-stage correction (for auxiliary PF).
 """
-mutable struct ParticleDistribution{WT,PT<:AbstractParticle,VT<:AbstractVector{PT}} <: AbstractParticleDistribution
+mutable struct ParticleDistribution{WT,PT<:AbstractParticle,VT<:AbstractVector{PT}} <:
+               AbstractParticleDistribution
     particles::VT
     ll_baseline::WT
 end
