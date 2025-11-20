@@ -16,15 +16,17 @@ mutable struct Particle{ST,WT,AT<:Integer} <: AbstractParticle{ST}
     ancestor::AT
 end
 
-# # try doing something a little different, with uninitialized weights
-# const UnweightedParticle{ST,AT} = Particle{ST,Nothing,AT}
+# NOTE: this is only ever used for initializing a particle filter
+const UnweightedParticle{ST,AT} = Particle{ST,Nothing,AT}
 
-# TODO: replace this with UnweightedParticle
-Particle(particle, ancestor) = Particle(particle, 0.0f0, ancestor)
-Particle(particle::AbstractParticle, ancestor) = Particle(particle.state, ancestor)
+Particle(state, ancestor) = Particle(state, nothing, ancestor)
+Particle(particle::UnweightedParticle, ancestor) = Particle(particle.state, ancestor)
+function Particle(particle::Particle{<:Any,WT}, ancestor) where {WT<:Real}
+    return Particle(particle.state, zero(WT), ancestor)
+end
 
-log_weight(p::Particle) = p.log_w
-# log_weight(::UnweightedParticle) = nothing
+log_weight(p::Particle{<:Any,<:Real}) = p.log_w
+log_weight(::UnweightedParticle) = false
 
 """
     RBState
@@ -58,9 +60,6 @@ mutable struct ParticleDistribution{WT,PT<:AbstractParticle,VT<:AbstractVector{P
     particles::VT
     ll_baseline::WT
 end
-
-# TODO: make a uniform
-# const UniformParticles{WT,PT,VT} = ParticleDistribution{WT,PT<:UnweightedParticle,VT}
 
 # Helper functions to make ParticleDistribution behave like a collection
 Base.collect(state::ParticleDistribution) = state.particles

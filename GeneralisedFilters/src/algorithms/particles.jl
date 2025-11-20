@@ -44,7 +44,7 @@ function initialise(
         initialise_particle(rng, prior, algo, ref; kwargs...)
     end
 
-    return ParticleDistribution(particles, 0)
+    return ParticleDistribution(particles, false)
 end
 
 function predict(

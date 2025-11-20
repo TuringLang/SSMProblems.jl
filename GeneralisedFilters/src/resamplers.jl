@@ -69,8 +69,8 @@ function construct_new_state(
     return ParticleDistribution(new_particles, zero(WT))
 end
 
-function resample_ancestor(particle::Particle{ST,WT}, ancestor::Int) where {ST,WT<:Real}
-    return Particle(particle.state, zero(WT), ancestor)
+function resample_ancestor(particle::Particle, ancestor::Int)
+    return Particle(particle, ancestor)
 end
 
 ## AUXILIARY RESAMPLER #####################################################################
@@ -133,10 +133,8 @@ end
 abstract type AbstractConditionalResampler <: AbstractResampler end
 
 function preserve_sample(state::ParticleDistribution)
-    n = length(state.particles)
-    new_particles = similar(state.particles)
-    for i in 1:n
-        new_particles[i] = set_ancestor(state.particles[i], i)
+    new_particles = map(eachindex(state.particles)) do i
+        set_ancestor(state.particles[i], i)
     end
     return ParticleDistribution(new_particles, state.ll_baseline)
 end
