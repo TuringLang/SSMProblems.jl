@@ -30,15 +30,10 @@ function GeneralisedFilters.resample(
     state,
     weights;
     ref_state::Union{Nothing,AbstractVector}=nothing,
+    kwargs...,
 )
     alt_resampler.resample_next = !alt_resampler.resample_next
     return GeneralisedFilters.resample(
-        rng, alt_resampler.resampler, state, weights; ref_state
+        rng, alt_resampler.resampler, state, weights; ref_state, kwargs...
     )
-end
-
-function GeneralisedFilters.sample_ancestors(
-    rng::AbstractRNG, alt_resampler::AlternatingResampler, weights, n::Int64=length(weights)
-)
-    return GeneralisedFilters.sample_ancestors(rng, alt_resampler.resampler, weights, n)
 end

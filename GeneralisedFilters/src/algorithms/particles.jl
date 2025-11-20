@@ -239,9 +239,7 @@ function propogate(
         ref_state
     end
 
-    # TODO: make this type consistent
-    # Will have to do a lazy zero or change propogate to accept a particle (in which case
-    # we'll need to construct a particle in the RBPF predict method)
+    # TODO: replace this with nothing (unweighted particle)
     return new_x, 0
 end
 
@@ -301,20 +299,8 @@ function step(
         predictive_loglik(obs(model), algo.pf, iter, p_star, observation; kwargs...)
     end
 
-    aux_weights = log_weights(state) + log_ξs
-    LSE_lookahead = logsumexp(aux_weights) - logsumexp(log_weights(state))
-
-    # TODO: make an auxiliary resampler which includes log_ξs and resamples with non-zero weights
-    if will_resample(resampler(algo), state, aux_weights)
-        state = resample(rng, resampler(algo), state, aux_weights; ref_state)
-        LSE_comp = logsumexp(log_weights(state))
-        # TODO: remove the log(num_particles) bit since it will not generate a Float32
-        state = ParticleDistribution(
-            state.particles, -(LSE_lookahead + (LSE_comp - log(num_particles(algo))))
-        )
-    else
-        state = preserve_sample(state)
-    end
+    rs = AuxiliaryResampler(resampler(algo), log_ξs)
+    state = maybe_resample(rng, rs, state; ref_state)
 
     callback(model, algo, iter, state, observation, PostResample; kwargs...)
     return move(
