@@ -307,9 +307,10 @@ function step(
     LSE_lookahead = logsumexp(aux_weights) - logsumexp(log_weights(state))
 
     # TODO: make an auxiliary resampler which includes log_ξs and resamples with non-zero weights
-    if will_resample(resampler(algo), state, softmax(aux_weights))
-        state = resample(rng, resampler(algo), state, softmax(aux_weights); ref_state)
+    if will_resample(resampler(algo), state, aux_weights)
+        state = resample(rng, resampler(algo), state, aux_weights; ref_state)
         LSE_comp = logsumexp(log_weights(state))
+        # TODO: remove the log(num_particles) bit since it will not generate a Float32
         state = ParticleDistribution(
             state.particles, -(LSE_lookahead + (LSE_comp - log(num_particles(algo))))
         )
