@@ -20,7 +20,6 @@ function initialise_particle(
     x = sample_prior(rng, prior.outer_prior, algo.pf, ref_state; kwargs...)
     z = initialise(rng, prior.inner_prior, algo.af; new_outer=x, kwargs...)
     # TODO (RB):  determine the correct type for the log_w field or use a NoWeight type
-    # return Particle(RBState(x, z), -log(N), 0)
     return Particle(RBState(x, z), 0)
 end
 

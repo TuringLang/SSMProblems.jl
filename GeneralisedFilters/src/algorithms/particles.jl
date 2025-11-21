@@ -240,7 +240,7 @@ function propogate(
     end
 
     # TODO: replace this with nothing (unweighted particle)
-    return new_x, 0
+    return new_x, false
 end
 
 # TODO: I feel like we shouldn't need to do this conversion. It should be handled by dispatch
