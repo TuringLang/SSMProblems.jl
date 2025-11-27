@@ -1,6 +1,7 @@
 export KalmanFilter, filter
 using CUDA: i32
-import PDMats: PDMat
+import PDMats: PDMat, X_A_Xt
+import LinearAlgebra: Symmetric
 
 export KalmanFilter, KF, KalmanSmoother, KS
 export BackwardInformationPredictor
@@ -12,7 +13,7 @@ KF() = KalmanFilter()
 
 function initialise(rng::AbstractRNG, prior::GaussianPrior, filter::KalmanFilter; kwargs...)
     μ0, Σ0 = calc_initial(prior; kwargs...)
-    return GaussianDistribution(μ0, Σ0)
+    return MvNormal(μ0, Σ0)
 end
 
 function predict(
@@ -20,53 +21,54 @@ function predict(
     dyn::LinearGaussianLatentDynamics,
     algo::KalmanFilter,
     iter::Integer,
-    state::GaussianDistribution,
+    state::MvNormal,
     observation=nothing;
     kwargs...,
 )
-    params = calc_params(dyn, iter; kwargs...)
-    state = kalman_predict(state, params)
+    dyn_params = calc_params(dyn, iter; kwargs...)
+    state = kalman_predict(state, dyn_params)
     return state
 end
 
-function kalman_predict(state, params)
-    μ, Σ = mean_cov(state)
-    A, b, Q = params
+function kalman_predict(state, dyn_params)
+    μ, Σ = params(state)
+    A, b, Q = dyn_params
 
     μ̂ = A * μ + b
-    Σ̂ = A * Σ * A' + Q
-    return GaussianDistribution(μ̂, Σ̂)
+    Σ̂ = X_A_Xt(Σ, A) + Q
+    return MvNormal(μ̂, Σ̂)
 end
 
 function update(
     obs::LinearGaussianObservationProcess,
     algo::KalmanFilter,
     iter::Integer,
-    state::GaussianDistribution,
+    state::MvNormal,
     observation::AbstractVector;
     kwargs...,
 )
-    params = calc_params(obs, iter; kwargs...)
-    state, ll = kalman_update(state, params, observation)
+    obs_params = calc_params(obs, iter; kwargs...)
+    state, ll = kalman_update(state, obs_params, observation)
     return state, ll
 end
 
-function kalman_update(state, params, observation)
-    μ, Σ = mean_cov(state)
-    H, c, R = params
+function kalman_update(state, obs_params, observation)
+    μ, Σ = params(state)
+    H, c, R = obs_params
 
-    # Update state
+    # Compute innovation distribution
     m = H * μ + c
-    y = observation - m
-    S = H * Σ * H' + R
-    S = (S + S') / 2  # force symmetric; TODO: replace with SA-compatibile hermitianpart
-    S_chol = cholesky(S)
-    K = Σ * H' / S_chol  # Zygote errors when using PDMat in solve
+    S = PDMat(X_A_Xt(Σ, H) + R)
+    ȳ = observation - m
+    K = Σ * H' / S
 
-    state = GaussianDistribution(μ + K * y, Σ - K * H * Σ)
+    # Update parameters using Joseph form to ensure numerical stability
+    μ̂ = μ + K * ȳ
+    Σ̂ = PDMat(X_A_Xt(Σ, I - K * H) + X_A_Xt(R, K))
+    state = MvNormal(μ̂, Σ̂)
 
     # Compute log-likelihood
-    ll = logpdf(MvNormal(m, PDMat(S_chol)), observation)
+    ll = logpdf(MvNormal(m, S), observation)
 
     return state, ll
 end
@@ -146,25 +148,36 @@ function smooth(
     return back_state, ll
 end
 
+import LinearAlgebra: eigen
+
 function backward(
     rng::AbstractRNG,
     model::LinearGaussianStateSpaceModel,
     algo::KalmanSmoother,
     iter::Integer,
-    back_state,
+    back_state::MvNormal,
     obs;
     states_cache,
     kwargs...,
 )
-    μ, Σ = mean_cov(back_state)
-    μ_pred, Σ_pred = mean_cov(states_cache.proposed_states[iter + 1])
-    μ_filt, Σ_filt = mean_cov(states_cache.filtered_states[iter])
+    # Extract filtered and predicted states
+    μ_filt, Σ_filt = params(states_cache.filtered_states[iter])
+    μ_pred, Σ_pred = params(states_cache.proposed_states[iter + 1])
+    μ_back, Σ_back = params(back_state)
 
-    G = Σ_filt * model.dyn.A' * inv(Σ_pred)
-    μ = μ_filt .+ G * (μ .- μ_pred)
-    Σ = Σ_filt .+ G * (Σ .- Σ_pred) * G'
+    dyn_params = calc_params(model.dyn, iter + 1; kwargs...)
+    A, b, Q = dyn_params
 
-    return GaussianDistribution(μ, Σ)
+    G = Σ_filt * A' / Σ_pred
+    μ̂ = μ_filt + G * (μ_back - μ_pred)
+
+    # Σ_pred - Σ_back  may be singular (even though it is PSD) so cannot use X_A_Xt with Cholesky
+    Σ̂ = Σ_filt + G * (Σ_back - Σ_pred) * G'
+
+    # Force symmetry
+    Σ̂ = PDMat(Symmetric(Σ̂))
+
+    return MvNormal(μ̂, Σ̂)
 end
 
 ## BACKWARD INFORMATION FILTER #############################################################
@@ -182,7 +195,7 @@ struct BackwardInformationPredictor <: AbstractBackwardPredictor end
 """
     backward_initialise(rng, obs, algo, iter, y; kwargs...)
 
-Initialise a backward predictor at time `T` with observation `y`, forming the likelihood 
+Initialise a backward predictor at time `T` with observation `y`, forming the likelihood
 p(y_T | x_T).
 """
 function backward_initialise(
@@ -197,7 +210,7 @@ function backward_initialise(
     R_inv = inv(R)
     λ = H' * R_inv * (y - c)
     Ω = H' * R_inv * H
-    return InformationDistribution(λ, Ω)
+    return InformationLikelihood(λ, Ω)
 end
 
 """
@@ -210,7 +223,7 @@ function backward_predict(
     dyn::LinearGaussianLatentDynamics,
     algo::BackwardInformationPredictor,
     iter::Integer,
-    state::InformationDistribution;
+    state::InformationLikelihood;
     kwargs...,
 )
     λ, Ω = natural_params(state)
@@ -223,7 +236,7 @@ function backward_predict(
     Ω̂ = A' * (I - Ω * F * inv(Λ) * F') * Ω * A
     λ̂ = A' * (I - Ω * F * inv(Λ) * F') * m
 
-    return InformationDistribution(λ̂, Ω̂)
+    return InformationLikelihood(λ̂, Ω̂)
 end
 
 """
@@ -235,7 +248,7 @@ function backward_update(
     obs::LinearGaussianObservationProcess,
     algo::BackwardInformationPredictor,
     iter::Integer,
-    state::InformationDistribution,
+    state::InformationLikelihood,
     y;
     kwargs...,
 )
@@ -246,5 +259,5 @@ function backward_update(
     λ̂ = λ + H' * R_inv * (y - c)
     Ω̂ = Ω + H' * R_inv * H
 
-    return InformationDistribution(λ̂, Ω̂)
+    return InformationLikelihood(λ̂, Ω̂)
 end

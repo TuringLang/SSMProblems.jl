@@ -13,7 +13,7 @@ function ancestor_weight(
     algo::RBPF,
     iter::Integer,
     state::RBState,
-    ref_state::RBState{<:Any,<:InformationDistribution};
+    ref_state::RBState{<:Any,<:InformationLikelihood};
     kwargs...,
 )
     trans_weight = ancestor_weight(
@@ -52,9 +52,9 @@ p(y_{t+1:T} | x_{t+1}).
 This Gaussian implementation is based on Lemma 1 of https://arxiv.org/pdf/1505.06357
 """
 function compute_marginal_predictive_likelihood(
-    forward_dist::GaussianDistribution, backward_dist::InformationDistribution
+    forward_dist::MvNormal, backward_dist::InformationLikelihood
 )
-    μ, Σ = mean_cov(forward_dist)
+    μ, Σ = params(forward_dist)
     λ, Ω = natural_params(backward_dist)
     Γ = cholesky(Σ).L
 

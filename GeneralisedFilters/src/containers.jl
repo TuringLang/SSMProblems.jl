@@ -98,34 +98,40 @@ end
 
 ## GAUSSIAN STATES #########################################################################
 
-struct GaussianDistribution{PT,ΣT}
-    μ::PT
-    Σ::ΣT
-end
+"""
+    InformationLikelihood
 
-function mean_cov(state::GaussianDistribution)
-    return state.μ, state.Σ
-end
+A container representing an unnormalized Gaussian likelihood p(y | x) in information form,
+parameterized by natural parameters (λ, Ω).
 
-struct InformationDistribution{λT,ΩT}
+The unnormalized log-likelihood is given by:
+    log p(y | x) ∝ λ'x - (1/2)x'Ωx
+
+This representation is particularly useful in backward filtering algorithms and
+Rao-Blackwellised particle filtering, where it represents the predictive likelihood
+p(y_{t:T} | x_t) conditioned on future observations.
+
+# Fields
+- `λ::λT`: The natural parameter vector (information vector)
+- `Ω::ΩT`: The natural parameter matrix (information/precision matrix)
+
+# See also
+- [`natural_params`](@ref): Extract the natural parameters (λ, Ω)
+- [`BackwardInformationPredictor`](@ref): Algorithm that uses this representation
+"""
+struct InformationLikelihood{λT,ΩT}
     λ::λT
     Ω::ΩT
 end
 
-function natural_params(state::InformationDistribution)
-    return state.λ, state.Ω
-end
+"""
+    natural_params(state::InformationLikelihood)
 
-# Conversions — explicit since these may fail if the covariance/precision is not invertible
-function GaussianDistribution(state::InformationDistribution)
-    λ, Ω = natural_params(state)
-    Σ = inv(Ω)
-    μ = Σ * λ
-    return GaussianDistribution(μ, Σ)
-end
-function InformationDistribution(state::GaussianDistribution)
-    μ, Σ = mean_cov(state)
-    Ω = inv(Σ)
-    λ = Ω * μ
-    return InformationDistribution(λ, Ω)
+Extract the natural parameters (λ, Ω) from an InformationLikelihood.
+
+Returns a tuple `(λ, Ω)` where λ is the information vector and Ω is the
+information/precision matrix.
+"""
+function natural_params(state::InformationLikelihood)
+    return state.λ, state.Ω
 end

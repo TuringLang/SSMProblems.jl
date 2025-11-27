@@ -17,7 +17,8 @@ end
 function SSMProblems.simulate(
     rng::AbstractRNG, prop::AbstractProposal, iter::Integer, state, observation; kwargs...
 )
-    return rand(rng, SSMProblems.distribution(prop, iter, state, observation; kwargs...))
+    dist = SSMProblems.distribution(prop, iter, state, observation; kwargs...)
+    return SSMProblems.simulate_from_dist(rng, dist)
 end
 
 function SSMProblems.logdensity(

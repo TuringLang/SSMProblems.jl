@@ -16,11 +16,18 @@ struct OptimalProposal{
 end
 
 function SSMProblems.distribution(prop::OptimalProposal, step::Integer, x, y; kwargs...)
-    A, b, Q = GeneralisedFilters.calc_params(prop.dyn, step; kwargs...)
-    H, c, R = GeneralisedFilters.calc_params(prop.obs, step; kwargs...)
-    Σ = inv(inv(Q) + H' * inv(R) * H)
-    μ = Σ * (inv(Q) * (A * x + b) + H' * inv(R) * (y - c))
-    return MvNormal(μ, Σ)
+    # Get parameters
+    dyn_params = GeneralisedFilters.calc_params(prop.dyn, step; kwargs...)
+    obs_params = GeneralisedFilters.calc_params(prop.obs, step; kwargs...)
+    A, b, Q = dyn_params
+
+    # Predicted state: p(x_t | x_{t-1})
+    state = MvNormal(A * x + b, Q)
+
+    # Update with observation: p(x_t | x_{t-1}, y_t)
+    state, _ = GeneralisedFilters.kalman_update(state, obs_params, y)
+
+    return state
 end
 
 """
