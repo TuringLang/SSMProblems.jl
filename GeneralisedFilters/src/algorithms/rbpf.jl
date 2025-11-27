@@ -16,10 +16,8 @@ resampler(algo::RBPF) = resampler(algo.pf)
 function initialise_particle(
     rng::AbstractRNG, prior::HierarchicalPrior, algo::RBPF, ref_state; kwargs...
 )
-    N = num_particles(algo)
     x = sample_prior(rng, prior.outer_prior, algo.pf, ref_state; kwargs...)
     z = initialise(rng, prior.inner_prior, algo.af; new_outer=x, kwargs...)
-    # TODO (RB):  determine the correct type for the log_w field or use a NoWeight type
     return Particle(RBState(x, z), 0)
 end
 
@@ -91,7 +89,7 @@ function predictive_state(
     weight_strategy::RepresentativeStateLookAhead,
     rbpf::RBPF,
     iter::Integer,
-    particle::AbstractParticle{<:RBState};
+    state::RBState;
     kwargs...,
 )
     x_star = predictive_statistic(
@@ -115,7 +113,7 @@ function predictive_loglik(
     obs::ObservationProcess,
     algo::RBPF,
     iter::Integer,
-    p_star::AbstractParticle{<:RBState},
+    state::RBState,
     observation;
     kwargs...,
 )
