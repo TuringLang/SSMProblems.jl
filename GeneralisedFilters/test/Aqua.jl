@@ -1,5 +1,6 @@
 using Aqua
 using GeneralisedFilters
+using SSMProblems
 
 @testset "Aqua.jl QA" begin
     # Manually specify tests to allow controlling their behaviour
