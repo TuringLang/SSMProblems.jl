@@ -225,7 +225,7 @@ function UCSVO(γ::T, prob::T) where {T<:Real}
     )
 
     local_level_model = StateSpaceModel(
-        GF.HomogeneousGaussianPrior(zeros(T, 1), ScalMat(1, 100.0)),
+        GF.HomogeneousGaussianPrior(zeros(T, 1), PDMat([100.0;;])),
         LocalLevelTrend(),
         OutlierAdjustedObservation(),
     )
