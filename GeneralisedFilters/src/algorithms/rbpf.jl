@@ -26,7 +26,7 @@ function predict_particle(
     dyn::HierarchicalDynamics,
     algo::RBPF,
     iter::Integer,
-    particle::AbstractParticle{<:RBState},
+    particle::Particle{<:RBState},
     observation,
     ref_state;
     kwargs...,
@@ -63,7 +63,7 @@ function update_particle(
     obs::ObservationProcess,
     algo::RBPF,
     iter::Integer,
-    particle::AbstractParticle{<:RBState},
+    particle::Particle{<:RBState},
     observation;
     kwargs...,
 )

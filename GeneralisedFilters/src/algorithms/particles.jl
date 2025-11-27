@@ -119,7 +119,7 @@ function predict_particle(
     dyn::LatentDynamics,
     algo::ParticleFilter,
     iter::Integer,
-    particle::AbstractParticle,
+    particle::Particle,
     observation,
     ref_state;
     kwargs...,
@@ -134,7 +134,7 @@ function update_particle(
     obs::ObservationProcess,
     ::ParticleFilter,
     iter::Integer,
-    particle::AbstractParticle,
+    particle::Particle,
     observation;
     kwargs...,
 )

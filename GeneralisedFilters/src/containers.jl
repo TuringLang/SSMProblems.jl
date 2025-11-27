@@ -2,15 +2,13 @@
 
 ## PARTICLES ###############################################################################
 
-abstract type AbstractParticle{T} end
-
 """
     Particle
 
 A container representing a single particle in a particle filter distribution, composed of a
 weighted sampled (stored as a log weight) and its ancestor index.
 """
-mutable struct Particle{ST,WT,AT<:Integer} <: AbstractParticle{ST}
+mutable struct Particle{ST,WT,AT<:Integer}
     state::ST
     log_w::WT
     ancestor::AT
@@ -56,7 +54,7 @@ their ancestories) into a distibution-like object.
   the unnormalized logsumexp of weights before update (for standard PF/guided filters)
   or a modified value that includes APF first-stage correction (for auxiliary PF).
 """
-mutable struct ParticleDistribution{WT,PT<:AbstractParticle,VT<:AbstractVector{PT}}
+mutable struct ParticleDistribution{WT,PT<:Particle,VT<:AbstractVector{PT}}
     particles::VT
     ll_baseline::WT
 end
