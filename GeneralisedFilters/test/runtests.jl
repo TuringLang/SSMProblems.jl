@@ -584,7 +584,7 @@ end
     )
     _, _, ys = sample(rng, full_model, K)
     # Convert to static arrays
-    ys = [SVector{1, T}(y) for y in ys]
+    ys = [SVector{1,T}(y) for y in ys]
 
     # Kalman smoother
     state, _ = GeneralisedFilters.smooth(
