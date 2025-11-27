@@ -107,6 +107,7 @@ end
     using SSMProblems
     using StableRNGs
     using StaticArrays
+    using PDMats
 
     D = 2
     rng = StableRNG(1234)
@@ -123,16 +124,18 @@ end
     R = @SMatrix rand(rng, D, D)
     R = R * R'
 
-    model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
+    model = create_homogeneous_linear_gaussian_model(
+        μ0, PDMat(Σ0), A, b, PDMat(Q), H, c, PDMat(R)
+    )
 
     _, _, ys = sample(rng, model, 2)
 
     state, _ = GeneralisedFilters.filter(rng, model, KalmanFilter(), ys)
 
     # Verify returned values are still StaticArrays
-    # @test ys[2] isa SVector{D,Float64}  # TODO: this fails due to use of MvNormal
+    @test ys[2] isa SVector{D,Float64}
     @test state.μ isa SVector{D,Float64}
-    @test state.Σ isa SMatrix{D,D,Float64}
+    @test state.Σ isa PDMat{Float64,SMatrix{D,D,Float64,D * D}}
 end
 
 @testitem "Kalman smoother test" begin
@@ -147,7 +150,9 @@ end
 
     for Dy in Dys
         rng = StableRNG(1234)
-        model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
+        model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
+            rng, Dx, Dy; static_arrays=true
+        )
         _, _, ys = sample(rng, model, 2)
 
         states, ll = GeneralisedFilters.smooth(rng, model, KalmanSmoother(), ys)
@@ -578,6 +583,8 @@ end
         rng, D_outer, D_inner, D_obs, T; static_arrays=true
     )
     _, _, ys = sample(rng, full_model, K)
+    # Convert to static arrays
+    ys = [SVector{1,T}(y) for y in ys]
 
     # Kalman smoother
     state, _ = GeneralisedFilters.smooth(
@@ -589,8 +596,8 @@ end
     ref_traj = nothing
     trajectory_samples = []
 
+    cb = GeneralisedFilters.DenseAncestorCallback(nothing)
     for i in 1:N_steps
-        cb = GeneralisedFilters.DenseAncestorCallback(nothing)
         bf_state, _ = GeneralisedFilters.filter(
             rng, hier_model, rbpf, ys; ref_state=ref_traj, callback=cb
         )
@@ -622,9 +629,10 @@ end
             μ_filt = trajectory_samples[i][t].z.μ
             Σ_filt = trajectory_samples[i][t].z.Σ
             μ_pred = A * μ_filt + b + C * trajectory_samples[i][t].x
-            Σ_pred = A * Σ_filt * A' + Q
+            Σ_pred = X_A_Xt(Σ_filt, A) + Q
+            Σ_pred = PDMat(Symmetric(Σ_pred))
 
-            G = Σ_filt * A' * inv(Σ_pred)
+            G = Σ_filt * A' / Σ_pred
             μ = μ_filt .+ G * (μ .- μ_pred)
             Σ = Σ_filt .+ G * (Σ .- Σ_pred) * G'
         end
@@ -649,7 +657,7 @@ end
     using LogExpFunctions
 
     import SSMProblems: prior, dyn, obs
-    import GeneralisedFilters: resampler, resample, move, RBState, InformationDistribution
+    import GeneralisedFilters: resampler, resample, move, RBState, InformationLikelihood
 
     using OffsetArrays
 
@@ -678,7 +686,7 @@ end
     N_steps = N_burnin + N_sample
     rbpf = RBPF(BF(N_particles; threshold=0.8), KalmanFilter())
     ref_traj = nothing
-    predictive_likelihoods = Vector{InformationDistribution{Vector{T},Matrix{T}}}(undef, K)
+    predictive_likelihoods = Vector{InformationLikelihood{Vector{T},Matrix{T}}}(undef, K)
     trajectory_samples = []
 
     for i in 1:N_steps

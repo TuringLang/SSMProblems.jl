@@ -1,4 +1,5 @@
 using StaticArrays
+import PDMats: PDMat
 
 function create_linear_gaussian_model(
     rng::AbstractRNG,
@@ -29,7 +30,9 @@ function create_linear_gaussian_model(
         R = SMatrix{Dy,Dy,T}(R)
     end
 
-    return create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
+    return create_homogeneous_linear_gaussian_model(
+        μ0, PDMat(Σ0), A, b, PDMat(Q), H, c, PDMat(R)
+    )
 end
 
 function _compute_joint(model, T::Integer)

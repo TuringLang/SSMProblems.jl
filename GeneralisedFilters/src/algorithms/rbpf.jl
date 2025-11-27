@@ -88,27 +88,27 @@ end
 function predictive_state(
     rng::AbstractRNG,
     dyn::HierarchicalDynamics,
-    apf::AuxiliaryParticleFilter{<:RBPF},
+    weight_strategy::RepresentativeStateLookAhead,
+    rbpf::RBPF,
     iter::Integer,
     particle::AbstractParticle{<:RBState};
     kwargs...,
 )
-    rbpf = apf.pf
     x_star = predictive_statistic(
-        rng, apf.pp, dyn.outer_dyn, iter, particle.state.x; kwargs...
+        rng, weight_strategy.pp, dyn.outer_dyn, iter, state.x; kwargs...
     )
     z_star = predict(
         rng,
         dyn.inner_dyn,
         rbpf.af,
         iter,
-        particle.state.z,
+        state.z,
         nothing;  # no observation available — maybe we should pass this in
-        prev_outer=particle.state.x,
+        prev_outer=state.x,
         new_outer=x_star,
         kwargs...,
     )
-    return Particle(RBState(x_star, z_star), particle.log_w, particle.ancestor)
+    return RBState(x_star, z_star)
 end
 
 function predictive_loglik(
@@ -120,7 +120,7 @@ function predictive_loglik(
     kwargs...,
 )
     _, log_increment = update(
-        obs, algo.af, iter, p_star.state.z, observation; new_outer=p_star.state.x, kwargs...
+        obs, algo.af, iter, state.z, observation; new_outer=state.x, kwargs...
     )
     return log_increment
 end

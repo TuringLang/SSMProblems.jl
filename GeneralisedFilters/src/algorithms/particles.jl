@@ -1,7 +1,8 @@
 export BootstrapFilter, BF
 export ParticleFilter, PF, AbstractProposal
-export AuxiliaryParticleFilter, PredictivePosterior
-export MeanPredictive, ModePredictive, DrawPredictive
+export AuxiliaryParticleFilter
+export AbstractLookAheadScore, RepresentativeStateLookAhead
+export PredictiveStatistic, MeanPredictive, ModePredictive, DrawPredictive
 
 import SSMProblems: distribution, simulate, logdensity
 
@@ -16,7 +17,8 @@ end
 function SSMProblems.simulate(
     rng::AbstractRNG, prop::AbstractProposal, iter::Integer, state, observation; kwargs...
 )
-    return rand(rng, SSMProblems.distribution(prop, iter, state, observation; kwargs...))
+    dist = SSMProblems.distribution(prop, iter, state, observation; kwargs...)
+    return SSMProblems.simulate_from_dist(rng, dist)
 end
 
 function SSMProblems.logdensity(
@@ -261,12 +263,56 @@ function filter(
     return filter(rng, ssm, algo, observations; ref_state=ref_state, kwargs...)
 end
 
-abstract type PredictivePosterior end
+abstract type AbstractLookAheadScore end
 
-struct AuxiliaryParticleFilter{PFT<:AbstractParticleFilter,PPT<:PredictivePosterior} <:
+function compute_logeta(
+    rng::AbstractRNG,
+    weight_strategy::AbstractLookAheadScore,
+    model::AbstractStateSpaceModel,
+    algo,
+    iter::Integer,
+    state,
+    observation;
+    kwargs...,
+)
+    return throw(
+        MethodError(
+            compute_logeta,
+            (rng, weight_strategy, model, algo, iter, state, observation, kwargs...),
+        ),
+    )
+end
+
+abstract type PredictiveStatistic end
+
+struct RepresentativeStateLookAhead{PPT<:PredictiveStatistic} <: AbstractLookAheadScore
+    pp::PPT
+end
+
+struct AuxiliaryParticleFilter{PFT<:AbstractParticleFilter,WT<:AbstractLookAheadScore} <:
        AbstractFilter
     pf::PFT
-    pp::PPT
+    weight_strategy::WT
+end
+
+function AuxiliaryParticleFilter(pf::AbstractParticleFilter, pp::PredictiveStatistic)
+    return AuxiliaryParticleFilter(pf, RepresentativeStateLookAhead(pp))
+end
+
+function compute_logeta(
+    rng::AbstractRNG,
+    weight_strategy::RepresentativeStateLookAhead,
+    model::AbstractStateSpaceModel,
+    algo,
+    iter::Integer,
+    state,
+    observation;
+    kwargs...,
+)
+    state_star = predictive_state(
+        rng, dyn(model), weight_strategy, algo, iter, state; kwargs...
+    )
+    return predictive_loglik(obs(model), algo, iter, state_star, observation; kwargs...)
 end
 
 resampler(algo::AuxiliaryParticleFilter) = resampler(algo.pf)
@@ -295,8 +341,16 @@ function step(
 )
     # Compute lookahead weights approximating log p(y_{t+1} | x_{t}^(i))
     log_ξs = map(state.particles) do particle
-        p_star = predictive_state(rng, dyn(model), algo, iter, particle; kwargs...)
-        predictive_loglik(obs(model), algo.pf, iter, p_star, observation; kwargs...)
+        compute_logeta(
+            rng,
+            algo.weight_strategy,
+            model,
+            algo.pf,
+            iter,
+            particle.state,
+            observation;
+            kwargs...,
+        )
     end
 
     rs = AuxiliaryResampler(resampler(algo), log_ξs)
@@ -308,7 +362,7 @@ function step(
     )
 end
 
-struct MeanPredictive <: PredictivePosterior end
+struct MeanPredictive <: PredictiveStatistic end
 
 function predictive_statistic(
     ::AbstractRNG, ::MeanPredictive, dyn, iter::Integer, state; kwargs...
@@ -317,7 +371,7 @@ function predictive_statistic(
     return mean(transition_dist)
 end
 
-struct ModePredictive <: PredictivePosterior end
+struct ModePredictive <: PredictiveStatistic end
 
 function predictive_statistic(
     ::AbstractRNG, ::ModePredictive, dyn, iter::Integer, state; kwargs...
@@ -326,7 +380,7 @@ function predictive_statistic(
     return mode(transition_dist)
 end
 
-struct DrawPredictive <: PredictivePosterior end
+struct DrawPredictive <: PredictiveStatistic end
 
 function predictive_statistic(
     rng::AbstractRNG, ::DrawPredictive, dyn, iter::Integer, state; kwargs...
@@ -334,27 +388,25 @@ function predictive_statistic(
     return SSMProblems.simulate(rng, dyn, iter, state; kwargs...)
 end
 
-# TODO (RB): Really these should be returning a state rather than a particle but we would
-# need to define a RB state first
 function predictive_state(
     rng::AbstractRNG,
     dyn::LatentDynamics,
-    apf::AuxiliaryParticleFilter{<:AbstractParticleFilter},
+    weight_strategy::RepresentativeStateLookAhead,
+    algo,
     iter::Integer,
-    particle::AbstractParticle;
+    state;
     kwargs...,
 )
-    x_star = predictive_statistic(rng, apf.pp, dyn, iter, particle.state; kwargs...)
-    return Particle(x_star, log_weight(particle), particle.ancestor)
+    return predictive_statistic(rng, weight_strategy.pp, dyn, iter, state; kwargs...)
 end
 
 function predictive_loglik(
     obs::ObservationProcess,
     algo::ParticleFilter,
     iter::Integer,
-    p_star::Particle,
+    state,
     observation;
     kwargs...,
 )
-    return SSMProblems.logdensity(obs, iter, p_star.state, observation; kwargs...)
+    return SSMProblems.logdensity(obs, iter, state, observation; kwargs...)
 end

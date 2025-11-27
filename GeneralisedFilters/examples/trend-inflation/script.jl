@@ -10,10 +10,12 @@ using Distributions
 using Random
 using StatsBase
 using LinearAlgebra
+using PDMats
 
 const GF = GeneralisedFilters
 
-INFL_PATH = joinpath(@__DIR__, "..", "..", "..", "examples", "trend-inflation"); #hide
+# INFL_PATH = joinpath(@__DIR__, "..", "..", "..", "examples", "trend-inflation"); #hide
+INFL_PATH = joinpath(@__DIR__)
 include(joinpath(INFL_PATH, "utilities.jl")); #hide
 
 # ## Model Definition
@@ -94,7 +96,7 @@ struct LocalLevelTrend <: LinearGaussianLatentDynamics end
 GF.calc_A(::LocalLevelTrend, ::Integer; kwargs...) = [1;;]
 GF.calc_b(::LocalLevelTrend, ::Integer; kwargs...) = [0;]
 function GF.calc_Q(::LocalLevelTrend, ::Integer; new_outer, kwargs...)
-    return [exp(new_outer[1]);;]
+    return PDMat([exp(new_outer[1]);;])
 end
 
 # Similarly, we define the observation process conditional on a separate log variance.
@@ -106,7 +108,7 @@ struct SimpleObservation <: LinearGaussianObservationProcess end
 GF.calc_H(::SimpleObservation, ::Integer; kwargs...) = [1;;]
 GF.calc_c(::SimpleObservation, ::Integer; kwargs...) = [0;]
 function GF.calc_R(::SimpleObservation, ::Integer; new_outer, kwargs...)
-    return [exp(new_outer[2]);;]
+    return PDMat([exp(new_outer[2]);;])
 end
 
 # ### Unobserved Components with Stochastic Volatility
@@ -119,7 +121,7 @@ function UCSV(γ::T) where {T<:Real}
     stoch_vol_process = StochasticVolatility(fill(γ, 2))
 
     local_level_model = StateSpaceModel(
-        GF.HomogeneousGaussianPrior(zeros(T, 1), Matrix(100.0I(1))),
+        GF.HomogeneousGaussianPrior(zeros(T, 1), PDMat([100.0;;])),
         LocalLevelTrend(),
         SimpleObservation(),
     )
@@ -208,7 +210,7 @@ struct OutlierAdjustedObservation <: LinearGaussianObservationProcess end
 GF.calc_H(::OutlierAdjustedObservation, ::Integer; kwargs...) = [1;;]
 GF.calc_c(::OutlierAdjustedObservation, ::Integer; kwargs...) = [0;]
 function GF.calc_R(::OutlierAdjustedObservation, ::Integer; new_outer, kwargs...)
-    return [new_outer[3] * exp(new_outer[2]);;]
+    return PDMat([new_outer[3] * exp(new_outer[2]);;])
 end
 
 # ### Outlier Adjusted UCSV
@@ -223,7 +225,7 @@ function UCSVO(γ::T, prob::T) where {T<:Real}
     )
 
     local_level_model = StateSpaceModel(
-        GF.HomogeneousGaussianPrior(zeros(T, 1), Matrix(100.0I(1))),
+        GF.HomogeneousGaussianPrior(zeros(T, 1), PDMat([100.0;;])),
         LocalLevelTrend(),
         OutlierAdjustedObservation(),
     )

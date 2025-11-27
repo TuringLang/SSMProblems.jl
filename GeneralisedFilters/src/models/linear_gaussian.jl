@@ -7,9 +7,21 @@ export HomogeneousGaussianPrior
 export HomogeneousLinearGaussianLatentDynamics
 export HomogeneousLinearGaussianObservationProcess
 
-import SSMProblems: distribution
-import Distributions: MvNormal
+import SSMProblems: distribution, simulate_from_dist
+import Distributions: MvNormal, params
 import LinearAlgebra: cholesky
+import Random: AbstractRNG, randn
+import PDMats: PDMat, AbstractPDMat
+using StaticArrays
+
+# Custom sampling for MvNormal with static arrays to return SVector instead of Vector
+function SSMProblems.simulate_from_dist(
+    rng::AbstractRNG, d::MvNormal{T,<:AbstractPDMat{T},SVector{D,T}}
+) where {T,D}
+    μ, Σ = params(d)
+    z = @SVector randn(rng, D)
+    return μ + cholesky(Σ).L * z
+end
 
 abstract type GaussianPrior <: StatePrior end
 
@@ -76,7 +88,7 @@ end
 #### HOMOGENEOUS LINEAR GAUSSIAN MODEL ####
 ###########################################
 
-struct HomogeneousGaussianPrior{XT<:AbstractVector,ΣT<:AbstractMatrix} <: GaussianPrior
+struct HomogeneousGaussianPrior{XT<:AbstractVector,ΣT<:AbstractPDMat} <: GaussianPrior
     μ0::XT
     Σ0::ΣT
 end
@@ -84,7 +96,7 @@ calc_μ0(prior::HomogeneousGaussianPrior; kwargs...) = prior.μ0
 calc_Σ0(prior::HomogeneousGaussianPrior; kwargs...) = prior.Σ0
 
 struct HomogeneousLinearGaussianLatentDynamics{
-    AT<:AbstractMatrix,bT<:AbstractVector,QT<:AbstractMatrix
+    AT<:AbstractMatrix,bT<:AbstractVector,QT<:AbstractPDMat
 } <: LinearGaussianLatentDynamics
     A::AT
     b::bT
@@ -95,7 +107,7 @@ calc_b(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer; kwargs...) = dyn
 calc_Q(dyn::HomogeneousLinearGaussianLatentDynamics, ::Integer; kwargs...) = dyn.Q
 
 struct HomogeneousLinearGaussianObservationProcess{
-    HT<:AbstractMatrix,cT<:AbstractVector,RT<:AbstractMatrix
+    HT<:AbstractMatrix,cT<:AbstractVector,RT<:AbstractPDMat
 } <: LinearGaussianObservationProcess
     H::HT
     c::cT
