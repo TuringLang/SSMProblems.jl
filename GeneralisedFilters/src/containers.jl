@@ -14,6 +14,18 @@ mutable struct Particle{ST,WT,AT<:Integer}
     ancestor::AT
 end
 
+# NOTE: this is only ever used for initializing a particle filter
+const UnweightedParticle{ST,AT} = Particle{ST,Nothing,AT}
+
+Particle(state, ancestor) = Particle(state, nothing, ancestor)
+Particle(particle::UnweightedParticle, ancestor) = Particle(particle.state, ancestor)
+function Particle(particle::Particle{<:Any,WT}, ancestor) where {WT<:Real}
+    return Particle(particle.state, zero(WT), ancestor)
+end
+
+log_weight(p::Particle{<:Any,<:Real}) = p.log_w
+log_weight(::UnweightedParticle) = false
+
 """
     RBState
 
@@ -30,8 +42,6 @@ mutable struct RBState{XT,ZT}
     z::ZT
 end
 
-const RBParticle{XT,ZT,WT} = Particle{RBState{XT,ZT},WT}
-
 """
     ParticleDistribution
 
@@ -44,7 +54,7 @@ their ancestories) into a distibution-like object.
   the unnormalized logsumexp of weights before update (for standard PF/guided filters)
   or a modified value that includes APF first-stage correction (for auxiliary PF).
 """
-mutable struct ParticleDistribution{WT,PT<:Particle{<:Any,WT},VT<:AbstractVector{PT}}
+mutable struct ParticleDistribution{WT,PT<:Particle,VT<:AbstractVector{PT}}
     particles::VT
     ll_baseline::WT
 end
@@ -59,10 +69,11 @@ Base.iterate(state::ParticleDistribution) = iterate(state.particles)
 # Not sure if this is kosher, since it doesn't follow the convention of Base.getindex
 Base.@propagate_inbounds Base.getindex(state::ParticleDistribution, i) = state.particles[i]
 
+log_weights(state::ParticleDistribution) = map(p -> log_weight(p), state.particles)
+get_weights(state::ParticleDistribution) = softmax(log_weights(state))
+
 # Helpers for StatsBase compatibility
-function StatsBase.weights(state::ParticleDistribution)
-    return Weights(softmax(map(p -> p.log_w, state.particles)))
-end
+StatsBase.weights(state::ParticleDistribution) = StatsBase.Weights(get_weights(state))
 
 """
     marginalise!(state::ParticleDistribution)
@@ -78,22 +89,21 @@ cases through a single-scalar caching mechanism. For standard PF, ll_baseline eq
 LSE before adding observation weights. For APF with resampling, it includes first-stage
 correction terms computed during the APF resampling step.
 """
-function marginalise!(state::ParticleDistribution)
+function marginalise!(state::ParticleDistribution, particles)
     # Compute logsumexp after adding observation likelihoods
-    LSE_after = logsumexp(map(p -> p.log_w, state.particles))
+    LSE_after = logsumexp(log_weight.(particles))
 
     # Compute log-likelihood increment: works for both PF and APF cases
     ll_increment = LSE_after - state.ll_baseline
 
     # Normalize weights
-    for p in state.particles
+    for p in particles
         p.log_w -= LSE_after
     end
 
     # Reset baseline for next iteration
-    state.ll_baseline = 0.0
-
-    return ll_increment
+    new_state = ParticleDistribution(particles, zero(ll_increment))
+    return new_state, ll_increment
 end
 
 ## GAUSSIAN STATES #########################################################################

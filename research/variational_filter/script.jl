@@ -4,8 +4,6 @@
 This example demonstrates the extensibility of GeneralisedFilters with an adaptation of VSMC
 with a tunable proposal ([Naesseth et al, 2016](https://arxiv.org/pdf/1705.11140)).
 =#
-using Pkg;
-Pkg.activate("research/variational_filter")
 
 using GeneralisedFilters, SSMProblems
 using PDMats, LinearAlgebra
@@ -67,12 +65,7 @@ function (kernel::DeepGaussianProposal)(x)
 end
 
 function SSMProblems.distribution(
-    model::AbstractStateSpaceModel,
-    kernel::DeepGaussianProposal,
-    step::Integer,
-    state,
-    observation;
-    kwargs...,
+    kernel::DeepGaussianProposal, step::Integer, state, observation; kwargs...
 )
     input = cat(state, observation; dims=1)
     μ, σ = kernel(input)
@@ -118,8 +111,8 @@ begin
     fig = Figure(; size=(500, 400), fontsize=16)
     ax = Axis(fig[1, 1]; limits=((0, 500), nothing), ylabel="ELBO", xlabel="Epochs")
     _, kf_ll = GeneralisedFilters.filter(true_model, KF(), ys)
-    hlines!(ax, kf_ll; linewidth=3, color=:black, label="KF")
-    lines!(ax, vsmc_ll; linewidth=3, color=:red, label="VSMC")
+    hlines!(ax, kf_ll; color=:black, label="KF")
+    lines!(ax, vsmc_ll; color=:red, label="VSMC")
     axislegend(ax; position=:rb)
     fig
 end

@@ -14,8 +14,8 @@ using PDMats
 
 const GF = GeneralisedFilters
 
-# INFL_PATH = joinpath(@__DIR__, "..", "..", "..", "examples", "trend-inflation"); #hide
-INFL_PATH = joinpath(@__DIR__)
+INFL_PATH = joinpath(@__DIR__, "..", "..", "..", "examples", "trend-inflation"); #hide
+# INFL_PATH = joinpath(@__DIR__)
 include(joinpath(INFL_PATH, "utilities.jl")); #hide
 
 # ## Model Definition

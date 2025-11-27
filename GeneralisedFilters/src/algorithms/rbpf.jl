@@ -18,8 +18,7 @@ function initialise_particle(
 )
     x = sample_prior(rng, prior.outer_prior, algo.pf, ref_state; kwargs...)
     z = initialise(rng, prior.inner_prior, algo.af; new_outer=x, kwargs...)
-    # TODO (RB):  determine the correct type for the log_w field or use a NoWeight type
-    return Particle(RBState(x, z), 0.0, 0)
+    return Particle(RBState(x, z), 0)
 end
 
 function predict_particle(
@@ -27,7 +26,7 @@ function predict_particle(
     dyn::HierarchicalDynamics,
     algo::RBPF,
     iter::Integer,
-    particle::RBParticle,
+    particle::Particle{<:RBState},
     observation,
     ref_state;
     kwargs...,
@@ -55,14 +54,16 @@ function predict_particle(
         kwargs...,
     )
 
-    return Particle(RBState(new_x, new_z), particle.log_w + logw_inc, particle.ancestor)
+    return Particle(
+        RBState(new_x, new_z), log_weight(particle) + logw_inc, particle.ancestor
+    )
 end
 
 function update_particle(
     obs::ObservationProcess,
     algo::RBPF,
     iter::Integer,
-    particle::RBParticle,
+    particle::Particle{<:RBState},
     observation;
     kwargs...,
 )
@@ -76,7 +77,9 @@ function update_particle(
         kwargs...,
     )
     return Particle(
-        RBState(particle.state.x, new_z), particle.log_w + log_increment, particle.ancestor
+        RBState(particle.state.x, new_z),
+        log_weight(particle) + log_increment,
+        particle.ancestor,
     )
 end
 

@@ -468,9 +468,9 @@ end
     struct DummyResampler <: GeneralisedFilters.AbstractResampler end
 
     function GeneralisedFilters.sample_ancestors(
-        rng::AbstractRNG, resampler::DummyResampler, weights::AbstractVector
+        ::AbstractRNG, ::DummyResampler, weights::AbstractVector, n::Int64=length(weights)
     )
-        return [mod1(a - 1, length(weights)) for a in 1:length(weights)]
+        return [mod1(a - 1, length(weights)) for a in 1:n]
     end
 
     SEED = 1234
@@ -703,16 +703,14 @@ end
             bf_state = resample(rng, resampler(rbpf), bf_state; ref_state=ref_traj)
 
             if !isnothing(ref_traj)
-                ancestor_weights = Vector{Float64}(undef, N_particles)
-                for j in 1:N_particles
-                    ancestor_weights[j] =
-                        bf_state.particles[j].log_w + ancestor_weight(
-                            dyn(hier_model),
-                            rbpf,
-                            t,
-                            bf_state.particles[j].state,
-                            RBState(ref_traj[t], predictive_likelihoods[t]),
-                        )
+                ancestor_weights = map(bf_state.particles) do particle
+                    GeneralisedFilters.log_weight(particle) + ancestor_weight(
+                        dyn(hier_model),
+                        rbpf,
+                        t,
+                        particle.state,
+                        RBState(ref_traj[t], predictive_likelihoods[t]),
+                    )
                 end
                 ancestor_idx = sample(
                     rng, 1:N_particles, weights(softmax(ancestor_weights))
