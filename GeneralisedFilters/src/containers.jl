@@ -1,4 +1,51 @@
+using LogExpFunctions
+
 """Containers used for storing representations of the filtering distribution."""
+
+## TYPELESS INITIALIZERS ###################################################################
+
+struct TypelessZero <: Number end
+
+Base.convert(::Type{T}, ::TypelessZero) where {T<:Number} = zero(T)
+Base.convert(::Type{TypelessZero}, ::TypelessZero) = TypelessZero()
+
+Base.:+(::TypelessZero, ::TypelessZero) = TypelessZero()
+
+Base.promote_rule(::Type{TypelessZero}, ::Type{T}) where {T<:Number} = T
+Base.promote_rule(::Type{TypelessZero}, ::Type{TypelessZero}) = TypelessZero
+
+Base.zero(::TypelessZero) = TypelessZero()
+Base.zero(::Type{TypelessZero}) = TypelessZero()
+
+Base.iszero(::TypelessZero) = true
+Base.isone(::TypelessZero) = false
+
+Base.show(io::IO, ::TypelessZero) = print(io, "TypelessZero()")
+
+struct TypelessBaseline <: Number
+    N::Int64
+end
+
+Base.convert(::Type{T}, b::TypelessBaseline) where {T<:Number} = T(log(b.N))
+Base.promote_rule(::Type{T}, ::Type{TypelessBaseline}) where {T<:Number} = T
+
+Base.iszero(::TypelessBaseline) = false
+Base.isone(::TypelessBaseline) = false
+
+function LogExpFunctions.logsumexp(weights::AbstractVector{TypelessZero})
+    return TypelessBaseline(length(weights))
+end
+
+function LogExpFunctions.softmax(x::AbstractVector{TypelessZero})
+    # TODO: horrible, but theoretically never used... except in the unit tests
+    return fill(1/length(x), length(x))
+end
+
+# this should cover it even though it's a little fucked up...
+Base.:+(::TypelessZero, b::TypelessBaseline) = b
+Base.:+(b::TypelessBaseline, ::TypelessZero) = b
+
+Base.show(io::IO, b::TypelessBaseline) = print(io, "Typeless(log($(b.N)))")
 
 ## PARTICLES ###############################################################################
 
@@ -15,16 +62,15 @@ mutable struct Particle{ST,WT,AT<:Integer}
 end
 
 # NOTE: this is only ever used for initializing a particle filter
-const UnweightedParticle{ST,AT} = Particle{ST,Nothing,AT}
+const UnweightedParticle{ST,AT} = Particle{ST,TypelessZero,AT}
 
-Particle(state, ancestor) = Particle(state, nothing, ancestor)
+Particle(state, ancestor) = Particle(state, TypelessZero(), ancestor)
 Particle(particle::UnweightedParticle, ancestor) = Particle(particle.state, ancestor)
 function Particle(particle::Particle{<:Any,WT}, ancestor) where {WT<:Real}
     return Particle(particle.state, zero(WT), ancestor)
 end
 
-log_weight(p::Particle{<:Any,<:Real}) = p.log_w
-log_weight(::UnweightedParticle) = false
+log_weight(p::Particle) = p.log_w
 
 """
     RBState

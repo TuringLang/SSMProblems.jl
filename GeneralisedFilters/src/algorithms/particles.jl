@@ -46,7 +46,7 @@ function initialise(
         initialise_particle(rng, prior, algo, ref; kwargs...)
     end
 
-    return ParticleDistribution(particles, false)
+    return ParticleDistribution(particles, TypelessZero())
 end
 
 function predict(
@@ -242,7 +242,7 @@ function propogate(
     end
 
     # TODO: replace this with nothing (unweighted particle)
-    return new_x, false
+    return new_x, TypelessZero()
 end
 
 # TODO: I feel like we shouldn't need to do this conversion. It should be handled by dispatch

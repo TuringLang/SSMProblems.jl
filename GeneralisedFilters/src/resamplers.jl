@@ -61,7 +61,7 @@ end
 
 function construct_new_state(
     state::ParticleDistribution{WT}, idxs, ::Nothing
-) where {WT<:Real}
+) where {WT<:Number}
     new_particles = map(eachindex(state.particles)) do i
         particle = state.particles[idxs[i]]
         resample_ancestor(particle, idxs[i])
@@ -167,9 +167,6 @@ function will_resample(cond_resampler::ESSResampler, state, weights=get_weights(
     ess = inv(sum(abs2, weights))
     return cond_resampler.threshold * n ≥ ess
 end
-
-# for initial states, skip resampling
-will_resample(::ESSResampler, ::UniformParticles, weights=get_weights(state)) = false
 
 function resample(
     rng::AbstractRNG,
