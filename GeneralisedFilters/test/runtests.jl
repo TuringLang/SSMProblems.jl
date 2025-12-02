@@ -5,6 +5,7 @@ using TestItemRunner
 @run_package_tests filter = ti -> !(:gpu in ti.tags)
 
 include("Aqua.jl")
+include("type_stability.jl")
 include("resamplers.jl")
 
 @testitem "Kalman filter test" begin
