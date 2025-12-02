@@ -168,6 +168,9 @@ function will_resample(cond_resampler::ESSResampler, state, weights=get_weights(
     return cond_resampler.threshold * n ≥ ess
 end
 
+# for initial states, skip resampling
+will_resample(::ESSResampler, ::UniformParticles, weights=get_weights(state)) = false
+
 function resample(
     rng::AbstractRNG,
     cond_resampler::ESSResampler,

@@ -106,6 +106,8 @@ function marginalise!(state::ParticleDistribution, particles)
     return new_state, ll_increment
 end
 
+const UniformParticles{WT,PT,VT} = ParticleDistribution{WT,PT,VT} where {PT<:UnweightedParticle}
+
 ## GAUSSIAN STATES #########################################################################
 
 """

@@ -340,7 +340,7 @@ function step(
     kwargs...,
 )
     # Compute lookahead weights approximating log p(y_{t+1} | x_{t}^(i))
-    log_ξs = map(state.particles) do particle
+    log_ηs = map(state.particles) do particle
         compute_logeta(
             rng,
             algo.weight_strategy,
@@ -353,7 +353,7 @@ function step(
         )
     end
 
-    rs = AuxiliaryResampler(resampler(algo), log_ξs)
+    rs = AuxiliaryResampler(resampler(algo), log_ηs)
     state = maybe_resample(rng, rs, state; ref_state)
 
     callback(model, algo, iter, state, observation, PostResample; kwargs...)
