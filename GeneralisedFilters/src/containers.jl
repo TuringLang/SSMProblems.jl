@@ -26,8 +26,13 @@ struct TypelessBaseline <: Number
     N::Int64
 end
 
+# Constructors for compatibility with Base.Number
+TypelessBaseline(x::TypelessBaseline) = x
+TypelessBaseline(x::Base.TwicePrecision) = TypelessBaseline(Int64(x))
+TypelessBaseline(x::AbstractChar) = TypelessBaseline(Int64(x))
+
 Base.convert(::Type{T}, b::TypelessBaseline) where {T<:Number} = T(log(b.N))
-Base.promote_rule(::Type{T}, ::Type{TypelessBaseline}) where {T<:Number} = T
+Base.promote_rule(::Type{TypelessBaseline}, ::Type{T}) where {T<:Number} = T
 
 Base.iszero(::TypelessBaseline) = false
 Base.isone(::TypelessBaseline) = false
@@ -38,7 +43,7 @@ end
 
 function LogExpFunctions.softmax(x::AbstractVector{TypelessZero})
     # TODO: horrible, but theoretically never used... except in the unit tests
-    return fill(1/length(x), length(x))
+    return fill(1 / length(x), length(x))
 end
 
 # this should cover it even though it's a little fucked up...
