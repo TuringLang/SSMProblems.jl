@@ -4,6 +4,12 @@ using LogExpFunctions
 
 ## TYPELESS INITIALIZERS ###################################################################
 
+"""
+    TypelessZero
+
+A lazy promotion for uninitialized particle weights whos type is not yet known at the first
+simulation of a particle filter.
+"""
 struct TypelessZero <: Number end
 
 Base.convert(::Type{T}, ::TypelessZero) where {T<:Number} = zero(T)
@@ -22,6 +28,12 @@ Base.isone(::TypelessZero) = false
 
 Base.show(io::IO, ::TypelessZero) = print(io, "TypelessZero()")
 
+"""
+    TypelessBaseline
+
+A lazy promotion for the computation of log-likelihood baslines given a collection of
+unweighted particles.
+"""
 struct TypelessBaseline <: Number
     N::Int64
 end

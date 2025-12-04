@@ -241,7 +241,6 @@ function propogate(
         ref_state
     end
 
-    # TODO: replace this with nothing (unweighted particle)
     return new_x, TypelessZero()
 end
 

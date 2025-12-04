@@ -75,6 +75,11 @@ end
 
 ## AUXILIARY RESAMPLER #####################################################################
 
+"""
+    AuxiliaryResampler
+
+A resampling scheme for multistage particle resampling with auxiliary weights
+"""
 struct AuxiliaryResampler <: AbstractResampler
     resampler::AbstractResampler
     log_weights::AbstractVector
@@ -117,7 +122,7 @@ function construct_new_state(
     LSE_1 = logsumexp(auxiliary_weights + log_weights(state))
     LSE_2 = logsumexp(log_weights(state))
     LSE_3 = logsumexp(log_weight.(new_particles))
-    LSE_4 = logsumexp(zero(auxiliary_weights)) # same thing as log(num_particles)
+    LSE_4 = TypelessBaseline(length(auxiliary_weights))
 
     return ParticleDistribution(new_particles, -((LSE_1 - LSE_2) + (LSE_3 - LSE_4)))
 end
