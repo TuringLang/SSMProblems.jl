@@ -46,7 +46,6 @@ function LogExpFunctions.softmax(x::AbstractVector{TypelessZero})
     return fill(1 / length(x), length(x))
 end
 
-# this should cover it even though it's a little fucked up...
 Base.:+(::TypelessZero, b::TypelessBaseline) = b
 Base.:+(b::TypelessBaseline, ::TypelessZero) = b
 
