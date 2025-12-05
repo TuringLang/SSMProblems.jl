@@ -15,7 +15,7 @@ Determine whether a resampler will trigger resampling given the current particle
 For uncondition resamplers, always returns `true`. For conditional resamplers (e.g.,
 `ESSResampler`), checks the resampling condition.
 """
-function will_resample(::AbstractResampler, state)
+function will_resample(::AbstractResampler, state, weights=get_weights(state))
     # Default: unconditional resamplers always resample
     return true
 end
@@ -35,63 +35,127 @@ otherwise return the input state unchanged (but with ancestors set to self).
 function maybe_resample(
     rng::AbstractRNG,
     resampler::AbstractResampler,
-    state;
+    state,
+    weights=get_weights(state);
     ref_state::Union{Nothing,AbstractVector}=nothing,
+    auxiliary_weights=nothing,
 )
-    # Default: unconditional resamplers always resample
-    return resample(rng, resampler, state; ref_state)
+    return resample(rng, resampler, state, weights; ref_state, auxiliary_weights)
 end
 
 function resample(
     rng::AbstractRNG,
     resampler::AbstractResampler,
-    state;
+    state,
+    weights=get_weights(state);
     ref_state::Union{Nothing,AbstractVector}=nothing,
+    auxiliary_weights::Union{Nothing,AbstractVector}=nothing,
+    kwargs...,
 )
-    weights = softmax(map(p -> p.log_w, state.particles))
     idxs = sample_ancestors(rng, resampler, weights)
-    # Set reference trajectory indices
     if !isnothing(ref_state)
         CUDA.@allowscalar idxs[1] = 1
     end
-    return construct_new_state(state, idxs)
+    return construct_new_state(state, idxs, auxiliary_weights)
 end
 
-function construct_new_state(state, idxs)
-    new_particles = similar(state.particles)
-    for i in 1:length(state.particles)
-        new_particles[i] = resample_ancestor(state.particles[idxs[i]], idxs[i])
+function construct_new_state(
+    state::ParticleDistribution{WT}, idxs, ::Nothing
+) where {WT<:Number}
+    new_particles = map(eachindex(state.particles)) do i
+        particle = state.particles[idxs[i]]
+        resample_ancestor(particle, idxs[i])
     end
-    # After resampling, weights are equal, so ll_baseline = 0.0
-    return ParticleDistribution(new_particles, 0.0)
+    return ParticleDistribution(new_particles, zero(WT))
 end
 
-# TODO (RB): this can probably be cleaned up if we allow mutation (I'm just playing it safe
-# whilst developing)
 function resample_ancestor(particle::Particle, ancestor::Int)
-    return Particle(particle.state, 0.0, ancestor)
+    return Particle(particle, ancestor)
+end
+
+## AUXILIARY RESAMPLER #####################################################################
+
+"""
+    AuxiliaryResampler
+
+A resampling scheme for multistage particle resampling with auxiliary weights
+"""
+struct AuxiliaryResampler <: AbstractResampler
+    resampler::AbstractResampler
+    log_weights::AbstractVector
+end
+
+function resample(
+    rng::AbstractRNG,
+    auxiliary::AuxiliaryResampler,
+    state;
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+)
+    weights = softmax(log_weights(state) + auxiliary.log_weights)
+    auxiliary_weights = auxiliary.log_weights
+    return resample(rng, auxiliary.resampler, state, weights; ref_state, auxiliary_weights)
+end
+
+function maybe_resample(
+    rng::AbstractRNG, auxiliary::AuxiliaryResampler, state; ref_state=nothing
+)
+    weights = softmax(log_weights(state) + auxiliary.log_weights)
+    auxiliary_weights = auxiliary.log_weights
+    return maybe_resample(
+        rng, auxiliary.resampler, state, weights; ref_state, auxiliary_weights
+    )
+end
+
+function will_resample(auxiliary::AuxiliaryResampler, state, weights)
+    return will_resample(auxiliary.resampler, state, weights)
+end
+
+function construct_new_state(
+    state::ParticleDistribution, idxs, auxiliary_weights::AbstractVector
+)
+    new_particles = map(eachindex(state.particles)) do i
+        particle = state.particles[idxs[i]]
+        resample_ancestor(particle, idxs[i], auxiliary_weights)
+    end
+
+    # calculate the baseline log-likelihood (not a fan, but it works...)
+    LSE_1 = logsumexp(auxiliary_weights + log_weights(state))
+    LSE_2 = logsumexp(log_weights(state))
+    LSE_3 = logsumexp(log_weight.(new_particles))
+    LSE_4 = TypelessBaseline(length(auxiliary_weights))
+
+    return ParticleDistribution(new_particles, -((LSE_1 - LSE_2) + (LSE_3 - LSE_4)))
+end
+
+function resample_ancestor(
+    particle::Particle, ancestor::Int, auxiliary_weights::AbstractVector
+)
+    return Particle(particle.state, -auxiliary_weights[ancestor], ancestor)
 end
 
 ## CONDITIONAL RESAMPLING ##################################################################
 
 abstract type AbstractConditionalResampler <: AbstractResampler end
 
+function preserve_sample(state::ParticleDistribution)
+    new_particles = map(eachindex(state.particles)) do i
+        set_ancestor(state.particles[i], i)
+    end
+    return ParticleDistribution(new_particles, state.ll_baseline)
+end
+
 function maybe_resample(
     rng::AbstractRNG,
     cond_resampler::AbstractConditionalResampler,
-    state;
+    state,
+    weights=get_weights(state);
     ref_state::Union{Nothing,AbstractVector}=nothing,
+    auxiliary_weights::Union{Nothing,AbstractVector}=nothing,
 )
-    if will_resample(cond_resampler, state)
-        return resample(rng, cond_resampler, state; ref_state)
+    if will_resample(cond_resampler, state, weights)
+        return resample(rng, cond_resampler, state, weights; ref_state, auxiliary_weights)
     else
-        # Not resampling: preserve ll_baseline and set ancestors to self
-        n = length(state.particles)
-        new_particles = similar(state.particles)
-        for i in 1:n
-            new_particles[i] = set_ancestor(state.particles[i], i)
-        end
-        return ParticleDistribution(new_particles, state.ll_baseline)
+        return preserve_sample(state)
     end
 end
 
@@ -103,9 +167,8 @@ struct ESSResampler <: AbstractConditionalResampler
     end
 end
 
-function will_resample(cond_resampler::ESSResampler, state)
-    n = length(state.particles)
-    weights = softmax(map(p -> p.log_w, state.particles))
+function will_resample(cond_resampler::ESSResampler, state, weights=get_weights(state))
+    n = length(state)
     ess = inv(sum(abs2, weights))
     return cond_resampler.threshold * n ≥ ess
 end
@@ -113,16 +176,20 @@ end
 function resample(
     rng::AbstractRNG,
     cond_resampler::ESSResampler,
-    state;
+    state,
+    weights=get_weights(state);
     ref_state::Union{Nothing,AbstractVector}=nothing,
+    auxiliary_weights::Union{Nothing,AbstractVector}=nothing,
 )
-    return resample(rng, cond_resampler.resampler, state; ref_state)
+    return resample(
+        rng, cond_resampler.resampler, state, weights; ref_state, auxiliary_weights
+    )
 end
 
 # TODO (RB): this can probably be cleaned up if we allow mutation (I'm just playing it safe
 # whilst developing)
 function set_ancestor(particle::Particle, ancestor::Int)
-    return Particle(particle.state, particle.log_w, ancestor)
+    return Particle(particle.state, log_weight(particle), ancestor)
 end
 
 ## CATEGORICAL RESAMPLE ####################################################################

@@ -19,7 +19,7 @@ function SSMProblems.simulate_from_dist(
     rng::AbstractRNG, d::MvNormal{T,<:AbstractPDMat{T},SVector{D,T}}
 ) where {T,D}
     μ, Σ = params(d)
-    z = @SVector randn(rng, D)
+    z = @SVector randn(rng, T, D)
     return μ + cholesky(Σ).L * z
 end
 
