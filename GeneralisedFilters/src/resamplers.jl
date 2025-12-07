@@ -25,7 +25,7 @@ end
         rng::AbstractRNG,
         resampler::AbstractResampler,
         state::ParticleDistribution;
-        ref_state::Union{Nothing,AbstractVector}=nothing,
+        ref_state=nothing,
     ) -> ParticleDistribution
 
 Perform resampling if the resampler's condition is met (for conditional resamplers),
@@ -37,7 +37,7 @@ function maybe_resample(
     resampler::AbstractResampler,
     state,
     weights=get_weights(state);
-    ref_state::Union{Nothing,AbstractVector}=nothing,
+    ref_state=nothing,
     auxiliary_weights=nothing,
 )
     return resample(rng, resampler, state, weights; ref_state, auxiliary_weights)
@@ -48,7 +48,7 @@ function resample(
     resampler::AbstractResampler,
     state,
     weights=get_weights(state);
-    ref_state::Union{Nothing,AbstractVector}=nothing,
+    ref_state=nothing,
     auxiliary_weights::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
@@ -89,7 +89,7 @@ function resample(
     rng::AbstractRNG,
     auxiliary::AuxiliaryResampler,
     state;
-    ref_state::Union{Nothing,AbstractVector}=nothing,
+    ref_state=nothing,
 )
     weights = softmax(log_weights(state) + auxiliary.log_weights)
     auxiliary_weights = auxiliary.log_weights
@@ -149,7 +149,7 @@ function maybe_resample(
     cond_resampler::AbstractConditionalResampler,
     state,
     weights=get_weights(state);
-    ref_state::Union{Nothing,AbstractVector}=nothing,
+    ref_state=nothing,
     auxiliary_weights::Union{Nothing,AbstractVector}=nothing,
 )
     if will_resample(cond_resampler, state, weights)
@@ -178,7 +178,7 @@ function resample(
     cond_resampler::ESSResampler,
     state,
     weights=get_weights(state);
-    ref_state::Union{Nothing,AbstractVector}=nothing,
+    ref_state=nothing,
     auxiliary_weights::Union{Nothing,AbstractVector}=nothing,
 )
     return resample(

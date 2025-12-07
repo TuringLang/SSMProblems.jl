@@ -29,7 +29,7 @@ function GeneralisedFilters.resample(
     alt_resampler::AlternatingResampler,
     state,
     weights;
-    ref_state::Union{Nothing,AbstractVector}=nothing,
+    ref_state=nothing,
     kwargs...,
 )
     alt_resampler.resample_next = !alt_resampler.resample_next

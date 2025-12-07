@@ -1,5 +1,7 @@
 using LogExpFunctions
 
+export ReferenceTrajectory
+
 """Containers used for storing representations of the filtering distribution."""
 
 ## TYPELESS INITIALIZERS ###################################################################
@@ -206,4 +208,21 @@ information/precision matrix.
 """
 function natural_params(state::InformationLikelihood)
     return state.λ, state.Ω
+end
+
+## REFERENCE TRAJECTORIES ##################################################################
+
+"""
+    ReferenceTrajectory
+
+A container representing a sampled trajectory from a state-space model, typically used for
+particle smoothing or conditional SMC.
+
+Fields:
+- `x0`: Initial state at time 0
+- `xs`: Vector of states at times 1:T
+"""
+struct ReferenceTrajectory{ST,VT<:AbstractVector}
+    x0::ST
+    xs::VT
 end
