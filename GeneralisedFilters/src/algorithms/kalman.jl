@@ -238,7 +238,7 @@ function backward_predict(
     # λ̂ = A' * (I - Ω * F * inv(Λ) * F') * m
     FΛ_inv_Ft = X_invA_Xt(Λ, F)
     I_minus_term = I - Ω * FΛ_inv_Ft
-    Ω̂ = PDMat(A' * I_minus_term * Ω * A)
+    Ω̂ = PDMat(Symmetric(A' * I_minus_term * Ω * A))
     λ̂ = A' * I_minus_term * m
 
     return InformationLikelihood(λ̂, Ω̂)
