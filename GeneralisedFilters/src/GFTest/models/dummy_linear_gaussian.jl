@@ -76,9 +76,23 @@ function create_dummy_linear_gaussian_model(
     R = rand_cov(rng, T, Dy; scale=obs_noise_scale)
 
     # Create full model
-    full_model = create_homogeneous_linear_gaussian_model(
-        μ0, PDMat(Σ0), A, b, PDMat(Q), H, c, PDMat(R)
-    )
+    # full_model = create_homogeneous_linear_gaussian_model(
+    #     μ0, PDMat(Σ0), A, b, PDMat(Q), H, c, PDMat(R)
+    # )
+    full_model = if static_arrays
+        create_homogeneous_linear_gaussian_model(
+            SVector{D_outer + D_inner,T}(μ0),
+            PDMat(SMatrix{D_outer + D_inner,D_outer + D_inner,T}(Σ0)),
+            SMatrix{D_outer + D_inner,D_outer + D_inner,T}(A),
+            SVector{D_outer + D_inner,T}(b),
+            PDMat(SMatrix{D_outer + D_inner,D_outer + D_inner,T}(Q)),
+            SMatrix{Dy,D_outer + D_inner,T}(H),
+            SVector{Dy,T}(c),
+            PDMat(SMatrix{Dy,Dy,T}(R)),
+        )
+    else
+        create_homogeneous_linear_gaussian_model(μ0, PDMat(Σ0), A, b, PDMat(Q), H, c, PDMat(R))
+    end
 
     outer_prior, outer_dyn = if static_arrays
         prior = HomogeneousGaussianPrior(
