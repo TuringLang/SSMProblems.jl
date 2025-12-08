@@ -60,12 +60,14 @@ function resample(
 end
 
 function construct_new_state(
-    state::ParticleDistribution{WT}, idxs, ::Nothing
-) where {WT<:Number}
-    new_particles = map(eachindex(state.particles)) do i
+    state::ParticleDistribution{WT,PT}, idxs, ::Nothing
+) where {WT<:Number,PT}
+    new_particles = Vector{PT}(undef, length(state.particles))
+    for i in eachindex(state.particles)
         particle = state.particles[idxs[i]]
-        resample_ancestor(particle, idxs[i])
+        new_particles[i] = resample_ancestor(particle, idxs[i])
     end
+
     return ParticleDistribution(new_particles, zero(WT))
 end
 
