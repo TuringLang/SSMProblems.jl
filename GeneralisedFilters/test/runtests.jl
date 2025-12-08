@@ -48,7 +48,7 @@ include("resamplers.jl")
     end
 end
 
-@testitem "Backward information filter test" begin
+@testitem "Backward information predictor test" begin
     using GeneralisedFilters
     using Distributions
     using LinearAlgebra
@@ -65,7 +65,8 @@ end
         _, _, ys = sample(rng, model, T)
 
         # Perform backward information filtering
-        BIF = BackwardInformationPredictor()
+        # Need initial jitter when Dy < Dx to ensure PD covariance
+        BIF = BackwardInformationPredictor(; initial_jitter=1e-8)
         predictive_likelihood = backward_initialise(rng, model.obs, BIF, T, ys[T])
         predictive_likelihood = backward_predict(
             rng, model.dyn, BIF, T - 1, predictive_likelihood
@@ -99,7 +100,7 @@ end
         λ, Ω = GeneralisedFilters.natural_params(predictive_likelihood)
 
         @test λ ≈ λ_true
-        @test Ω ≈ Ω_true
+        @test Ω ≈ Ω_true atol = 1e-6  # slight numerical differences due to jitter
     end
 end
 
