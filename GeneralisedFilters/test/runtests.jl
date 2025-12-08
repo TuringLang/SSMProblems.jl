@@ -687,7 +687,9 @@ end
     N_steps = N_burnin + N_sample
     rbpf = RBPF(BF(N_particles; threshold=0.8), KalmanFilter())
     ref_traj = nothing
-    predictive_likelihoods = Vector{InformationLikelihood{Vector{T},Matrix{T}}}(undef, K)
+    predictive_likelihoods = Vector{InformationLikelihood{Vector{T},PDMat{T,Matrix{T}}}}(
+        undef, K
+    )
     trajectory_samples = []
 
     for i in 1:N_steps
