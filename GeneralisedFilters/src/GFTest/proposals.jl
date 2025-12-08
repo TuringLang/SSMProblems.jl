@@ -25,7 +25,7 @@ function SSMProblems.distribution(prop::OptimalProposal, step::Integer, x, y; kw
     state = MvNormal(A * x + b, Q)
 
     # Update with observation: p(x_t | x_{t-1}, y_t)
-    state, _ = GeneralisedFilters.kalman_update(state, obs_params, y)
+    state, _ = GeneralisedFilters.kalman_update(state, obs_params, y, nothing) # no jitter
 
     return state
 end
