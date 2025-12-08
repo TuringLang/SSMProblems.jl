@@ -232,7 +232,7 @@ function backward_predict(
 
     m = λ - Ω * b
     # HACK: missing method for Symmetir{SMatrix} + UniformScaling
-    Λ = PDMat(Xt_A_X(Ω, F).data + I)
+    Λ = PDMat(Symmetric(Xt_A_X(Ω, F).data + I))
 
     # Ω̂ = A' * (I - Ω * F * inv(Λ) * F') * Ω * A
     # λ̂ = A' * (I - Ω * F * inv(Λ) * F') * m
