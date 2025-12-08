@@ -464,8 +464,6 @@ end
     using Random: randexp, AbstractRNG
     using StatsBase: sample, Weights
 
-    using OffsetArrays
-
     struct DummyResampler <: GeneralisedFilters.AbstractResampler end
 
     function GeneralisedFilters.sample_ancestors(
@@ -482,19 +480,29 @@ end
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, 1, 1)
     _, _, ys = sample(rng, model, K)
 
-    ref_traj = OffsetVector([rand(rng, 1) for _ in 0:K], -1)
+    # Create reference trajectory
+    ref_states = [rand(rng, 1) for _ in 0:K]
+    ref_traj = ReferenceTrajectory(ref_states[1], ref_states[2:end])
 
     bf = BF(N_particles; threshold=1.0, resampler=DummyResampler())
-    cb = GeneralisedFilters.DenseAncestorCallback(nothing)
+    cb = GeneralisedFilters.DenseAncestorCallback()
     bf_state, _ = GeneralisedFilters.filter(
         rng, model, bf, ys; ref_state=ref_traj, callback=cb
     )
 
     traj = GeneralisedFilters.get_ancestry(cb.container, N_particles)
-    true_traj = [cb.container.particles[t][N_particles - K + t] for t in 0:K]
 
-    @test traj.parent == true_traj
-    @test GeneralisedFilters.get_ancestry(cb.container, 1) == ref_traj
+    # Construct expected trajectory manually
+    true_x0 = cb.container.x0s[N_particles - K]
+    true_xs = [cb.container.xs[t][N_particles - K + t] for t in 1:K]
+
+    @test traj.x0 == true_x0
+    @test traj.xs == true_xs
+
+    # Test that particle 1 retrieves the reference trajectory
+    ref_traj_reconstructed = GeneralisedFilters.get_ancestry(cb.container, 1)
+    @test ref_traj_reconstructed.x0 == ref_traj.x0
+    @test ref_traj_reconstructed.xs == ref_traj.xs
 end
 
 @testitem "CSMC test" begin
@@ -505,8 +513,6 @@ end
     using LogExpFunctions: logsumexp
     using Random: randexp
     using StatsBase: sample, weights
-
-    using OffsetArrays
 
     SEED = 1234
     Dx = 1
@@ -534,7 +540,7 @@ end
     lls = []
 
     for i in 1:N_steps
-        cb = GeneralisedFilters.DenseAncestorCallback(nothing)
+        cb = GeneralisedFilters.DenseAncestorCallback()
         bf_state, ll = GeneralisedFilters.filter(
             rng, model, bf, ys; ref_state=ref_traj, callback=cb
         )
@@ -551,7 +557,7 @@ end
     # unbiased estimate of 1 / Z. See Elements of Sequential Monte Carlo (Section 5.2)
     log_recip_likelihood_estimate = logsumexp(-lls) - log(length(lls))
 
-    csmc_mean = sum(getindex.(trajectory_samples, t_smooth)) / N_sample
+    csmc_mean = sum([traj.xs[t_smooth] for traj in trajectory_samples]) / N_sample
     @test csmc_mean ≈ state.μ rtol = 1e-3
     @test log_recip_likelihood_estimate ≈ -ks_ll rtol = 1e-3
 end
@@ -565,8 +571,6 @@ end
     using StatsBase: sample, weights
     using StaticArrays
     using Statistics
-
-    using OffsetArrays
 
     SEED = 1234
     D_outer = 1
@@ -597,7 +601,7 @@ end
     ref_traj = nothing
     trajectory_samples = []
 
-    cb = GeneralisedFilters.DenseAncestorCallback(nothing)
+    cb = GeneralisedFilters.DenseAncestorCallback()
     for i in 1:N_steps
         bf_state, _ = GeneralisedFilters.filter(
             rng, hier_model, rbpf, ys; ref_state=ref_traj, callback=cb
@@ -610,11 +614,14 @@ end
             push!(trajectory_samples, deepcopy(ref_traj))
         end
         # Reference trajectory should only be nonlinear state for RBPF
-        ref_traj = getproperty.(ref_traj, :x)
+        # Extract outer states from the hierarchical states
+        ref_traj = ReferenceTrajectory(
+            getproperty(ref_traj.x0, :x), getproperty.(ref_traj.xs, :x)
+        )
     end
 
-    # Extract inner and outer trajectories
-    x_trajectories = getproperty.(getindex.(trajectory_samples, t_smooth), :x)
+    # Extract inner and outer trajectories at time t_smooth
+    x_trajectories = [getproperty(traj.xs[t_smooth], :x) for traj in trajectory_samples]
 
     # Manually perform smoothing until we have a cleaner interface
     A = hier_model.inner_model.dyn.A
@@ -623,13 +630,13 @@ end
     Q = hier_model.inner_model.dyn.Q
     z_smoothed_means = Vector{T}(undef, N_sample)
     for i in 1:N_sample
-        μ = trajectory_samples[i][K].z.μ
-        Σ = trajectory_samples[i][K].z.Σ
+        μ = trajectory_samples[i].xs[K].z.μ
+        Σ = trajectory_samples[i].xs[K].z.Σ
 
         for t in (K - 1):-1:t_smooth
-            μ_filt = trajectory_samples[i][t].z.μ
-            Σ_filt = trajectory_samples[i][t].z.Σ
-            μ_pred = A * μ_filt + b + C * trajectory_samples[i][t].x
+            μ_filt = trajectory_samples[i].xs[t].z.μ
+            Σ_filt = trajectory_samples[i].xs[t].z.Σ
+            μ_pred = A * μ_filt + b + C * trajectory_samples[i].xs[t].x
             Σ_pred = X_A_Xt(Σ_filt, A) + Q
             Σ_pred = PDMat(Symmetric(Σ_pred))
 
@@ -659,8 +666,6 @@ end
 
     import SSMProblems: prior, dyn, obs
     import GeneralisedFilters: resampler, resample, move, RBState, InformationLikelihood
-
-    using OffsetArrays
 
     SEED = 1234
     D_outer = 1
@@ -692,7 +697,7 @@ end
 
     for i in 1:N_steps
         global predictive_likelihoods
-        cb = GeneralisedFilters.DenseAncestorCallback(nothing)
+        cb = GeneralisedFilters.DenseAncestorCallback()
 
         # Manual filtering with ancestor resampling
         bf_state = initialise(rng, prior(hier_model), rbpf; ref_state=ref_traj)
@@ -710,7 +715,7 @@ end
                         rbpf,
                         t,
                         particle.state,
-                        RBState(ref_traj[t], predictive_likelihoods[t]),
+                        RBState(ref_traj.xs[t], predictive_likelihoods[t]),
                     )
                 end
                 ancestor_idx = sample(
@@ -739,7 +744,10 @@ end
             push!(trajectory_samples, deepcopy(ref_traj))
         end
         # Reference trajectory should only be nonlinear state for RBPF
-        ref_traj = getproperty.(ref_traj, :x)
+        # Extract outer states from the hierarchical states
+        ref_traj_outer = ReferenceTrajectory(
+            getproperty(ref_traj.x0, :x), getproperty.(ref_traj.xs, :x)
+        )
 
         pred_lik = backward_initialise(
             rng, hier_model.inner_model.obs, BackwardInformationPredictor(), K, ys[K]
@@ -752,8 +760,8 @@ end
                 BackwardInformationPredictor(),
                 t,
                 pred_lik;
-                prev_outer=ref_traj[t],
-                next_outer=ref_traj[t + 1],
+                prev_outer=ref_traj_outer.xs[t],
+                next_outer=ref_traj_outer.xs[t + 1],
             )
             pred_lik = backward_update(
                 hier_model.inner_model.obs,
@@ -764,10 +772,13 @@ end
             )
             predictive_likelihoods[t] = deepcopy(pred_lik)
         end
+
+        # Update ref_traj for next iteration
+        global ref_traj = ref_traj_outer
     end
 
-    # Extract inner and outer trajectories
-    x_trajectories = getproperty.(getindex.(trajectory_samples, t_smooth), :x)
+    # Extract inner and outer trajectories at time t_smooth
+    x_trajectories = [getproperty(traj.xs[t_smooth], :x) for traj in trajectory_samples]
 
     # Manually perform smoothing until we have a cleaner interface
     A = hier_model.inner_model.dyn.A
@@ -776,13 +787,13 @@ end
     Q = hier_model.inner_model.dyn.Q
     z_smoothed_means = Vector{T}(undef, N_sample)
     for i in 1:N_sample
-        μ = trajectory_samples[i][K].z.μ
-        Σ = trajectory_samples[i][K].z.Σ
+        μ = trajectory_samples[i].xs[K].z.μ
+        Σ = trajectory_samples[i].xs[K].z.Σ
 
         for t in (K - 1):-1:t_smooth
-            μ_filt = trajectory_samples[i][t].z.μ
-            Σ_filt = trajectory_samples[i][t].z.Σ
-            μ_pred = A * μ_filt + b + C * trajectory_samples[i][t].x
+            μ_filt = trajectory_samples[i].xs[t].z.μ
+            Σ_filt = trajectory_samples[i].xs[t].z.Σ
+            μ_pred = A * μ_filt + b + C * trajectory_samples[i].xs[t].x
             Σ_pred = A * Σ_filt * A' + Q
 
             G = Σ_filt * A' * inv(Σ_pred)

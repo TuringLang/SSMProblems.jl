@@ -50,21 +50,26 @@ end
 
 ## DENSE PARTICLE STORAGE ##################################################################
 
-struct DenseParticleContainer{T}
-    particles::OffsetVector{Vector{T},Vector{Vector{T}}}
+mutable struct DenseParticleContainer{T0,T1}
+    x0s::Vector{T0}
+    xs::Union{Vector{Vector{T1}},Nothing}
     ancestors::Vector{Vector{Int}}
 end
 
-function get_ancestry(container::DenseParticleContainer{T}, i::Integer) where {T}
+# Partial constructor when only x0s are known
+function DenseParticleContainer(x0s::Vector{T0}) where {T0}
+    return DenseParticleContainer{T0,Any}(x0s, nothing, Vector{Int}[])
+end
+
+function get_ancestry(container::DenseParticleContainer{T0,T1}, i::Integer) where {T0,T1}
     a = i
-    v = Vector{T}(undef, length(container.particles))
-    ancestry = OffsetVector(v, -1)
-    for t in length(container.ancestors):-1:1
-        ancestry[t] = container.particles[t][a]
-        a = container.ancestors[t][a]
+    xs = Vector{T1}(undef, length(container.xs))
+    for k in length(container.ancestors):-1:1
+        xs[k] = container.xs[k][a]
+        a = container.ancestors[k][a]
     end
-    ancestry[0] = container.particles[0][a]
-    return ancestry
+
+    return ReferenceTrajectory(container.x0s[a], xs)
 end
 
 """
@@ -73,16 +78,21 @@ end
 A callback for dense ancestry storage, which fills a `DenseParticleContainer`.
 """
 mutable struct DenseAncestorCallback <: AbstractCallback
-    container
+    container::Union{DenseParticleContainer,Nothing}
+end
+
+# Default to initialising with no container
+function DenseAncestorCallback()
+    return DenseAncestorCallback(nothing)
 end
 
 function (c::DenseAncestorCallback)(
     model, filter, state, data, ::PostInitCallback; kwargs...
 )
     particles = state.particles
-    c.container = DenseParticleContainer(
-        OffsetVector([deepcopy(getfield.(particles, :state))], -1), Vector{Int}[]
-    )
+    x0s = deepcopy(getfield.(particles, :state))
+    # Partially construct container using just initial states
+    c.container = DenseParticleContainer(x0s)
     return nothing
 end
 
@@ -90,8 +100,19 @@ function (c::DenseAncestorCallback)(
     model, filter, step, state, data, ::PostUpdateCallback; kwargs...
 )
     particles = state.particles
-    push!(c.container.particles, deepcopy(getfield.(particles, :state)))
-    push!(c.container.ancestors, deepcopy(getfield.(particles, :ancestor)))
+    states = deepcopy(getfield.(particles, :state))
+
+    # Re-instantiate trajectory storage with concrete type on first call
+    if c.container.xs === nothing
+        T0 = eltype(c.container.x0s)
+        T1 = eltype(states)
+        c.container = DenseParticleContainer{T0,T1}(
+            c.container.x0s, Vector{Vector{T1}}(), c.container.ancestors
+        )
+    end
+    push!(c.container.xs, states)
+    push!(c.container.ancestors, getfield.(particles, :ancestor))
+
     return nothing
 end
 

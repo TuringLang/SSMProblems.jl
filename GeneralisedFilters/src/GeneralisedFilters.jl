@@ -4,7 +4,6 @@ using AbstractMCMC: AbstractMCMC, AbstractSampler
 import Distributions: MvNormal, params
 import Random: AbstractRNG, default_rng, rand
 import SSMProblems: prior, dyn, obs
-using OffsetArrays
 using SSMProblems
 using StatsBase
 

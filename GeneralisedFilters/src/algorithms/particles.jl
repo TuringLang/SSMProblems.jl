@@ -37,12 +37,12 @@ function initialise(
     rng::AbstractRNG,
     prior::StatePrior,
     algo::AbstractParticleFilter;
-    ref_state::Union{Nothing,AbstractVector}=nothing,
+    ref_state=nothing,
     kwargs...,
 )
     N = num_particles(algo)
     particles = map(1:N) do i
-        ref = !isnothing(ref_state) && i == 1 ? ref_state[0] : nothing
+        ref = !isnothing(ref_state) && i == 1 ? ref_state.x0 : nothing
         initialise_particle(rng, prior, algo, ref; kwargs...)
     end
 
@@ -56,12 +56,12 @@ function predict(
     iter::Integer,
     state,
     observation;
-    ref_state::Union{Nothing,AbstractVector}=nothing,
+    ref_state=nothing,
     kwargs...,
 )
     particles = map(1:num_particles(algo)) do i
         particle = state.particles[i]
-        ref = !isnothing(ref_state) && i == 1 ? ref_state[iter] : nothing
+        ref = !isnothing(ref_state) && i == 1 ? ref_state.xs[iter] : nothing
         predict_particle(rng, dyn, algo, iter, particle, observation, ref; kwargs...)
     end
 
@@ -151,7 +151,7 @@ function step(
     iter::Integer,
     state,
     observation;
-    ref_state::Union{Nothing,AbstractVector}=nothing,
+    ref_state=nothing,
     callback::CallbackType=nothing,
     kwargs...,
 )
@@ -251,7 +251,7 @@ function filter(
     model::HierarchicalSSM,
     algo::ParticleFilter,
     observations::AbstractVector;
-    ref_state::Union{Nothing,AbstractVector}=nothing,
+    ref_state=nothing,
     kwargs...,
 )
     ssm = StateSpaceModel(
@@ -321,7 +321,7 @@ function initialise(
     rng::AbstractRNG,
     prior::StatePrior,
     algo::AuxiliaryParticleFilter;
-    ref_state::Union{Nothing,AbstractVector}=nothing,
+    ref_state=nothing,
     kwargs...,
 )
     return initialise(rng, prior, algo.pf; ref_state, kwargs...)
@@ -334,7 +334,7 @@ function step(
     iter::Integer,
     state,
     observation;
-    ref_state::Union{Nothing,AbstractVector}=nothing,
+    ref_state=nothing,
     callback::CallbackType=nothing,
     kwargs...,
 )
