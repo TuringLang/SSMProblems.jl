@@ -50,8 +50,9 @@ end
 
 ## DENSE PARTICLE STORAGE ##################################################################
 
-struct DenseParticleContainer{T}
+struct DenseParticleContainer{T,WT}
     particles::OffsetVector{Vector{T},Vector{Vector{T}}}
+    weights::Vector{Vector{WT}}
     ancestors::Vector{Vector{Int}}
 end
 
@@ -81,7 +82,9 @@ function (c::DenseAncestorCallback)(
 )
     particles = state.particles
     c.container = DenseParticleContainer(
-        OffsetVector([deepcopy(getfield.(particles, :state))], -1), Vector{Int}[]
+        OffsetVector([deepcopy(getfield.(particles, :state))], -1),
+        Vector{Float64}[],
+        Vector{Int}[],
     )
     return nothing
 end
@@ -91,6 +94,7 @@ function (c::DenseAncestorCallback)(
 )
     particles = state.particles
     push!(c.container.particles, deepcopy(getfield.(particles, :state)))
+    push!(c.container.weights, deepcopy(getfield.(particles, :log_w)))
     push!(c.container.ancestors, deepcopy(getfield.(particles, :ancestor)))
     return nothing
 end
