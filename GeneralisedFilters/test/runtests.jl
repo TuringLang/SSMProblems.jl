@@ -464,7 +464,6 @@ end
     using Random: randexp, AbstractRNG
     using StatsBase: sample, Weights
 
-
     struct DummyResampler <: GeneralisedFilters.AbstractResampler end
 
     function GeneralisedFilters.sample_ancestors(
@@ -514,7 +513,6 @@ end
     using LogExpFunctions: logsumexp
     using Random: randexp
     using StatsBase: sample, weights
-
 
     SEED = 1234
     Dx = 1
@@ -573,7 +571,6 @@ end
     using StatsBase: sample, weights
     using StaticArrays
     using Statistics
-
 
     SEED = 1234
     D_outer = 1
@@ -669,7 +666,6 @@ end
 
     import SSMProblems: prior, dyn, obs
     import GeneralisedFilters: resampler, resample, move, RBState, InformationLikelihood
-
 
     SEED = 1234
     D_outer = 1

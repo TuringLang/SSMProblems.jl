@@ -85,12 +85,7 @@ struct AuxiliaryResampler <: AbstractResampler
     log_weights::AbstractVector
 end
 
-function resample(
-    rng::AbstractRNG,
-    auxiliary::AuxiliaryResampler,
-    state;
-    ref_state=nothing,
-)
+function resample(rng::AbstractRNG, auxiliary::AuxiliaryResampler, state; ref_state=nothing)
     weights = softmax(log_weights(state) + auxiliary.log_weights)
     auxiliary_weights = auxiliary.log_weights
     return resample(rng, auxiliary.resampler, state, weights; ref_state, auxiliary_weights)

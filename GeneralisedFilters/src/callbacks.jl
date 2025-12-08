@@ -335,7 +335,7 @@ function get_ancestry(tree::ParallelParticleTree{ST}, T::Integer) where {ST}
         paths[t] = tree.states[parents]
         gather!(parents, tree.parents, parents)
     end
-        return paths
+    return paths
 end
 
 # Get ancestory of a single particle
@@ -349,7 +349,7 @@ function get_ancestry(
             path[t] = container.states[ancestor_index]
             ancestor_index = container.parents[ancestor_index]
         end
-                return path
+        return path
     end
 end
 
