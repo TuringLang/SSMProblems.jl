@@ -743,27 +743,21 @@ end
         # Reference trajectory should only be nonlinear state for RBPF
         ref_traj = getproperty.(ref_traj, :x)
 
-        pred_lik = backward_initialise(
-            rng, hier_model.inner_model.obs, BackwardInformationPredictor(), K, ys[K]
-        )
+        bip = BackwardInformationPredictor(; initial_jitter=1e-8)
+
+        pred_lik = backward_initialise(rng, hier_model.inner_model.obs, bip, K, ys[K])
         predictive_likelihoods[K] = deepcopy(pred_lik)
         for t in (K - 1):-1:1
             pred_lik = backward_predict(
                 rng,
                 hier_model.inner_model.dyn,
-                BackwardInformationPredictor(),
+                bip,
                 t,
                 pred_lik;
                 prev_outer=ref_traj[t],
                 next_outer=ref_traj[t + 1],
             )
-            pred_lik = backward_update(
-                hier_model.inner_model.obs,
-                BackwardInformationPredictor(),
-                t,
-                pred_lik,
-                ys[t],
-            )
+            pred_lik = backward_update(hier_model.inner_model.obs, bip, t, pred_lik, ys[t])
             predictive_likelihoods[t] = deepcopy(pred_lik)
         end
     end

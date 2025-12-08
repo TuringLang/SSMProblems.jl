@@ -204,14 +204,25 @@ end
 ## BACKWARD INFORMATION FILTER #############################################################
 
 """
-    BackwardInformationPredictor
+    BackwardInformationPredictor(; jitter=nothing, initial_jitter=nothing)
 
 An algorithm to recursively compute the predictive likelihood p(y_{t:T} | x_t) of a linear
 Gaussian state space model in information form.
 
+# Fields
+- `jitter::Union{Nothing, Real}`: Optional value added to the precision matrix Ω after the
+  backward predict step to improve numerical stability. If `nothing`, no jitter is applied.
+- `initial_jitter::Union{Nothing, Real}`: Optional value added to the precision matrix Ω
+  at initialization to improve numerical stability.
+
 This implementation is based on https://arxiv.org/pdf/1505.06357
 """
-struct BackwardInformationPredictor <: AbstractBackwardPredictor end
+struct BackwardInformationPredictor <: AbstractBackwardPredictor
+    jitter::Union{Nothing,Real}
+    initial_jitter::Union{Nothing,Real}
+end
+BackwardInformationPredictor(; jitter=nothing, initial_jitter=nothing) =
+    BackwardInformationPredictor(jitter, initial_jitter)
 
 """
     backward_initialise(rng, obs, algo, iter, y; kwargs...)
@@ -230,7 +241,16 @@ function backward_initialise(
     H, c, R = calc_params(obs, iter; kwargs...)
     R_inv = inv(R)
     λ = H' * R_inv * (y - c)
-    Ω = PDMat(Xt_A_X(R_inv, H))
+    Ω = Xt_A_X(R_inv, H)
+
+    # Optionally add initial_jitter for numerical stability and convert to PDMat
+    if !isnothing(filter.initial_jitter)
+        for i in 1:size(Ω, 1)
+            Ω[i, i] += filter.initial_jitter
+        end
+    end
+    Ω = PDMat(Symmetric(Ω))
+
     return InformationLikelihood(λ, Ω)
 end
 
@@ -259,8 +279,16 @@ function backward_predict(
     # λ̂ = A' * (I - Ω * F * inv(Λ) * F') * m
     FΛ_inv_Ft = X_invA_Xt(Λ, F)
     I_minus_term = I - Ω * FΛ_inv_Ft
-    Ω̂ = PDMat(Symmetric(A' * I_minus_term * Ω * A))
+    Ω̂ = A' * I_minus_term * Ω * A
     λ̂ = A' * I_minus_term * m
+
+    # Optionally add jitter for numerical stability and convert to PDMat
+    if !isnothing(algo.jitter)
+        for i in 1:size(Ω̂, 1)
+            Ω̂[i, i] += algo.jitter
+        end
+    end
+    Ω̂ = PDMat(Symmetric(Ω̂))
 
     return InformationLikelihood(λ̂, Ω̂)
 end
