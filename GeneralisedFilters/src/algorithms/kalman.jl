@@ -1,6 +1,6 @@
 export KalmanFilter, filter
 using CUDA: i32
-import PDMats: PDMat, X_A_Xt
+import PDMats: PDMat, X_A_Xt, Xt_A_X, X_invA_Xt, Xt_invA_X
 import LinearAlgebra: Symmetric
 
 export KalmanFilter, KF, KalmanSmoother, KS
@@ -209,7 +209,7 @@ function backward_initialise(
     H, c, R = calc_params(obs, iter; kwargs...)
     R_inv = inv(R)
     λ = H' * R_inv * (y - c)
-    Ω = H' * R_inv * H
+    Ω = PDMat(Xt_A_X(R_inv, H))
     return InformationLikelihood(λ, Ω)
 end
 
@@ -231,10 +231,15 @@ function backward_predict(
     F = cholesky(Q).L
 
     m = λ - Ω * b
-    Λ = F' * Ω * F + I
+    # HACK: missing method for Symmetir{SMatrix} + UniformScaling
+    Λ = PDMat(Xt_A_X(Ω, F).data + I)
 
-    Ω̂ = A' * (I - Ω * F * inv(Λ) * F') * Ω * A
-    λ̂ = A' * (I - Ω * F * inv(Λ) * F') * m
+    # Ω̂ = A' * (I - Ω * F * inv(Λ) * F') * Ω * A
+    # λ̂ = A' * (I - Ω * F * inv(Λ) * F') * m
+    FΛ_inv_Ft = X_invA_Xt(Λ, F)
+    I_minus_term = I - Ω * FΛ_inv_Ft
+    Ω̂ = PDMat(A' * I_minus_term * Ω * A)
+    λ̂ = A' * I_minus_term * m
 
     return InformationLikelihood(λ̂, Ω̂)
 end
@@ -257,7 +262,7 @@ function backward_update(
     R_inv = inv(R)
 
     λ̂ = λ + H' * R_inv * (y - c)
-    Ω̂ = Ω + H' * R_inv * H
+    Ω̂ = PDMat(Ω + Xt_A_X(R_inv, H))
 
     return InformationLikelihood(λ̂, Ω̂)
 end

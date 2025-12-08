@@ -1,4 +1,5 @@
-import LinearAlgebra: I, cholesky, logdet
+import LinearAlgebra: I, cholesky, logdet, dot
+using PDMats: PDMats
 
 export ancestor_weight
 
@@ -59,10 +60,9 @@ function compute_marginal_predictive_likelihood(
     Γ = cholesky(Σ).L
 
     # Apply two-filter smoother style formula
-    # TODO: Clean this up with Mahalanobis distance helper
-    Λ = Γ' * Ω * Γ + I
+    Λ = PDMat(Xt_A_X(Ω, Γ).data + I)
     M = Γ' * (λ - Ω * μ)
-    ζ = μ' * Ω * μ - 2 * λ' * μ - M' * inv(Λ) * M
+    ζ = PDMats.quad(Ω, μ) - 2 * dot(λ, μ) - PDMats.quad(Λ, M)
 
     return -0.5 * (logdet(Λ) + ζ)
 end
