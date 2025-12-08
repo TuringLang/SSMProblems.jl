@@ -7,7 +7,19 @@ export KalmanFilter, KF, KalmanSmoother, KS
 export BackwardInformationPredictor
 export backward_initialise, backward_predict, backward_update
 
-struct KalmanFilter <: AbstractFilter end
+"""
+    KalmanFilter(; jitter=nothing)
+
+Kalman filter for linear Gaussian state space models.
+
+# Fields
+- `jitter::Union{Nothing, Real}`: Optional value added to the covariance matrix after the
+  update step to improve numerical stability. If `nothing`, no jitter is applied.
+"""
+struct KalmanFilter <: AbstractFilter
+    jitter::Union{Nothing,Real}
+end
+KalmanFilter(; jitter=nothing) = KalmanFilter(jitter)
 
 KF() = KalmanFilter()
 
@@ -48,11 +60,11 @@ function update(
     kwargs...,
 )
     obs_params = calc_params(obs, iter; kwargs...)
-    state, ll = kalman_update(state, obs_params, observation)
+    state, ll = kalman_update(state, obs_params, observation, algo.jitter)
     return state, ll
 end
 
-function kalman_update(state, obs_params, observation)
+function kalman_update(state, obs_params, observation, jitter)
     μ, Σ = params(state)
     H, c, R = obs_params
 
@@ -64,7 +76,16 @@ function kalman_update(state, obs_params, observation)
 
     # Update parameters using Joseph form to ensure numerical stability
     μ̂ = μ + K * ȳ
-    Σ̂ = PDMat(X_A_Xt(Σ, I - K * H) + X_A_Xt(R, K))
+    Σ̂ = X_A_Xt(Σ, I - K * H) + X_A_Xt(R, K)
+
+    # Optionally add jitter for numerical stability and convert to PDMat
+    if !isnothing(jitter)
+        for i in 1:size(Σ̂, 1)
+            Σ̂[i, i] += jitter
+        end
+    end
+    Σ̂ = PDMat(Symmetric(Σ̂))
+
     state = MvNormal(μ̂, Σ̂)
 
     # Compute log-likelihood
