@@ -62,7 +62,7 @@ function compute_marginal_predictive_likelihood(
     # Apply two-filter smoother style formula
     Λ = PDMat(Xt_A_X(Ω, Γ).data + I)
     M = Γ' * (λ - Ω * μ)
-    ζ = PDMats.quad(Ω, μ) - 2 * dot(λ, μ) - PDMats.quad(Λ, M)
+    ζ = PDMats.quad(Ω, μ) - 2 * dot(λ, μ) - PDMats.invquad(Λ, M)
 
     return -0.5 * (logdet(Λ) + ζ)
 end
