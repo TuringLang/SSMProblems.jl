@@ -6,19 +6,6 @@ struct HierarchicalSSM{PT<:StatePrior,LD<:LatentDynamics,MT<:StateSpaceModel} <:
     outer_prior::PT
     outer_dyn::LD
     inner_model::MT
-    prev_outer_name::Symbol
-    new_outer_name::Symbol
-end
-function HierarchicalSSM(
-    outer_prior,
-    outer_dyn,
-    inner_model;
-    prev_outer_name=:prev_outer,
-    new_outer_name=:new_outer,
-)
-    return HierarchicalSSM(
-        outer_prior, outer_dyn, inner_model, prev_outer_name, new_outer_name
-    )
 end
 outer_prior(model::HierarchicalSSM) = model.outer_prior
 inner_prior(model::HierarchicalSSM) = model.inner_model.prior
@@ -39,18 +26,9 @@ inner_prior(prior::HierarchicalPrior) = prior.inner_prior
 struct HierarchicalDynamics{D1<:LatentDynamics,D2<:LatentDynamics} <: LatentDynamics
     outer_dyn::D1
     inner_dyn::D2
-    prev_outer_name::Symbol
-    new_outer_name::Symbol
-end
-function HierarchicalDynamics(
-    outer_dyn, inner_dyn; prev_outer_name=:prev_outer, new_outer_name=:new_outer
-)
-    return HierarchicalDynamics(outer_dyn, inner_dyn, prev_outer_name, new_outer_name)
 end
 function SSMProblems.dyn(model::HierarchicalSSM)
-    return HierarchicalDynamics(
-        model.outer_dyn, model.inner_model.dyn, model.prev_outer_name, model.new_outer_name
-    )
+    return HierarchicalDynamics(model.outer_dyn, model.inner_model.dyn)
 end
 outer_dyn(dyn::HierarchicalDynamics) = dyn.outer_dyn
 inner_dyn(dyn::HierarchicalDynamics) = dyn.inner_dyn
@@ -87,16 +65,7 @@ function AbstractMCMC.sample(
     # Simulate outer dynamics
     xs = fill(simulate(rng, outer_dyn, 1, x0; kwargs...), T)
     zs = fill(
-        simulate(
-            rng,
-            inner_model.dyn,
-            1,
-            z0;
-            model.prev_outer_name => x0,
-            model.new_outer_name => xs[1],
-            kwargs...,
-        ),
-        T,
+        simulate(rng, inner_model.dyn, 1, z0; prev_outer=x0, new_outer=xs[1], kwargs...), T
     )
 
     for t in 2:T
@@ -106,8 +75,8 @@ function AbstractMCMC.sample(
             inner_model.dyn,
             t,
             zs[t - 1];
-            model.prev_outer_name => xs[t - 1],
-            model.new_outer_name => xs[t],
+            prev_outer=xs[t - 1],
+            new_outer=xs[t],
             kwargs...,
         )
     end
@@ -134,13 +103,7 @@ function SSMProblems.simulate(
     outer_dyn, inner_dyn = proc.outer_dyn, proc.inner_dyn
     x = simulate(rng, outer_dyn, step, prev_state.x; kwargs...)
     z = simulate(
-        rng,
-        inner_dyn,
-        step,
-        prev_state.z;
-        proc.prev_outer_name => prev_state.x,
-        proc.new_outer_name => x,
-        kwargs...,
+        rng, inner_dyn, step, prev_state.z; prev_outer=prev_state.x, new_outer=x, kwargs...
     )
     return HierarchicalState(x, z)
 end

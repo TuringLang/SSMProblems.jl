@@ -755,8 +755,8 @@ end
                 bip,
                 t,
                 pred_lik;
-                hier_model.prev_outer_name => ref_traj[t],
-                hier_model.new_outer_name => ref_traj[t + 1],
+                prev_outer=ref_traj[t],
+                next_outer=ref_traj[t + 1],
             )
             pred_lik = backward_update(hier_model.inner_model.obs, bip, t, pred_lik, ys[t])
             predictive_likelihoods[t] = deepcopy(pred_lik)
