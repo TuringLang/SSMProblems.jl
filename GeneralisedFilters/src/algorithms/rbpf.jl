@@ -49,8 +49,8 @@ function predict_particle(
         iter,
         particle.state.z,
         observation;
-        prev_outer=particle.state.x,
-        new_outer=new_x,
+        dyn.prev_outer_name => particle.state.x,
+        dyn.new_outer_name => new_x,
         kwargs...,
     )
 
@@ -102,8 +102,8 @@ function predictive_state(
         iter,
         state.z,
         nothing;  # no observation available — maybe we should pass this in
-        prev_outer=state.x,
-        new_outer=x_star,
+        dyn.prev_outer_name => state.x,
+        dyn.new_outer_name => x_star,
         kwargs...,
     )
     return RBState(x_star, z_star)

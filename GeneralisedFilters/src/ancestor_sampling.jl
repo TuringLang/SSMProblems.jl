@@ -34,8 +34,8 @@ function ancestor_weight(
         iter,
         filt_dist,
         nothing;
-        prev_outer=state.x,
-        new_outer=ref_state.x,
+        dyn.prev_outer_name => state.x,
+        dyn.new_outer_name => ref_state.x,
         kwargs...,
     )
 

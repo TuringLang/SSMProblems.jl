@@ -221,8 +221,9 @@ struct BackwardInformationPredictor <: AbstractBackwardPredictor
     jitter::Union{Nothing,Real}
     initial_jitter::Union{Nothing,Real}
 end
-BackwardInformationPredictor(; jitter=nothing, initial_jitter=nothing) =
-    BackwardInformationPredictor(jitter, initial_jitter)
+function BackwardInformationPredictor(; jitter=nothing, initial_jitter=nothing)
+    return BackwardInformationPredictor(jitter, initial_jitter)
+end
 
 """
     backward_initialise(rng, obs, algo, iter, y; kwargs...)
@@ -255,7 +256,7 @@ function backward_initialise(
 end
 
 """
-    backward_predict(rng, dyn, algo, iter, state; prev_outer=nothing, next_outer=nothing, kwargs...)
+    backward_predict(rng, dyn, algo, iter, state; kwargs...)
 
 Perform a backward prediction step to compute p(y_{t+1:T} | x_t) from p(y_{t:T} | x_{t+1}).
 """
