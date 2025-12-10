@@ -1,5 +1,7 @@
 using LogExpFunctions
 
+export InformationLikelihood
+
 """Containers used for storing representations of the filtering distribution."""
 
 ## TYPELESS INITIALIZERS ###################################################################

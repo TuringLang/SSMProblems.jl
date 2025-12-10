@@ -289,7 +289,7 @@ struct RepresentativeStateLookAhead{PPT<:PredictiveStatistic} <: AbstractLookAhe
 end
 
 struct AuxiliaryParticleFilter{PFT<:AbstractParticleFilter,WT<:AbstractLookAheadScore} <:
-       AbstractFilter
+       AbstractParticleFilter
     pf::PFT
     weight_strategy::WT
 end

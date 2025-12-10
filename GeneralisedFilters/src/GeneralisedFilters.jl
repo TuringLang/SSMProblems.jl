@@ -109,6 +109,16 @@ function step(
     # generalised to fit analytical filters
     return move(rng, model, algo, iter, state, observation; kwargs...)
 end
+function step(
+    model::AbstractStateSpaceModel,
+    algo::AbstractFilter,
+    iter::Integer,
+    state,
+    observation;
+    kwargs...,
+)
+    return step(default_rng(), model, algo, iter, state, observation; kwargs...)
+end
 
 function move(
     rng::AbstractRNG,

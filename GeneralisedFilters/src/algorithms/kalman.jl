@@ -221,8 +221,9 @@ struct BackwardInformationPredictor <: AbstractBackwardPredictor
     jitter::Union{Nothing,Real}
     initial_jitter::Union{Nothing,Real}
 end
-BackwardInformationPredictor(; jitter=nothing, initial_jitter=nothing) =
-    BackwardInformationPredictor(jitter, initial_jitter)
+function BackwardInformationPredictor(; jitter=nothing, initial_jitter=nothing)
+    return BackwardInformationPredictor(jitter, initial_jitter)
+end
 
 """
     backward_initialise(rng, obs, algo, iter, y; kwargs...)
@@ -249,6 +250,7 @@ function backward_initialise(
             Ω[i, i] += filter.initial_jitter
         end
     end
+    println(eigen(Ω).values)
     Ω = PDMat(Symmetric(Ω))
 
     return InformationLikelihood(λ, Ω)
