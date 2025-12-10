@@ -1,6 +1,6 @@
 name = "GeneralisedFilters"
 uuid = "3ef92589-7ab8-43f9-b5b9-a3a0c86ecbb7"
-version = "0.4.1"
+version = "0.4.2"
 authors = [
     "THargreaves <tim.hargreaves@icloud.com>", 
     "Charles Knipp <charlesknipp98@gmail.com>",
