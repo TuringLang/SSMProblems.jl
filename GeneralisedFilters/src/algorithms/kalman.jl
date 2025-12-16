@@ -16,8 +16,8 @@ Kalman filter for linear Gaussian state space models.
 - `jitter::Union{Nothing, Real}`: Optional value added to the covariance matrix after the
   update step to improve numerical stability. If `nothing`, no jitter is applied.
 """
-struct KalmanFilter <: AbstractFilter
-    jitter::Union{Nothing,Real}
+struct KalmanFilter{T<:Union{Nothing,Real}} <: AbstractFilter
+    jitter::T
 end
 KalmanFilter(; jitter=nothing) = KalmanFilter(jitter)
 
@@ -215,12 +215,12 @@ Gaussian state space model in information form.
 
 This implementation is based on https://arxiv.org/pdf/1505.06357
 """
-struct BackwardInformationPredictor <: AbstractBackwardPredictor
-    jitter::Union{Nothing,Real}
-    initial_jitter::Union{Nothing,Real}
+struct BackwardInformationPredictor{T0,T} <: AbstractBackwardPredictor
+    initial_jitter::T0
+    jitter::T
 end
-function BackwardInformationPredictor(; jitter=nothing, initial_jitter=nothing)
-    return BackwardInformationPredictor(jitter, initial_jitter)
+function BackwardInformationPredictor(; initial_jitter=nothing, jitter=nothing)
+    return BackwardInformationPredictor(initial_jitter, jitter)
 end
 
 """
