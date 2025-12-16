@@ -22,17 +22,18 @@ export InnerDynamics, create_dummy_linear_gaussian_model
     Linear Gaussian dynamics conditonal on the (previous) outer state (u_t), defined by:
     x_{t+1} = A x_t + b + C u_t + w_t
 """
-struct InnerDynamics{TMat<:AbstractMatrix,TVec<:AbstractVector,TCov<:AbstractMatrix} <:
-       LinearGaussianLatentDynamics
-    A::TMat
-    b::TVec
-    C::TMat
-    Q::TCov
+struct InnerDynamics{
+    AT<:AbstractMatrix,bT<:AbstractVector,CT<:AbstractMatrix,QT<:AbstractMatrix
+} <: LinearGaussianLatentDynamics
+    A::AT
+    b::bT
+    C::CT
+    Q::QT
 end
 
-struct InnerPrior{TVec<:AbstractVector,TCov<:AbstractMatrix} <: GaussianPrior
-    μ0::TVec
-    Σ0::TCov
+struct InnerPrior{XT<:AbstractVector,ΣT<:AbstractMatrix} <: GaussianPrior
+    μ0::XT
+    Σ0::ΣT
 end
 
 # CPU methods
@@ -119,7 +120,7 @@ function create_dummy_linear_gaussian_model(
             PDMat(SMatrix{D_inner,D_inner,T}(Σ0[(D_outer + 1):end, (D_outer + 1):end])),
         )
         dyn = InnerDynamics(
-            SMatrix{D_inner,D_outer,T}(A[(D_outer + 1):end, (D_outer + 1):end]),
+            SMatrix{D_inner,D_inner,T}(A[(D_outer + 1):end, (D_outer + 1):end]),
             SVector{D_inner,T}(b[(D_outer + 1):end]),
             SMatrix{D_inner,D_outer,T}(A[(D_outer + 1):end, 1:D_outer]),
             PDMat(SMatrix{D_inner,D_inner,T}(Q[(D_outer + 1):end, (D_outer + 1):end])),
