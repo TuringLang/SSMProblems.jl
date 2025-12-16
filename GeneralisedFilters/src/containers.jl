@@ -73,7 +73,7 @@ Base.show(io::IO, b::TypelessBaseline) = print(io, "Typeless(log($(b.N)))")
 A container representing a single particle in a particle filter distribution, composed of a
 weighted sampled (stored as a log weight) and its ancestor index.
 """
-mutable struct Particle{ST,WT,AT<:Integer}
+struct Particle{ST,WT,AT<:Integer}
     state::ST
     log_w::WT
     ancestor::AT
@@ -101,7 +101,7 @@ rather than the distribution itself.
 - `x::XT`: The sampled state component
 - `z::ZT`: The Rao-Blackwellised distribution component
 """
-mutable struct RBState{XT,ZT}
+struct RBState{XT,ZT}
     x::XT
     z::ZT
 end
@@ -160,10 +160,8 @@ function marginalise!(state::ParticleDistribution, particles)
     # Compute log-likelihood increment: works for both PF and APF cases
     ll_increment = LSE_after - state.ll_baseline
 
-    # Normalize weights
-    for p in particles
-        p.log_w -= LSE_after
-    end
+    # Create new particles with normalized weights
+    particles = map(p -> Particle(p.state, p.log_w - LSE_after, p.ancestor), particles)
 
     # Reset baseline for next iteration
     new_state = ParticleDistribution(particles, zero(ll_increment))

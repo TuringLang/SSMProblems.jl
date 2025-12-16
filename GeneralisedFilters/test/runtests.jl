@@ -727,7 +727,11 @@ end
 
             # Set ancestor index
             if !isnothing(ref_traj)
-                bf_state.particles[end].ancestor = ancestor_idx
+                bf_state.particles[end] = GeneralisedFilters.Particle(
+                    bf_state.particles[end].state,
+                    bf_state.particles[end].log_w,
+                    ancestor_idx,
+                )
             end
 
             # Manually trigger callback
