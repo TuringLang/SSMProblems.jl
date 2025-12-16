@@ -80,9 +80,7 @@ function kalman_update(state, obs_params, observation, jitter)
 
     # Optionally add jitter for numerical stability and convert to PDMat
     if !isnothing(jitter)
-        for i in 1:size(Σ̂, 1)
-            Σ̂[i, i] += jitter
-        end
+        Σ̂ += jitter * I
     end
     Σ̂ = PDMat(Symmetric(Σ̂))
 
@@ -246,9 +244,7 @@ function backward_initialise(
 
     # Optionally add initial_jitter for numerical stability and convert to PDMat
     if !isnothing(filter.initial_jitter)
-        for i in 1:size(Ω, 1)
-            Ω[i, i] += filter.initial_jitter
-        end
+        Ω += filter.initial_jitter * I
     end
     Ω = PDMat(Symmetric(Ω))
 
@@ -285,9 +281,7 @@ function backward_predict(
 
     # Optionally add jitter for numerical stability and convert to PDMat
     if !isnothing(algo.jitter)
-        for i in 1:size(Ω̂, 1)
-            Ω̂[i, i] += algo.jitter
-        end
+        Ω̂ += algo.jitter * I
     end
     Ω̂ = PDMat(Symmetric(Ω̂))
 
