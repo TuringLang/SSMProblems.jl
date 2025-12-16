@@ -250,7 +250,6 @@ function backward_initialise(
             Ω[i, i] += filter.initial_jitter
         end
     end
-    println(eigen(Ω).values)
     Ω = PDMat(Symmetric(Ω))
 
     return InformationLikelihood(λ, Ω)
