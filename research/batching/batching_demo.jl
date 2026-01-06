@@ -68,46 +68,94 @@ b_test = Array(bs[end])
 Q_test = Array(Qs.data)
 pred_G_test = kalman_predict(MvNormal(μ_test, PDMat(Σ_test)), (A_test, b_test, Q_test))
 
+println("=== Predict Comparison ===")
 println("CPU Mean: ", pred_G_test.μ[1:5])
 println("GPU Mean: ", Array(pred_Gs[end].μ[1:5]))
 
-println("CPU Covariance Diagonal: ", diag(pred_G_test.Σ)[1:5])
-println("GPU Covariance Diagonal: ", Array(diag(pred_Gs[end].Σ))[1:5])
+println("CPU Covariance [1:3, 1:3]: ", Matrix(pred_G_test.Σ)[1:3, 1:3])
+println("GPU Covariance [1:3, 1:3]: ", Array(pred_Gs[end].Σ)[1:3, 1:3])
 
-# Increase batch size and benchmark
-D_large = 32
-N_large = 10000
-μs_large = BatchedCuVector(CUDA.randn(Float32, D_large, N_large))
-Σs_root_large = BatchedCuMatrix(CUDA.randn(Float32, D_large, D_large, N_large))
-Σs_large = Σs_root_large .* adjoint.(Σs_root_large) .+ SharedCuMatrix(CuArray{Float32}(I, D_large, D_large))
-Σ_PDs_large = broadcasted(PDMat, Σs_large);
-Gs_large = StructArray{MvNormal}((μ=μs_large, Σ=Σ_PDs_large));
-dyn_params_large = (
-    SharedCuMatrix(CUDA.randn(Float32, D_large, D_large)),
-    BatchedCuVector(CUDA.randn(Float32, D_large, N_large)),
-    SharedCuMatrix((CUDA.randn(Float32, D_large, D_large) * CUDA.randn(Float32, D_large, D_large)') .+ CuArray{Float32}(I, D_large, D_large)),
-)
-display(@benchmark kalman_predict.($Gs_large, Ref($dyn_params_large)))
+# =============================================================================
+# Kalman Update
+# =============================================================================
 
-# Compare to multithreading StaticArrays
-using StaticArrays
-μs_static = [SVector{D_large, Float32}(randn(Float32, D_large)) for _ in 1:N_large];
-Σs_root_static = [SMatrix{D_large,D_large,Float32}(randn(Float32, D_large, D_large)) for _ in 1:N_large];
-Σs_static = [Σs_root_static[i] * adjoint(Σs_root_static[i]) + I for i in 1:N_large];
-Gs_static = [MvNormal(μs_static[i], Σs_static[i]) for i in 1:N_large];
-A_static = SMatrix{D_large,D_large,Float32}(randn(Float32, D_large, D_large));
-b_static = [SVector{D_large, Float32}(randn(Float32, D_large)) for _ in 1:N_large];
-Q_root_static = SMatrix{D_large,D_large,Float32}(randn(Float32, D_large, D_large));
-Q_static = Q_root_static * adjoint(Q_root_static) + I;
+function kalman_update(state, obs_params, observation)
+    μ = state.μ
+    Σ = state.Σ
+    H = obs_params[1]
+    c = obs_params[2]
+    R = obs_params[3]
 
-function test_static(Gs, A, b, Q)
-    out = Vector{MvNormal{Float32, PDMat{Float32, SMatrix{32, 32, Float32, 1024}}, SVector{32, Float32}}}(undef, length(Gs))
-    for i in 1:length(Gs)
-        @inbounds out[i] = kalman_predict(Gs[i], (A, b[i], Q))
-    end
-    return out
+    # Compute innovation distribution
+    m = H * μ + c
+    S = PDMat(X_A_Xt(Σ, H) + R)
+    ȳ = observation - m
+
+    # Kalman gain
+    K = Σ * H' / S
+
+    # Update parameters using Joseph form for numerical stability
+    μ̂ = μ + K * ȳ
+    Σ̂ = X_A_Xt(Σ, I - K * H) + X_A_Xt(R, K)
+
+    return MvNormal(μ̂, Σ̂)
 end
 
-display(@benchmark test_static($Gs_static, $A_static, $b_static, $Q_static))
+function kalman_step(state, dyn_params, obs_params, observation)
+    state = kalman_predict(state, dyn_params)
+    state = kalman_update(state, obs_params, observation)
+    return state
+end
 
-@profview test_static(Gs_static, A_static, b_static, Q_static)
+# Observation parameters (H and c shared, R batched)
+Hs = SharedCuMatrix(CUDA.randn(Float32, D_obs, D_state))
+cs = SharedCuVector(CUDA.randn(Float32, D_obs))
+I_obs = CuArray{Float32}(I, D_obs, D_obs)
+I_obs_shared = SharedCuMatrix(I_obs)
+Rs_root = BatchedCuMatrix(CUDA.randn(Float32, D_obs, D_obs, N))
+Rs = Rs_root .* adjoint.(Rs_root) .+ I_obs_shared
+
+obs_params = (Hs, cs, Rs)
+
+# Observations
+observations = BatchedCuVector(CUDA.randn(Float32, D_obs, N))
+
+# Run update on GPU
+update_Gs = kalman_update.(pred_Gs, Ref(obs_params), observations);
+
+# Compare update to CPU
+H_test = Array(Hs.data)
+c_test = Array(cs.data)
+R_test = PDMat(Array(Rs[end]))
+obs_test = Array(observations[end])
+
+update_G_test = kalman_update(pred_G_test, (H_test, c_test, R_test), obs_test)
+
+println("\n=== Update Comparison ===")
+println("CPU Mean: ", update_G_test.μ[1:5])
+println("GPU Mean: ", Array(update_Gs.μ[end][1:5]))
+
+println("CPU Covariance [1:3, 1:3]: ", Matrix(update_G_test.Σ)[1:3, 1:3])
+println("GPU Covariance [1:3, 1:3]: ", Array(update_Gs.Σ[end])[1:3, 1:3])
+
+# =============================================================================
+# Full Kalman Step
+# =============================================================================
+
+# Run full step on GPU (from original state)
+step_Gs = kalman_step.(Gs, Ref(dyn_params), Ref(obs_params), observations);
+
+# Compare full step to CPU
+step_G_test = kalman_step(
+    MvNormal(μ_test, PDMat(Σ_test)),
+    (A_test, b_test, Q_test),
+    (H_test, c_test, R_test),
+    obs_test,
+)
+
+println("\n=== Full Step Comparison ===")
+println("CPU Mean: ", step_G_test.μ[1:5])
+println("GPU Mean: ", Array(step_Gs.μ[end][1:5]))
+
+println("CPU Covariance [1:3, 1:3]: ", Matrix(step_G_test.Σ)[1:3, 1:3])
+println("GPU Covariance [1:3, 1:3]: ", Array(step_Gs.Σ[end])[1:3, 1:3])
