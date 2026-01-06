@@ -10,7 +10,6 @@ using StatsBase
 
 # TODO: heavy modules—move to extension
 using CUDA
-using NNlib
 
 export initialise, step, predict, update, filter
 
@@ -18,6 +17,12 @@ export initialise, step, predict, update, filter
 include("callbacks.jl")
 include("containers.jl")
 include("resamplers.jl")
+
+# Batching utilities
+include("batching/types.jl")
+include("batching/broadcasting.jl")
+include("batching/wrappers.jl")
+include("batching/operations.jl")
 
 ## FILTERING BASE ##########################################################################
 

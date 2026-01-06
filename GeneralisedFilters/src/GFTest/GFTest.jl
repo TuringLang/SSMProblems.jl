@@ -2,7 +2,6 @@ module GFTest
 
 using CUDA
 using LinearAlgebra
-using NNlib
 using Random
 using StaticArrays
 
