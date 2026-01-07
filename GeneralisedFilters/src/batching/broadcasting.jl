@@ -8,6 +8,8 @@ import Base.Broadcast: broadcasted
 
 import PDMats: PDMat
 
+export BATCHED_CACHE_VERBOSITY, clear_batched_cache!
+
 # =============================================================================
 # Broadcast Style
 # =============================================================================
@@ -184,7 +186,24 @@ end
 # Broadcast Materialization
 # =============================================================================
 
-const BATCHED_FUNC_CACHE = Dict{Tuple,Any}()
+# Verbosity levels: :silent, :verbose, :debug
+# :silent  - no output
+# :verbose - print when generating or regenerating (i.e. cache misses)
+# :debug   - print all cache activity including hits
+const BATCHED_CACHE_VERBOSITY = Ref{Symbol}(:silent)
+
+# Cache stores (batched_function, world_age_when_cached)
+const BATCHED_FUNC_CACHE = Dict{Tuple{Any,Type},Tuple{Any,UInt}}()
+
+"""
+    clear_batched_cache!()
+
+Clear the batched function cache. Useful for debugging or forcing regeneration.
+"""
+function clear_batched_cache!()
+    empty!(BATCHED_FUNC_CACHE)
+    return nothing
+end
 
 function Broadcast.materialize(bc::Broadcasted{BatchedStyle})
     f = bc.f
@@ -198,17 +217,30 @@ function Broadcast.materialize(bc::Broadcasted{BatchedStyle})
     argtypes = Tuple{map(typeof, args)...}
     key = (f, argtypes)
 
-    # HACK: caching was issues when functions were modified
-    # if !haskey(BATCHED_FUNC_CACHE, key)
-    #     println("  [Generating batched version of $f]")
-    #     batched_f = generate_batched_function(f, argtypes)
-    #     BATCHED_FUNC_CACHE[key] = batched_f
-    # end
+    # Get element types for method lookup
+    element_types = Tuple{map(ir_element_type, argtypes.parameters)...}
 
-    # batched_f = BATCHED_FUNC_CACHE[key]
-    # return Base.invokelatest(batched_f, nothing, args...)
+    if haskey(BATCHED_FUNC_CACHE, key)
+        batched_f, cached_world = BATCHED_FUNC_CACHE[key]
+        # Check if the method has been redefined since caching
+        m = which(f, element_types)
+        if m.primary_world <= cached_world
+            if BATCHED_CACHE_VERBOSITY[] == :debug
+                println("  [Using cached batched version of $f]")
+            end
+            return Base.invokelatest(batched_f, nothing, args...)
+        end
+        if BATCHED_CACHE_VERBOSITY[] in (:verbose, :debug)
+            println("  [Regenerating batched version of $f (method redefined)]")
+        end
+    else
+        if BATCHED_CACHE_VERBOSITY[] in (:verbose, :debug)
+            println("  [Generating batched version of $f]")
+        end
+    end
 
-    println("  [Generating batched version of $f]")
     batched_f = generate_batched_function(f, argtypes)
+    current_world = Base.get_world_counter()
+    BATCHED_FUNC_CACHE[key] = (batched_f, current_world)
     return Base.invokelatest(batched_f, nothing, args...)
 end

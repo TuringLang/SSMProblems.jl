@@ -21,6 +21,8 @@ D_state = 2
 D_obs = 2
 N = 3
 
+BATCHED_CACHE_VERBOSITY[] = :debug
+
 function kalman_predict(state, dyn_params)
     A = dyn_params[1]
     b = dyn_params[2]
