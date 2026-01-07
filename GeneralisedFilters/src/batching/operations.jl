@@ -161,24 +161,47 @@ end
 # PDMat Broadcasting
 # =============================================================================
 
-# function broadcasted(::Type{PDMat}, A::BatchedCuMatrix{T,CuMatrix{T}}) where {T}
-#     chol = cholesky_batched(A)
-#     return BatchedPDMat{T}(chol)
-# end
+# HACK: PDMat is a constructor so will use
+# `broadcasted(::Type{W}, args::Union{BatchedCuMatrix, BatchedCuVector, SharedCuMatrix, SharedCuVector, StructArray}...) where W`
+# rather than the desired recursive broadcast to
+# `PDMat(mat::AbstractMatrix) = PDMat(mat, cholesky(mat))`
+# This method hardcodes a manual override for BatchedCuMatrix inputs. This should be replaced
+# by a more general solution in the future.
+function broadcasted(::Type{PDMat}, A::BatchedCuMatrix{T}) where {T}
+    chol = cholesky.(A)
+    return PDMat.(A, chol)
+end
 
-# function broadcasted(::typeof(\), S::BatchedPDMat{T}, A::BatchedCuMatrix{T}) where {T}
-#     return pdmat_solve(S, A)
-# end
+# HACK: Addition with PDMat extracts .mat field. Should be replaced by automatic
+# materialization of PDMat to BatchedCuMatrix in the future.
+function broadcasted(
+    ::typeof(+), A::BatchedCuMatrix{T}, P::StructArray{<:PDMat{T}}
+) where {T}
+    return broadcasted(+, A, P.mat)
+end
 
-# function broadcasted(::typeof(/), A::BatchedCuMatrix{T}, S::BatchedPDMat{T}) where {T}
-#     # Need to actually transpose the data, not just wrap it
-#     At_data = permutedims(A.data, (2, 1, 3))
-#     At = BatchedCuMatrix(At_data)
-#     result_t = pdmat_solve(S, At)
-#     # Transpose back
-#     result_data = permutedims(result_t.data, (2, 1, 3))
-#     return BatchedCuMatrix(result_data)
-# end
+function broadcasted(
+    ::typeof(+), P::StructArray{<:PDMat{T}}, A::BatchedCuMatrix{T}
+) where {T}
+    return broadcasted(+, P.mat, A)
+end
+
+# A / S where S is PDMat: computes A * inv(S)
+# potrs solves S * X = B, so we solve S * X = A' and transpose back
+function broadcasted(
+    ::typeof(/), A::BatchedCuMatrix{T}, S::StructArray{<:PDMat{T}}
+) where {T}
+    L = S.chol.factors.data
+
+    # Transpose A: potrs solves S*X = B, we want A*inv(S) = (inv(S)*A')'
+    At = BatchedCuMatrix(permutedims(A.data, (2, 1, 3)))
+
+    # Solve S * X = A' in-place (result stored in At)
+    potrs_batched!('L', L, At)
+
+    # Transpose back
+    return BatchedCuMatrix(permutedims(At.data, (2, 1, 3)))
+end
 
 # =============================================================================
 # Quadratic Form Broadcasting
@@ -195,36 +218,36 @@ function broadcasted(
     return broadcasted(*, temp, Xt)
 end
 
-# X_A_Xt for BatchedPDMat: X * P * X' where P = L * L'
+# X_A_Xt for StructArray{PDMat}: X * P * X' where P = L * L'
 # Computed as (X * L) * (X * L)' using TRMM and SYRK
-# function broadcasted(
-#     ::typeof(X_A_Xt), P::BatchedPDMat{T}, X::Union{BatchedCuMatrix{T},SharedCuMatrix{T}}
-# ) where {T}
-#     L = P.chol.factors
-#     N = get_batch_size(P, X)
+# HACK: this function should dispatch to specialised `*` for triangular types but this is
+# not yet implemented
+function broadcasted(
+    ::typeof(X_A_Xt),
+    P::StructArray{<:PDMat{T}},
+    X::Union{BatchedCuMatrix{T},SharedCuMatrix{T}},
+) where {T}
+    # P.chol.factors is StructArray{LowerTriangular}, .data is the BatchedCuMatrix
+    L = P.chol.factors.data
+    N = get_batch_size(L, X)
+    out_dim = inner_size_for_blas(X)[1]
 
-#     X_inner = inner_size_for_blas(X)
-#     m = X_inner[1]
+    # Copy X for in-place TRMM
+    XL = if X isa SharedCuMatrix
+        BatchedCuMatrix(repeat(reshape(X.data, size(X.data)..., 1), 1, 1, N))
+    else
+        BatchedCuMatrix(copy(X.data))
+    end
 
-#     # Copy X to XL (TRMM overwrites in-place)
-#     XL_data = if X isa SharedCuMatrix
-#         repeat(reshape(X.data, size(X.data, 1), size(X.data, 2), 1), 1, 1, N)
-#     else
-#         copy(X.data)
-#     end
-#     XL = BatchedCuMatrix(XL_data)
+    # XL = X * L using TRMM (side='R', uplo='L', no transpose, non-unit diagonal)
+    trmm_batched!('R', 'L', 'N', 'N', one(T), L, XL)
 
-#     # XL = X * L using TRMM (side='R' for right multiply, uplo='L' for lower triangular)
-#     L_data = BatchedCuMatrix(L.data)
-#     trmm_batched!('R', 'L', 'N', 'N', one(T), L_data, XL)
+    # result = XL * XL' using SYRK (fills lower triangle only)
+    result = BatchedCuMatrix(CuArray{T}(undef, out_dim, out_dim, N))
+    syrk_batched!('L', 'N', one(T), XL, zero(T), result)
 
-#     # Result = XL * XL' using SYRK (fills lower triangle)
-#     Result_data = CuArray{T}(undef, m, m, N)
-#     Result = BatchedCuMatrix(Result_data)
-#     syrk_batched!('L', 'N', one(T), XL, zero(T), Result)
+    # Copy lower triangle to upper for full symmetric matrix
+    symmetrize_lower!(result)
 
-#     # Symmetrize: copy lower triangle to upper
-#     symmetrize_lower!(Result)
-
-#     return Result
-# end
+    return result
+end

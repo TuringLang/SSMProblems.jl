@@ -48,9 +48,6 @@ end
 
 const SharedArray = Union{SharedCuVector,SharedCuMatrix}
 
-# Convenience constructors that infer memory type
-SharedCuMatrix(data::CuArray{T,2,M}) where {T,M} = SharedCuMatrix{T,M}(data)
-SharedCuVector(data::CuArray{T,1,M}) where {T,M} = SharedCuVector{T,M}(data)
 
 Shared(x::CuArray{T,2,M}) where {T,M} = SharedCuMatrix{T,M}(x)
 Shared(x::CuArray{T,1,M}) where {T,M} = SharedCuVector{T,M}(x)
