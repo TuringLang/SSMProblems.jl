@@ -17,9 +17,9 @@ Magma.magma_init()
 # Configuration
 # =============================================================================
 
-D_state = 64
-D_obs = 64
-N = 1000
+D_state = 2
+D_obs = 2
+N = 3
 
 function kalman_predict(state, dyn_params)
     A = dyn_params[1]
@@ -45,7 +45,7 @@ Q = Q_root * Q_root' + I
 Qs = SharedCuMatrix(Q)
 
 Σ_PDs = broadcasted(PDMat, Σs);
-Gs = StructArray{MvNormal}((μ=μs, Σ=Σ_PDs));
+Gs = MvNormal.(μs, Σ_PDs);
 
 function kalman_predict(state, dyn_params)
     A = dyn_params[1]
@@ -53,7 +53,8 @@ function kalman_predict(state, dyn_params)
     Q = dyn_params[3]
 
     μ̂ = A * state.μ + b
-    Σ̂ = X_A_Xt(state.Σ, A) + Q
+    Σ̂ = PDMat(X_A_Xt(state.Σ, A) + Q)
+
     return MvNormal(μ̂, Σ̂)
 end
 
@@ -69,11 +70,11 @@ Q_test = Array(Qs.data)
 pred_G_test = kalman_predict(MvNormal(μ_test, PDMat(Σ_test)), (A_test, b_test, Q_test))
 
 println("=== Predict Comparison ===")
-println("CPU Mean: ", pred_G_test.μ[1:5])
-println("GPU Mean: ", Array(pred_Gs[end].μ[1:5]))
+println("CPU Mean: ", pred_G_test.μ)
+println("GPU Mean: ", Array(pred_Gs.μ[end]))
 
-println("CPU Covariance [1:3, 1:3]: ", Matrix(pred_G_test.Σ)[1:3, 1:3])
-println("GPU Covariance [1:3, 1:3]: ", Array(pred_Gs[end].Σ)[1:3, 1:3])
+println("CPU Covariance: ", Matrix(pred_G_test.Σ))
+println("GPU Covariance: ", Array(pred_Gs.Σ.mat[end]))
 
 # =============================================================================
 # Kalman Update
@@ -96,7 +97,7 @@ function kalman_update(state, obs_params, observation)
 
     # Update parameters using Joseph form for numerical stability
     μ̂ = μ + K * ȳ
-    Σ̂ = X_A_Xt(Σ, I - K * H) + X_A_Xt(R, K)
+    Σ̂ = PDMat(X_A_Xt(Σ, I - K * H) + X_A_Xt(R, K))
 
     return MvNormal(μ̂, Σ̂)
 end
@@ -114,6 +115,7 @@ I_obs = CuArray{Float32}(I, D_obs, D_obs)
 I_obs_shared = SharedCuMatrix(I_obs)
 Rs_root = BatchedCuMatrix(CUDA.randn(Float32, D_obs, D_obs, N))
 Rs = Rs_root .* adjoint.(Rs_root) .+ I_obs_shared
+Rs = PDMat.(Rs);
 
 obs_params = (Hs, cs, Rs)
 
@@ -126,17 +128,17 @@ update_Gs = kalman_update.(pred_Gs, Ref(obs_params), observations);
 # Compare update to CPU
 H_test = Array(Hs.data)
 c_test = Array(cs.data)
-R_test = PDMat(Array(Rs[end]))
+R_test = PDMat(Array(Rs.mat[end]))
 obs_test = Array(observations[end])
 
 update_G_test = kalman_update(pred_G_test, (H_test, c_test, R_test), obs_test)
 
 println("\n=== Update Comparison ===")
-println("CPU Mean: ", update_G_test.μ[1:5])
-println("GPU Mean: ", Array(update_Gs.μ[end][1:5]))
+println("CPU Mean: ", update_G_test.μ)
+println("GPU Mean: ", Array(update_Gs.μ[end]))
 
-println("CPU Covariance [1:3, 1:3]: ", Matrix(update_G_test.Σ)[1:3, 1:3])
-println("GPU Covariance [1:3, 1:3]: ", Array(update_Gs.Σ[end])[1:3, 1:3])
+println("CPU Covariance: ", Matrix(update_G_test.Σ))
+println("GPU Covariance: ", Array(update_Gs.Σ.mat[end]))
 
 # =============================================================================
 # Full Kalman Step
@@ -154,8 +156,8 @@ step_G_test = kalman_step(
 )
 
 println("\n=== Full Step Comparison ===")
-println("CPU Mean: ", step_G_test.μ[1:5])
-println("GPU Mean: ", Array(step_Gs.μ[end][1:5]))
+println("CPU Mean: ", step_G_test.μ)
+println("GPU Mean: ", Array(step_Gs.μ[end]))
 
-println("CPU Covariance [1:3, 1:3]: ", Matrix(step_G_test.Σ)[1:3, 1:3])
-println("GPU Covariance [1:3, 1:3]: ", Array(step_Gs.Σ[end])[1:3, 1:3])
+println("CPU Covariance: ", Matrix(step_G_test.Σ))
+println("GPU Covariance: ", Array(step_Gs.Σ.mat[end]))
