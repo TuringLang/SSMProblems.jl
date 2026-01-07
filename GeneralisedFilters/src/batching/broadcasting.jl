@@ -198,12 +198,17 @@ function Broadcast.materialize(bc::Broadcasted{BatchedStyle})
     argtypes = Tuple{map(typeof, args)...}
     key = (f, argtypes)
 
-    if !haskey(BATCHED_FUNC_CACHE, key)
-        println("  [Generating batched version of $f]")
-        batched_f = generate_batched_function(f, argtypes)
-        BATCHED_FUNC_CACHE[key] = batched_f
-    end
+    # HACK: caching was issues when functions were modified
+    # if !haskey(BATCHED_FUNC_CACHE, key)
+    #     println("  [Generating batched version of $f]")
+    #     batched_f = generate_batched_function(f, argtypes)
+    #     BATCHED_FUNC_CACHE[key] = batched_f
+    # end
 
-    batched_f = BATCHED_FUNC_CACHE[key]
+    # batched_f = BATCHED_FUNC_CACHE[key]
+    # return Base.invokelatest(batched_f, nothing, args...)
+
+    println("  [Generating batched version of $f]")
+    batched_f = generate_batched_function(f, argtypes)
     return Base.invokelatest(batched_f, nothing, args...)
 end
