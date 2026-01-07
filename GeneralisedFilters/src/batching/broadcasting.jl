@@ -18,9 +18,6 @@ Base.BroadcastStyle(::Type{<:BatchedCuMatrix}) = BatchedStyle()
 Base.BroadcastStyle(::Type{<:BatchedCuVector}) = BatchedStyle()
 Base.BroadcastStyle(::Type{<:SharedCuMatrix}) = BatchedStyle()
 Base.BroadcastStyle(::Type{<:SharedCuVector}) = BatchedStyle()
-Base.BroadcastStyle(::Type{<:BatchedCholesky}) = BatchedStyle()
-Base.BroadcastStyle(::Type{<:BatchedPDMat}) = BatchedStyle()
-# HACK: Currently hard-coded but can be replaced with a custom StructArray type
 Base.BroadcastStyle(::Type{<:StructArray}) = BatchedStyle()
 Base.BroadcastStyle(::BatchedStyle, ::BatchedStyle) = BatchedStyle()
 Base.BroadcastStyle(::BatchedStyle, ::DefaultArrayStyle{0}) = BatchedStyle()
@@ -30,12 +27,8 @@ Base.BroadcastStyle(::BatchedStyle, ::DefaultArrayStyle{0}) = BatchedStyle()
 # =============================================================================
 
 maybe_convert_ref(x) = x
-function maybe_convert_ref(r::Base.RefValue{<:CuVector{T}}) where {T}
-    return SharedCuVector{T,CuVector{T}}(r[])
-end
-function maybe_convert_ref(r::Base.RefValue{<:CuMatrix{T}}) where {T}
-    return SharedCuMatrix{T,CuMatrix{T}}(r[])
-end
+maybe_convert_ref(r::Base.RefValue{<:CuVector}) = SharedCuVector(r[])
+maybe_convert_ref(r::Base.RefValue{<:CuMatrix}) = SharedCuMatrix(r[])
 
 # =============================================================================
 # Structural Operations (Pass-through)
@@ -54,15 +47,12 @@ broadcasted(::typeof(getfield), r::Base.RefValue, s::Symbol) = getfield(r[], s)
 # StructArray Wrapping
 # =============================================================================
 
-inner_eltype(arg::BatchedCuVector{T}) where {T} = CuVector{T}
-inner_eltype(arg::BatchedCuMatrix{T}) where {T} = CuMatrix{T}
-inner_eltype(arg::SharedCuVector{T}) where {T} = CuVector{T}
-inner_eltype(arg::SharedCuMatrix{T}) where {T} = CuMatrix{T}
-inner_eltype(arg::BatchedPDMat{T}) where {T} = PDMat{T,CuMatrix{T}}
+inner_eltype(arg::BatchedOrShared) = eltype(arg)
+inner_eltype(arg::StructArray) = eltype(arg)
 inner_eltype(arg) = typeof(arg)
 
 function wrap_if_batched(::Type{T}, args...) where {T}
-    if any(arg -> arg isa Union{BatchedArray,SharedArray,BatchedPDMat}, args)
+    if any(arg -> arg isa Union{BatchedOrShared,StructArray}, args)
         field_names = fieldnames(T)
         element_types = Tuple{map(inner_eltype, args)...}
         ElType = Core.Compiler.return_type(T, element_types)
@@ -74,19 +64,36 @@ function wrap_if_batched(::Type{T}, args...) where {T}
 end
 
 # =============================================================================
+# Generic Wrapper Broadcasting
+# =============================================================================
+
+"""
+    broadcasted(::Type{W}, args::BatchedOrShared...)
+
+Generic wrapper for any type constructor applied to batched arguments.
+Works for single-field wrappers (Adjoint, Transpose, LowerTriangular, etc.)
+as well as multi-field types (PDMat, Cholesky, etc.).
+
+Returns a StructArray where each element is the type applied to the
+corresponding elements of the input arrays.
+"""
+function broadcasted(::Type{W}, args::Vararg{BatchedOrShared}) where {W}
+    element_types = Tuple{map(eltype, args)...}
+    ElType = Core.Compiler.return_type(W, element_types)
+    field_names = fieldnames(ElType)
+    nt = NamedTuple{field_names}(args)
+    return StructArray{ElType}(nt)
+end
+
+# Redirect function forms to type constructors
+broadcasted(::typeof(adjoint), A::BatchedOrShared) = broadcasted(Adjoint, A)
+broadcasted(::typeof(transpose), A::BatchedOrShared) = broadcasted(Transpose, A)
+
+# =============================================================================
 # IR Transformation
 # =============================================================================
 
-const SKIP_BROADCAST = Set{Any}([
-    tuple,
-    Core.tuple,
-    getfield,
-    getproperty,
-    adjoint,
-    transpose,
-    LowerTriangular,
-    UpperTriangular,
-])
+const SKIP_BROADCAST = Set{Any}([tuple, Core.tuple, getfield, getproperty])
 
 const BROADCAST_TYPES = Set{Any}([PDMat])
 

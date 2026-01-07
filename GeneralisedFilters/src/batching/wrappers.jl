@@ -1,5 +1,7 @@
 using Magma
 using Magma.LibMagma
+using LinearAlgebra: cholesky, Cholesky, LowerTriangular
+using StructArrays: StructArray
 
 # =============================================================================
 # Trivial Wrappers (reductions and elementwise operations)
@@ -389,27 +391,25 @@ function gemv_batched_smallsq!(
     return y
 end
 
-function potrf_batched!(uplo::Char, A::BatchedCuMatrix{Float32})
+function potrf_batched!(uplo::Char, A::BatchedCuMatrix{Float32}, info::CuVector{Int64})
     N = batch_size(A)
     n = size(A.data, 1)
     lda = n
 
     dA = create_pointer_array(A)
-    info_gpu = CUDA.zeros(Int64, N)
 
     CUDA.synchronize()
     queue_ptr = Ref{LibMagma.magma_queue_t}()
     LibMagma.magma_queue_create_internal(0, queue_ptr, C_NULL, C_NULL, 0)
     LibMagma.magma_spotrf_batched(
-        magma_uplo(uplo), n, dA, lda, pointer(info_gpu), N, queue_ptr[]
+        magma_uplo(uplo), n, dA, lda, pointer(info), N, queue_ptr[]
     )
     LibMagma.magma_queue_sync_internal(queue_ptr[], C_NULL, C_NULL, 0)
     LibMagma.magma_queue_destroy_internal(queue_ptr[], C_NULL, C_NULL, 0)
 
     CUDA.unsafe_free!(dA)
 
-    factors = BatchedCuMatrix{Float32,LowerTriangular{Float32,CuMatrix{Float32}}}(A.data)
-    return BatchedCholesky{Float32}(factors, info_gpu, uplo)
+    return A
 end
 
 function potrs_batched!(
@@ -489,25 +489,36 @@ end
 # Higher-level Cholesky Operations
 # =============================================================================
 
-function cholesky_batched(A::BatchedCuMatrix{T}) where {T}
+function broadcasted(::typeof(cholesky), A::BatchedCuMatrix{T,M}) where {T,M}
+    N = batch_size(A)
     A_copy = BatchedCuMatrix(copy(A.data))
-    return potrf_batched!('L', A_copy)
+    info = CUDA.zeros(Int64, N)
+
+    potrf_batched!('L', A_copy, info)
+
+    factors_wrapped = broadcasted(LowerTriangular, A_copy)
+
+    # TODO: Use a lazy constant vector for uplo instead of dense fill
+    uplo = fill('L', N)
+
+    ElType = Cholesky{T,eltype(A)}
+    return StructArray{ElType}((; factors=factors_wrapped, uplo=uplo, info=info))
 end
 
-function pdmat_solve(S::BatchedPDMat{T}, B::BatchedCuMatrix{T}) where {T}
-    L = S.chol.factors
-    L_data = BatchedCuMatrix(L.data)
+# function pdmat_solve(S::BatchedPDMat{T}, B::BatchedCuMatrix{T}) where {T}
+#     L = S.chol.factors
+#     L_data = BatchedCuMatrix(L.data)
 
-    B_copy = BatchedCuMatrix(copy(B.data))
+#     B_copy = BatchedCuMatrix(copy(B.data))
 
-    # Solve L*L'*X = B via two triangular solves:
-    # 1. Solve L*Y = B (Y stored in B_copy)
-    trsm_batched!('L', 'L', 'N', 'N', one(T), L_data, B_copy)
-    # 2. Solve L'*X = Y (X stored in B_copy)
-    trsm_batched!('L', 'L', 'T', 'N', one(T), L_data, B_copy)
+#     # Solve L*L'*X = B via two triangular solves:
+#     # 1. Solve L*Y = B (Y stored in B_copy)
+#     trsm_batched!('L', 'L', 'N', 'N', one(T), L_data, B_copy)
+#     # 2. Solve L'*X = Y (X stored in B_copy)
+#     trsm_batched!('L', 'L', 'T', 'N', one(T), L_data, B_copy)
 
-    return B_copy
-end
+#     return B_copy
+# end
 
 # =============================================================================
 # Batched TRMM (Triangular Matrix Multiply)
