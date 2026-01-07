@@ -1,53 +1,71 @@
 import PDMats: X_A_Xt
 
 # =============================================================================
-# Adjoint/Transpose Broadcasting
+# GEMM-Compatible Types
 # =============================================================================
 
-function broadcasted(::typeof(adjoint), A::BatchedCuMatrix{T,CuMatrix{T}}) where {T}
-    return BatchedCuMatrix{T,Adjoint{T,CuMatrix{T}}}(A.data)
-end
+# Type aliases for StructArray-wrapped matrices
+const BatchedAdjoint{T,M} = StructArray{
+    Adjoint{T,CuArray{T,2,M}},1,@NamedTuple{parent::BatchedCuMatrix{T,M}}
+}
+const BatchedTranspose{T,M} = StructArray{
+    Transpose{T,CuArray{T,2,M}},1,@NamedTuple{parent::BatchedCuMatrix{T,M}}
+}
+const SharedAdjoint{T,M} = StructArray{
+    Adjoint{T,CuArray{T,2,M}},1,@NamedTuple{parent::SharedCuMatrix{T,M}}
+}
+const SharedTranspose{T,M} = StructArray{
+    Transpose{T,CuArray{T,2,M}},1,@NamedTuple{parent::SharedCuMatrix{T,M}}
+}
 
-function broadcasted(::typeof(transpose), A::BatchedCuMatrix{T,CuMatrix{T}}) where {T}
-    return BatchedCuMatrix{T,Transpose{T,CuMatrix{T}}}(A.data)
-end
+# Union of all GEMM-compatible matrix types
+const GEMMCompatibleMatrix{T} = Union{
+    BatchedCuMatrix{T},
+    SharedCuMatrix{T},
+    BatchedAdjoint{T},
+    BatchedTranspose{T},
+    SharedAdjoint{T},
+    SharedTranspose{T},
+}
 
-function broadcasted(::typeof(adjoint), A::SharedCuMatrix{T,CuMatrix{T}}) where {T}
-    return SharedCuMatrix{T,Adjoint{T,CuMatrix{T}}}(A.data)
-end
+# trans_flag: returns BLAS transpose flag for each type
+trans_flag(::BatchedCuMatrix{T}) where {T} = 'N'
+trans_flag(::SharedCuMatrix{T}) where {T} = 'N'
+trans_flag(::BatchedAdjoint{T}) where {T} = T <: Real ? 'T' : 'C'
+trans_flag(::BatchedTranspose{T}) where {T} = 'T'
+trans_flag(::SharedAdjoint{T}) where {T} = T <: Real ? 'T' : 'C'
+trans_flag(::SharedTranspose{T}) where {T} = 'T'
 
-function broadcasted(::typeof(transpose), A::SharedCuMatrix{T,CuMatrix{T}}) where {T}
-    return SharedCuMatrix{T,Transpose{T,CuMatrix{T}}}(A.data)
-end
+# gemm_data: extracts the underlying BatchedCuMatrix/SharedCuMatrix for GEMM
+gemm_data(A::BatchedCuMatrix) = A
+gemm_data(A::SharedCuMatrix) = A
+gemm_data(A::BatchedAdjoint) = A.parent
+gemm_data(A::BatchedTranspose) = A.parent
+gemm_data(A::SharedAdjoint) = A.parent
+gemm_data(A::SharedTranspose) = A.parent
 
-function broadcasted(
-    ::typeof(adjoint), A::BatchedCuMatrix{T,Adjoint{T,CuMatrix{T}}}
-) where {T}
-    return BatchedCuMatrix{T,CuMatrix{T}}(A.data)
-end
+# inner_size_for_blas for wrapped types (delegates to underlying data)
+inner_size_for_blas(A::BatchedAdjoint) = inner_size_for_blas(A.parent)
+inner_size_for_blas(A::BatchedTranspose) = inner_size_for_blas(A.parent)
+inner_size_for_blas(A::SharedAdjoint) = inner_size_for_blas(A.parent)
+inner_size_for_blas(A::SharedTranspose) = inner_size_for_blas(A.parent)
 
-function broadcasted(
-    ::typeof(adjoint), A::SharedCuMatrix{T,Adjoint{T,CuMatrix{T}}}
-) where {T}
-    return SharedCuMatrix{T,CuMatrix{T}}(A.data)
-end
+# batch_size for wrapped types
+batch_size(A::BatchedAdjoint) = batch_size(A.parent)
+batch_size(A::BatchedTranspose) = batch_size(A.parent)
+batch_size(A::SharedAdjoint) = batch_size(A.parent)
+batch_size(A::SharedTranspose) = batch_size(A.parent)
 
-function broadcasted(::Type{LowerTriangular}, A::BatchedCuMatrix{T,CuMatrix{T}}) where {T}
-    return BatchedCuMatrix{T,LowerTriangular{T,CuMatrix{T}}}(A.data)
-end
-
-function broadcasted(::Type{UpperTriangular}, A::BatchedCuMatrix{T,CuMatrix{T}}) where {T}
-    return BatchedCuMatrix{T,UpperTriangular{T,CuMatrix{T}}}(A.data)
-end
+# TODO: For nested wrappers (e.g., Adjoint{LowerTriangular{...}}), we should
+# materialize the inner wrapper first before extracting. For now, we only
+# support single-level Adjoint/Transpose wrappers for efficient GEMM dispatch.
 
 # =============================================================================
 # Matrix Multiply Broadcasting
 # =============================================================================
 
 function broadcasted(
-    ::typeof(*),
-    A::Union{BatchedCuMatrix{T},SharedCuMatrix{T}},
-    B::Union{BatchedCuMatrix{T},SharedCuMatrix{T}},
+    ::typeof(*), A::GEMMCompatibleMatrix{T}, B::GEMMCompatibleMatrix{T}
 ) where {T}
     transA = trans_flag(A)
     transB = trans_flag(B)
@@ -62,17 +80,17 @@ function broadcasted(
     C_data = CuArray{T}(undef, m, n, N)
     C = BatchedCuMatrix(C_data)
 
-    gemm_batched!(transA, transB, one(T), A, B, zero(T), C)
+    gemm_batched!(transA, transB, one(T), gemm_data(A), gemm_data(B), zero(T), C)
     return C
 end
 
 # Multi-argument multiply
 function broadcasted(
     ::typeof(*),
-    A::Union{BatchedCuMatrix{T},SharedCuMatrix{T}},
-    B::Union{BatchedCuMatrix{T},SharedCuMatrix{T}},
-    C::Union{BatchedCuMatrix{T},SharedCuMatrix{T}},
-    rest::Union{BatchedCuMatrix{T},SharedCuMatrix{T}}...,
+    A::GEMMCompatibleMatrix{T},
+    B::GEMMCompatibleMatrix{T},
+    C::GEMMCompatibleMatrix{T},
+    rest::GEMMCompatibleMatrix{T}...,
 ) where {T}
     result = broadcasted(*, A, B)
     result = broadcasted(*, result, C)
@@ -143,24 +161,24 @@ end
 # PDMat Broadcasting
 # =============================================================================
 
-function broadcasted(::Type{PDMat}, A::BatchedCuMatrix{T,CuMatrix{T}}) where {T}
-    chol = cholesky_batched(A)
-    return BatchedPDMat{T}(chol)
-end
+# function broadcasted(::Type{PDMat}, A::BatchedCuMatrix{T,CuMatrix{T}}) where {T}
+#     chol = cholesky_batched(A)
+#     return BatchedPDMat{T}(chol)
+# end
 
-function broadcasted(::typeof(\), S::BatchedPDMat{T}, A::BatchedCuMatrix{T}) where {T}
-    return pdmat_solve(S, A)
-end
+# function broadcasted(::typeof(\), S::BatchedPDMat{T}, A::BatchedCuMatrix{T}) where {T}
+#     return pdmat_solve(S, A)
+# end
 
-function broadcasted(::typeof(/), A::BatchedCuMatrix{T}, S::BatchedPDMat{T}) where {T}
-    # Need to actually transpose the data, not just wrap it
-    At_data = permutedims(A.data, (2, 1, 3))
-    At = BatchedCuMatrix(At_data)
-    result_t = pdmat_solve(S, At)
-    # Transpose back
-    result_data = permutedims(result_t.data, (2, 1, 3))
-    return BatchedCuMatrix(result_data)
-end
+# function broadcasted(::typeof(/), A::BatchedCuMatrix{T}, S::BatchedPDMat{T}) where {T}
+#     # Need to actually transpose the data, not just wrap it
+#     At_data = permutedims(A.data, (2, 1, 3))
+#     At = BatchedCuMatrix(At_data)
+#     result_t = pdmat_solve(S, At)
+#     # Transpose back
+#     result_data = permutedims(result_t.data, (2, 1, 3))
+#     return BatchedCuMatrix(result_data)
+# end
 
 # =============================================================================
 # Quadratic Form Broadcasting
@@ -179,34 +197,34 @@ end
 
 # X_A_Xt for BatchedPDMat: X * P * X' where P = L * L'
 # Computed as (X * L) * (X * L)' using TRMM and SYRK
-function broadcasted(
-    ::typeof(X_A_Xt), P::BatchedPDMat{T}, X::Union{BatchedCuMatrix{T},SharedCuMatrix{T}}
-) where {T}
-    L = P.chol.factors
-    N = get_batch_size(P, X)
+# function broadcasted(
+#     ::typeof(X_A_Xt), P::BatchedPDMat{T}, X::Union{BatchedCuMatrix{T},SharedCuMatrix{T}}
+# ) where {T}
+#     L = P.chol.factors
+#     N = get_batch_size(P, X)
 
-    X_inner = inner_size_for_blas(X)
-    m = X_inner[1]
+#     X_inner = inner_size_for_blas(X)
+#     m = X_inner[1]
 
-    # Copy X to XL (TRMM overwrites in-place)
-    XL_data = if X isa SharedCuMatrix
-        repeat(reshape(X.data, size(X.data, 1), size(X.data, 2), 1), 1, 1, N)
-    else
-        copy(X.data)
-    end
-    XL = BatchedCuMatrix(XL_data)
+#     # Copy X to XL (TRMM overwrites in-place)
+#     XL_data = if X isa SharedCuMatrix
+#         repeat(reshape(X.data, size(X.data, 1), size(X.data, 2), 1), 1, 1, N)
+#     else
+#         copy(X.data)
+#     end
+#     XL = BatchedCuMatrix(XL_data)
 
-    # XL = X * L using TRMM (side='R' for right multiply, uplo='L' for lower triangular)
-    L_data = BatchedCuMatrix(L.data)
-    trmm_batched!('R', 'L', 'N', 'N', one(T), L_data, XL)
+#     # XL = X * L using TRMM (side='R' for right multiply, uplo='L' for lower triangular)
+#     L_data = BatchedCuMatrix(L.data)
+#     trmm_batched!('R', 'L', 'N', 'N', one(T), L_data, XL)
 
-    # Result = XL * XL' using SYRK (fills lower triangle)
-    Result_data = CuArray{T}(undef, m, m, N)
-    Result = BatchedCuMatrix(Result_data)
-    syrk_batched!('L', 'N', one(T), XL, zero(T), Result)
+#     # Result = XL * XL' using SYRK (fills lower triangle)
+#     Result_data = CuArray{T}(undef, m, m, N)
+#     Result = BatchedCuMatrix(Result_data)
+#     syrk_batched!('L', 'N', one(T), XL, zero(T), Result)
 
-    # Symmetrize: copy lower triangle to upper
-    symmetrize_lower!(Result)
+#     # Symmetrize: copy lower triangle to upper
+#     symmetrize_lower!(Result)
 
-    return Result
-end
+#     return Result
+# end
