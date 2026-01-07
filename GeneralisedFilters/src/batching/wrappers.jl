@@ -3,6 +3,49 @@ using Magma.LibMagma
 using LinearAlgebra: cholesky, Cholesky, LowerTriangular
 using StructArrays: StructArray
 
+export get_magma_queue, reset_magma_queue!
+
+# =============================================================================
+# MAGMA Queue Management
+# =============================================================================
+
+# Store the queue pointer directly (not in a Ref) to avoid lifetime issues
+mutable struct MagmaQueueCache
+    ptr::LibMagma.magma_queue_t
+    initialized::Bool
+end
+
+const MAGMA_QUEUE_CACHE = MagmaQueueCache(LibMagma.magma_queue_t(), false)
+
+"""
+    get_magma_queue()
+
+Get the cached MAGMA queue, creating it on first use.
+Returns the raw queue pointer for use with MAGMA functions.
+"""
+function get_magma_queue()
+    if !MAGMA_QUEUE_CACHE.initialized
+        queue_ref = Ref{LibMagma.magma_queue_t}()
+        LibMagma.magma_queue_create_internal(0, queue_ref, C_NULL, C_NULL, 0)
+        MAGMA_QUEUE_CACHE.ptr = queue_ref[]
+        MAGMA_QUEUE_CACHE.initialized = true
+    end
+    return MAGMA_QUEUE_CACHE.ptr
+end
+
+"""
+    reset_magma_queue!()
+
+Destroy and recreate the MAGMA queue. Useful if you suspect queue corruption.
+"""
+function reset_magma_queue!()
+    if MAGMA_QUEUE_CACHE.initialized
+        LibMagma.magma_queue_destroy_internal(MAGMA_QUEUE_CACHE.ptr, C_NULL, C_NULL, 0)
+        MAGMA_QUEUE_CACHE.initialized = false
+    end
+    return get_magma_queue()
+end
+
 # =============================================================================
 # Trivial Wrappers (reductions and elementwise operations)
 # =============================================================================
@@ -127,8 +170,7 @@ function gemm_batched!(
     lddc = m
 
     CUDA.synchronize()
-    queue_ptr = Ref{LibMagma.magma_queue_t}()
-    LibMagma.magma_queue_create_internal(0, queue_ptr, C_NULL, C_NULL, 0)
+    queue = get_magma_queue()
     LibMagma.magma_sgemm_batched(
         magma_trans(transA),
         magma_trans(transB),
@@ -144,10 +186,9 @@ function gemm_batched!(
         dC,
         lddc,
         N,
-        queue_ptr[],
+        queue,
     )
-    LibMagma.magma_queue_sync_internal(queue_ptr[], C_NULL, C_NULL, 0)
-    LibMagma.magma_queue_destroy_internal(queue_ptr[], C_NULL, C_NULL, 0)
+    LibMagma.magma_queue_sync_internal(queue, C_NULL, C_NULL, 0)
 
     CUDA.unsafe_free!(dA)
     CUDA.unsafe_free!(dB)
@@ -182,8 +223,7 @@ function gemm_batched_smallsq!(
     lddc = m
 
     CUDA.synchronize()
-    queue_ptr = Ref{LibMagma.magma_queue_t}()
-    LibMagma.magma_queue_create_internal(0, queue_ptr, C_NULL, C_NULL, 0)
+    queue = get_magma_queue()
     LibMagma.magmablas_sgemm_batched_smallsq(
         magma_trans(transA),
         magma_trans(transB),
@@ -205,10 +245,9 @@ function gemm_batched_smallsq!(
         0,      # cj
         lddc,
         N,
-        queue_ptr[],
+        queue,
     )
-    LibMagma.magma_queue_sync_internal(queue_ptr[], C_NULL, C_NULL, 0)
-    LibMagma.magma_queue_destroy_internal(queue_ptr[], C_NULL, C_NULL, 0)
+    LibMagma.magma_queue_sync_internal(queue, C_NULL, C_NULL, 0)
 
     CUDA.unsafe_free!(dA)
     CUDA.unsafe_free!(dB)
@@ -239,8 +278,7 @@ function gemm_batched_smallsq!(
     lddc = m
 
     CUDA.synchronize()
-    queue_ptr = Ref{LibMagma.magma_queue_t}()
-    LibMagma.magma_queue_create_internal(0, queue_ptr, C_NULL, C_NULL, 0)
+    queue = get_magma_queue()
     LibMagma.magmablas_dgemm_batched_smallsq(
         magma_trans(transA),
         magma_trans(transB),
@@ -262,10 +300,9 @@ function gemm_batched_smallsq!(
         0,      # cj
         lddc,
         N,
-        queue_ptr[],
+        queue,
     )
-    LibMagma.magma_queue_sync_internal(queue_ptr[], C_NULL, C_NULL, 0)
-    LibMagma.magma_queue_destroy_internal(queue_ptr[], C_NULL, C_NULL, 0)
+    LibMagma.magma_queue_sync_internal(queue, C_NULL, C_NULL, 0)
 
     CUDA.unsafe_free!(dA)
     CUDA.unsafe_free!(dB)
@@ -298,13 +335,11 @@ function gemv_batched!(
     incy = 1
 
     CUDA.synchronize()
-    queue_ptr = Ref{LibMagma.magma_queue_t}()
-    LibMagma.magma_queue_create_internal(0, queue_ptr, C_NULL, C_NULL, 0)
+    queue = get_magma_queue()
     LibMagma.magmablas_sgemv_batched(
-        magma_trans(transA), m, n, alpha, dA, ldda, dx, incx, beta, dy, incy, N, queue_ptr[]
+        magma_trans(transA), m, n, alpha, dA, ldda, dx, incx, beta, dy, incy, N, queue
     )
-    LibMagma.magma_queue_sync_internal(queue_ptr[], C_NULL, C_NULL, 0)
-    LibMagma.magma_queue_destroy_internal(queue_ptr[], C_NULL, C_NULL, 0)
+    LibMagma.magma_queue_sync_internal(queue, C_NULL, C_NULL, 0)
 
     CUDA.unsafe_free!(dA)
     CUDA.unsafe_free!(dx)
@@ -337,13 +372,11 @@ function gemv_batched!(
     incy = 1
 
     CUDA.synchronize()
-    queue_ptr = Ref{LibMagma.magma_queue_t}()
-    LibMagma.magma_queue_create_internal(0, queue_ptr, C_NULL, C_NULL, 0)
+    queue = get_magma_queue()
     LibMagma.magmablas_dgemv_batched(
-        magma_trans(transA), m, n, alpha, dA, ldda, dx, incx, beta, dy, incy, N, queue_ptr[]
+        magma_trans(transA), m, n, alpha, dA, ldda, dx, incx, beta, dy, incy, N, queue
     )
-    LibMagma.magma_queue_sync_internal(queue_ptr[], C_NULL, C_NULL, 0)
-    LibMagma.magma_queue_destroy_internal(queue_ptr[], C_NULL, C_NULL, 0)
+    LibMagma.magma_queue_sync_internal(queue, C_NULL, C_NULL, 0)
 
     CUDA.unsafe_free!(dA)
     CUDA.unsafe_free!(dx)
@@ -376,13 +409,11 @@ function gemv_batched_smallsq!(
     incy = 1
 
     CUDA.synchronize()
-    queue_ptr = Ref{LibMagma.magma_queue_t}()
-    LibMagma.magma_queue_create_internal(0, queue_ptr, C_NULL, C_NULL, 0)
+    queue = get_magma_queue()
     LibMagma.magmablas_sgemv_batched_smallsq(
-        magma_trans(transA), n, alpha, dA, ldda, dx, incx, beta, dy, incy, N, queue_ptr[]
+        magma_trans(transA), n, alpha, dA, ldda, dx, incx, beta, dy, incy, N, queue
     )
-    LibMagma.magma_queue_sync_internal(queue_ptr[], C_NULL, C_NULL, 0)
-    LibMagma.magma_queue_destroy_internal(queue_ptr[], C_NULL, C_NULL, 0)
+    LibMagma.magma_queue_sync_internal(queue, C_NULL, C_NULL, 0)
 
     CUDA.unsafe_free!(dA)
     CUDA.unsafe_free!(dx)
@@ -399,13 +430,9 @@ function potrf_batched!(uplo::Char, A::BatchedCuMatrix{Float32}, info::CuVector{
     dA = create_pointer_array(A)
 
     CUDA.synchronize()
-    queue_ptr = Ref{LibMagma.magma_queue_t}()
-    LibMagma.magma_queue_create_internal(0, queue_ptr, C_NULL, C_NULL, 0)
-    LibMagma.magma_spotrf_batched(
-        magma_uplo(uplo), n, dA, lda, pointer(info), N, queue_ptr[]
-    )
-    LibMagma.magma_queue_sync_internal(queue_ptr[], C_NULL, C_NULL, 0)
-    LibMagma.magma_queue_destroy_internal(queue_ptr[], C_NULL, C_NULL, 0)
+    queue = get_magma_queue()
+    LibMagma.magma_spotrf_batched(magma_uplo(uplo), n, dA, lda, pointer(info), N, queue)
+    LibMagma.magma_queue_sync_internal(queue, C_NULL, C_NULL, 0)
 
     CUDA.unsafe_free!(dA)
 
@@ -426,13 +453,9 @@ function potrs_batched!(
     lddb = n
 
     CUDA.synchronize()
-    queue_ptr = Ref{LibMagma.magma_queue_t}()
-    LibMagma.magma_queue_create_internal(0, queue_ptr, C_NULL, C_NULL, 0)
-    LibMagma.magma_spotrs_batched(
-        magma_uplo(uplo), n, nrhs, dA, ldda, dB, lddb, N, queue_ptr[]
-    )
-    LibMagma.magma_queue_sync_internal(queue_ptr[], C_NULL, C_NULL, 0)
-    LibMagma.magma_queue_destroy_internal(queue_ptr[], C_NULL, C_NULL, 0)
+    queue = get_magma_queue()
+    LibMagma.magma_spotrs_batched(magma_uplo(uplo), n, nrhs, dA, ldda, dB, lddb, N, queue)
+    LibMagma.magma_queue_sync_internal(queue, C_NULL, C_NULL, 0)
 
     CUDA.unsafe_free!(dA)
     CUDA.unsafe_free!(dB)
@@ -459,8 +482,7 @@ function trsm_batched!(
     lddb = m
 
     CUDA.synchronize()
-    queue_ptr = Ref{LibMagma.magma_queue_t}()
-    LibMagma.magma_queue_create_internal(0, queue_ptr, C_NULL, C_NULL, 0)
+    queue = get_magma_queue()
     LibMagma.magmablas_strsm_batched(
         magma_side(side),
         magma_uplo(uplo),
@@ -474,10 +496,9 @@ function trsm_batched!(
         dB,
         lddb,
         N,
-        queue_ptr[],
+        queue,
     )
-    LibMagma.magma_queue_sync_internal(queue_ptr[], C_NULL, C_NULL, 0)
-    LibMagma.magma_queue_destroy_internal(queue_ptr[], C_NULL, C_NULL, 0)
+    LibMagma.magma_queue_sync_internal(queue, C_NULL, C_NULL, 0)
 
     CUDA.unsafe_free!(dA)
     CUDA.unsafe_free!(dB)
@@ -543,8 +564,7 @@ function trmm_batched!(
     lddb = m
 
     CUDA.synchronize()
-    queue_ptr = Ref{LibMagma.magma_queue_t}()
-    LibMagma.magma_queue_create_internal(0, queue_ptr, C_NULL, C_NULL, 0)
+    queue = get_magma_queue()
     LibMagma.magmablas_strmm_batched(
         magma_side(side),
         magma_uplo(uplo),
@@ -558,10 +578,9 @@ function trmm_batched!(
         dB,
         lddb,
         N,
-        queue_ptr[],
+        queue,
     )
-    LibMagma.magma_queue_sync_internal(queue_ptr[], C_NULL, C_NULL, 0)
-    LibMagma.magma_queue_destroy_internal(queue_ptr[], C_NULL, C_NULL, 0)
+    LibMagma.magma_queue_sync_internal(queue, C_NULL, C_NULL, 0)
 
     CUDA.unsafe_free!(dA)
     CUDA.unsafe_free!(dB)
@@ -588,8 +607,7 @@ function trmm_batched!(
     lddb = m
 
     CUDA.synchronize()
-    queue_ptr = Ref{LibMagma.magma_queue_t}()
-    LibMagma.magma_queue_create_internal(0, queue_ptr, C_NULL, C_NULL, 0)
+    queue = get_magma_queue()
     LibMagma.magmablas_dtrmm_batched(
         magma_side(side),
         magma_uplo(uplo),
@@ -603,10 +621,9 @@ function trmm_batched!(
         dB,
         lddb,
         N,
-        queue_ptr[],
+        queue,
     )
-    LibMagma.magma_queue_sync_internal(queue_ptr[], C_NULL, C_NULL, 0)
-    LibMagma.magma_queue_destroy_internal(queue_ptr[], C_NULL, C_NULL, 0)
+    LibMagma.magma_queue_sync_internal(queue, C_NULL, C_NULL, 0)
 
     CUDA.unsafe_free!(dA)
     CUDA.unsafe_free!(dB)
@@ -637,8 +654,7 @@ function syrk_batched!(
     lddc = n
 
     CUDA.synchronize()
-    queue_ptr = Ref{LibMagma.magma_queue_t}()
-    LibMagma.magma_queue_create_internal(0, queue_ptr, C_NULL, C_NULL, 0)
+    queue = get_magma_queue()
     LibMagma.magmablas_ssyrk_batched(
         magma_uplo(uplo),
         magma_trans(trans),
@@ -651,10 +667,9 @@ function syrk_batched!(
         dC,
         lddc,
         N,
-        queue_ptr[],
+        queue,
     )
-    LibMagma.magma_queue_sync_internal(queue_ptr[], C_NULL, C_NULL, 0)
-    LibMagma.magma_queue_destroy_internal(queue_ptr[], C_NULL, C_NULL, 0)
+    LibMagma.magma_queue_sync_internal(queue, C_NULL, C_NULL, 0)
 
     CUDA.unsafe_free!(dA)
     CUDA.unsafe_free!(dC)
@@ -681,8 +696,7 @@ function syrk_batched!(
     lddc = n
 
     CUDA.synchronize()
-    queue_ptr = Ref{LibMagma.magma_queue_t}()
-    LibMagma.magma_queue_create_internal(0, queue_ptr, C_NULL, C_NULL, 0)
+    queue = get_magma_queue()
     LibMagma.magmablas_dsyrk_batched(
         magma_uplo(uplo),
         magma_trans(trans),
@@ -695,10 +709,9 @@ function syrk_batched!(
         dC,
         lddc,
         N,
-        queue_ptr[],
+        queue,
     )
-    LibMagma.magma_queue_sync_internal(queue_ptr[], C_NULL, C_NULL, 0)
-    LibMagma.magma_queue_destroy_internal(queue_ptr[], C_NULL, C_NULL, 0)
+    LibMagma.magma_queue_sync_internal(queue, C_NULL, C_NULL, 0)
 
     CUDA.unsafe_free!(dA)
     CUDA.unsafe_free!(dC)
