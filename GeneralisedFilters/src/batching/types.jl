@@ -39,27 +39,27 @@ function Base.getindex(x::BatchedCuVector{T,CuVector{T}}, i::Int) where {T}
 end
 
 function Base.getindex(x::BatchedCuMatrix{T,CuMatrix{T}}, i::Int) where {T}
-    return view(x.data, :, :, i)
+    return view(x.data,:,:,i)
 end
 
 function Base.getindex(
     x::BatchedCuMatrix{T,LowerTriangular{T,CuMatrix{T}}}, i::Int
 ) where {T}
-    return LowerTriangular(view(x.data, :, :, i))
+    return LowerTriangular(view(x.data,:,:,i))
 end
 
 function Base.getindex(
     x::BatchedCuMatrix{T,UpperTriangular{T,CuMatrix{T}}}, i::Int
 ) where {T}
-    return UpperTriangular(view(x.data, :, :, i))
+    return UpperTriangular(view(x.data,:,:,i))
 end
 
 function Base.getindex(x::BatchedCuMatrix{T,Adjoint{T,CuMatrix{T}}}, i::Int) where {T}
-    return adjoint(view(x.data, :, :, i))
+    return adjoint(view(x.data,:,:,i))
 end
 
 function Base.getindex(x::BatchedCuMatrix{T,Transpose{T,CuMatrix{T}}}, i::Int) where {T}
-    return transpose(view(x.data, :, :, i))
+    return transpose(view(x.data,:,:,i))
 end
 
 # =============================================================================

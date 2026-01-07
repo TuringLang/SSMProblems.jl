@@ -180,9 +180,7 @@ end
 # X_A_Xt for BatchedPDMat: X * P * X' where P = L * L'
 # Computed as (X * L) * (X * L)' using TRMM and SYRK
 function broadcasted(
-    ::typeof(X_A_Xt),
-    P::BatchedPDMat{T},
-    X::Union{BatchedCuMatrix{T},SharedCuMatrix{T}},
+    ::typeof(X_A_Xt), P::BatchedPDMat{T}, X::Union{BatchedCuMatrix{T},SharedCuMatrix{T}}
 ) where {T}
     L = P.chol.factors
     N = get_batch_size(P, X)
