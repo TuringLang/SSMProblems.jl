@@ -10,7 +10,6 @@ using StatsBase
 
 # TODO: heavy modules—move to extension
 using CUDA
-using NNlib
 
 # Filtering utilities
 include("callbacks.jl")
