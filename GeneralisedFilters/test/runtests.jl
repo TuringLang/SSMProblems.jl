@@ -104,6 +104,68 @@ end
     end
 end
 
+@testitem "Backward information predictor non-homogeneous test" begin
+    using GeneralisedFilters
+    using Distributions
+    using LinearAlgebra
+    using StableRNGs
+
+    SEED = 1234
+    Dx = 2
+    Dy = 2
+    T = 4
+
+    rng = StableRNG(SEED)
+    model = GeneralisedFilters.GFTest.create_nonhomogeneous_linear_gaussian_model(
+        rng, Dx, Dy, T
+    )
+    _, _, ys = sample(rng, model, T)
+
+    BIF = BackwardInformationPredictor(; initial_jitter=1e-8)
+    predictive_likelihood = backward_initialise(rng, model.obs, BIF, T, ys[T])
+    predictive_likelihood = backward_predict(
+        rng, model.dyn, BIF, T - 1, predictive_likelihood
+    )
+    predictive_likelihood = backward_update(
+        model.obs, BIF, T - 1, predictive_likelihood, ys[T - 1]
+    )
+    predictive_likelihood = backward_predict(
+        rng, model.dyn, BIF, T - 2, predictive_likelihood
+    )
+    predictive_likelihood = backward_update(
+        model.obs, BIF, T - 2, predictive_likelihood, ys[T - 2]
+    )
+
+    # Compute analytical result with time-varying parameters
+    A_Tm1, b_Tm1, Q_Tm1 = GeneralisedFilters.calc_params(model.dyn, T - 1)
+    A_T, b_T, Q_T = GeneralisedFilters.calc_params(model.dyn, T)
+    H_Tm2, c_Tm2, R_Tm2 = GeneralisedFilters.calc_params(model.obs, T - 2)
+    H_Tm1, c_Tm1, R_Tm1 = GeneralisedFilters.calc_params(model.obs, T - 1)
+    H_T, c_T, R_T = GeneralisedFilters.calc_params(model.obs, T)
+
+    # Projection matrix F from x_{T-2} to [Y_{T-2}, Y_{T-1}, Y_T]
+    F = [H_Tm2; H_Tm1 * A_Tm1; H_T * A_T * A_Tm1]
+
+    # Offset vector g
+    g = [c_Tm2; H_Tm1 * b_Tm1 + c_Tm1; H_T * A_T * b_Tm1 + H_T * b_T + c_T]
+
+    # Covariance Σ of [Y_{T-2}, Y_{T-1}, Y_T] given x_{T-2}
+    #! format: off
+    Σ = [
+        R_Tm2                                         zeros(Dy, Dy)                                       zeros(Dy, Dy);
+        zeros(Dy, Dy)                                 H_Tm1 * Q_Tm1 * H_Tm1' + R_Tm1                      H_Tm1 * Q_Tm1 * A_T' * H_T';
+        zeros(Dy, Dy)                                 H_T * A_T * Q_Tm1 * H_Tm1'                          H_T * A_T * Q_Tm1 * A_T' * H_T' + H_T * Q_T * H_T' + R_T
+    ]
+    #! format: on
+
+    λ_true = F' * inv(Σ) * (vcat(ys[(T - 2):T]...) .- g)
+    Ω_true = F' * inv(Σ) * F
+    λ, Ω = GeneralisedFilters.natural_params(predictive_likelihood)
+
+    @test λ ≈ λ_true
+    @test Ω ≈ Ω_true atol = 1e-6
+end
+
 @testitem "Kalman filter StaticArrays" begin
     using GeneralisedFilters
     using SSMProblems
@@ -197,6 +259,57 @@ end
         @test smoothed.μ ≈ μ_X1
         @test smoothed.Σ ≈ Σ_X1
     end
+end
+
+@testitem "Kalman smoother non-homogeneous test" begin
+    using GeneralisedFilters
+    using Distributions
+    using LinearAlgebra
+    using StableRNGs
+    using SSMProblems: dyn, obs, prior
+
+    SEED = 1234
+    Dx = 2
+    Dy = 2
+    T = 3
+
+    rng = StableRNG(SEED)
+    model = GeneralisedFilters.GFTest.create_nonhomogeneous_linear_gaussian_model(
+        rng, Dx, Dy, T
+    )
+    _, _, ys = sample(rng, model, T)
+
+    # Forward pass: store filtered and predicted distributions
+    kf = KF()
+    filtered = Vector{MvNormal}(undef, T)
+    predicted = Vector{MvNormal}(undef, T)
+
+    let state = initialise(rng, prior(model), kf)
+        for t in 1:T
+            pred = predict(rng, dyn(model), kf, t, state, ys[t])
+            predicted[t] = pred
+            state, _ = update(obs(model), kf, t, pred, ys[t])
+            filtered[t] = state
+        end
+    end
+
+    # Backward pass: smooth using backward_smooth
+    smoothed = foldl((T - 1):-1:1; init=filtered[T]) do smoothed, t
+        backward_smooth(dyn(model), kf, t, filtered[t], smoothed; predicted=predicted[t + 1])
+    end
+
+    # Compute ground truth using joint MVN conditional distribution
+    μ_Z, Σ_Z = GeneralisedFilters.GFTest._compute_joint_nonhomogeneous(model, T)
+
+    # Condition on observations
+    y = vcat(ys...)
+    I_x = (Dx + 1):(2Dx)
+    I_y = (Dx * (T + 1) + 1):(Dx * (T + 1) + T * Dy)
+    μ_X1 = μ_Z[I_x] + Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ (y - μ_Z[I_y]))
+    Σ_X1 = Σ_Z[I_x, I_x] - Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ Σ_Z[I_y, I_x])
+
+    @test smoothed.μ ≈ μ_X1
+    @test smoothed.Σ ≈ Σ_X1
 end
 
 @testitem "RTS smoother (single cache version)" begin
