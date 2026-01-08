@@ -311,7 +311,8 @@ function backward_predict(
     kwargs...,
 )
     λ, Ω = natural_params(state)
-    A, b, Q = calc_params(dyn, iter; kwargs...)
+    # Use iter + 1 to get transition from x_iter to x_{iter+1}, matching forward filter convention
+    A, b, Q = calc_params(dyn, iter + 1; kwargs...)
     F = cholesky(Q).L
 
     m = λ - Ω * b
