@@ -281,7 +281,8 @@ end
 
     # Backward information pass: compute p(y_{t_smooth+1:T} | x_{t_smooth})
     # We do predict+update from T-1 down to t_smooth+1, then only predict at t_smooth
-    bip = BackwardInformationPredictor()
+    # Note: initial_jitter needed because Dy < Dx makes H'R⁻¹H rank-deficient
+    bip = BackwardInformationPredictor(; initial_jitter=1e-10)
     back_lik = let lik = backward_initialise(rng, obs(model), bip, T, ys[T])
         for t in (T - 1):-1:(t_smooth + 1)
             lik = backward_predict(rng, dyn(model), bip, t, lik)
