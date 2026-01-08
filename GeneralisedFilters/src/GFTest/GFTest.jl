@@ -2,6 +2,7 @@ module GFTest
 
 using CUDA
 using LinearAlgebra
+using PDMats
 using Random
 using StaticArrays
 

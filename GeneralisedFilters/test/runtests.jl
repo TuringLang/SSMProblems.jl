@@ -7,6 +7,7 @@ using TestItemRunner
 include("Aqua.jl")
 include("type_stability.jl")
 include("resamplers.jl")
+include("kalman_gradient.jl")
 
 @testitem "Kalman filter test" begin
     using GeneralisedFilters

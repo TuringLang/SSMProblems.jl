@@ -38,6 +38,7 @@ julia = "1.10"
 
 [extras]
 Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
+FiniteDifferences = "26cc04aa-876d-5657-8c51-4c34ba976000"
 JET = "c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"
 PDMats = "90014a1f-27ba-587c-ab20-58faa44d9150"
 StableRNGs = "860ef19b-820b-49d6-a774-d7a799459cd3"
@@ -46,4 +47,4 @@ TestItemRunner = "f8b46487-2199-4994-9208-9a1283c18c0a"
 TestItems = "1c621080-faea-4a02-84b6-bbd5e436b8fe"
 
 [targets]
-test = ["Aqua", "PDMats", "StableRNGs", "Test", "TestItemRunner", "TestItems", "JET"]
+test = ["Aqua", "FiniteDifferences", "PDMats", "StableRNGs", "Test", "TestItemRunner", "TestItems", "JET"]
