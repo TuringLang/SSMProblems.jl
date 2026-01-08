@@ -145,24 +145,48 @@ end
     using Distributions
     using LinearAlgebra
     using StableRNGs
+    using SSMProblems: dyn, obs, prior
 
     SEED = 1234
     Dx = 3
     Dys = [2, 3, 4]
+    T = 2
 
     for Dy in Dys
-        rng = StableRNG(1234)
+        rng = StableRNG(SEED)
         model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
             rng, Dx, Dy; static_arrays=true
         )
-        _, _, ys = sample(rng, model, 2)
+        _, _, ys = sample(rng, model, T)
 
-        states, ll = GeneralisedFilters.smooth(rng, model, KalmanSmoother(), ys)
+        # Forward pass: store filtered and predicted distributions
+        kf = KF()
+        filtered = Vector{MvNormal}(undef, T)
+        predicted = Vector{MvNormal}(undef, T)
 
+        state = initialise(rng, prior(model), kf)
+        total_ll = 0.0
+        for t in 1:T
+            pred = predict(rng, dyn(model), kf, t, state, ys[t])
+            predicted[t] = pred
+            state, ll = update(obs(model), kf, t, pred, ys[t])
+            filtered[t] = state
+            total_ll += ll
+        end
+
+        # Backward pass: smooth using backward_smooth
+        smoothed = filtered[T]
+        for t in (T - 1):-1:1
+            smoothed = backward_smooth(
+                dyn(model), kf, t, filtered[t], smoothed; predicted=predicted[t + 1]
+            )
+        end
+
+        # Compute ground truth using joint MVN conditional distribution
         # Let Z = [X0, X1, X2, Y1, Y2] be the joint state vector
-        μ_Z, Σ_Z = GeneralisedFilters.GFTest._compute_joint(model, 2)
+        μ_Z, Σ_Z = GeneralisedFilters.GFTest._compute_joint(model, T)
 
-        # Condition on observations using formula for MVN conditional distribution. See: 
+        # Condition on observations using formula for MVN conditional distribution. See:
         # https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Conditional_distributions
         y = [ys[1]; ys[2]]
         I_x = (Dx + 1):(2Dx)  # just X1
@@ -170,9 +194,113 @@ end
         μ_X1 = μ_Z[I_x] + Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ (y - μ_Z[I_y]))
         Σ_X1 = Σ_Z[I_x, I_x] - Σ_Z[I_x, I_y] * (Σ_Z[I_y, I_y] \ Σ_Z[I_y, I_x])
 
-        @test states.μ ≈ μ_X1
-        @test states.Σ ≈ Σ_X1
+        @test smoothed.μ ≈ μ_X1
+        @test smoothed.Σ ≈ Σ_X1
     end
+end
+
+@testitem "RTS smoother (single cache version)" begin
+    using GeneralisedFilters
+    using Distributions
+    using LinearAlgebra
+    using StableRNGs
+    using SSMProblems: dyn, obs, prior
+
+    SEED = 1234
+    Dx = 3
+    Dy = 2
+    T = 5
+
+    rng = StableRNG(SEED)
+    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
+        rng, Dx, Dy; static_arrays=true
+    )
+    _, _, ys = sample(rng, model, T)
+
+    # Forward pass: store filtered and predicted distributions
+    kf = KF()
+    filtered = Vector{MvNormal}(undef, T)
+    predicted = Vector{MvNormal}(undef, T)
+
+    state = let s = initialise(rng, prior(model), kf)
+        for t in 1:T
+            pred = predict(rng, dyn(model), kf, t, s, ys[t])
+            predicted[t] = pred
+            s, _ = update(obs(model), kf, t, pred, ys[t])
+            filtered[t] = s
+        end
+        s
+    end
+
+    # Smooth with predicted provided
+    smoothed_with_pred = foldl((T - 1):-1:1; init=filtered[T]) do smoothed, t
+        backward_smooth(dyn(model), kf, t, filtered[t], smoothed; predicted=predicted[t + 1])
+    end
+
+    # Smooth without predicted (computed internally)
+    smoothed_without_pred = foldl((T - 1):-1:1; init=filtered[T]) do smoothed, t
+        backward_smooth(dyn(model), kf, t, filtered[t], smoothed)
+    end
+
+    # Both should give the same result
+    @test smoothed_with_pred.μ ≈ smoothed_without_pred.μ
+    @test smoothed_with_pred.Σ ≈ smoothed_without_pred.Σ
+end
+
+@testitem "Kalman two-filter smoother test" begin
+    using GeneralisedFilters
+    using Distributions
+    using LinearAlgebra
+    using StableRNGs
+    using SSMProblems: dyn, obs, prior
+
+    SEED = 1234
+    Dx = 3
+    Dy = 2
+    T = 5
+    t_smooth = 2
+
+    # HACK: inverse of SArray backed PDMat fails due to Hermitian error — waiting to fix upstream
+    rng = StableRNG(SEED)
+    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
+        rng, Dx, Dy; static_arrays=false
+    )
+    _, _, ys = sample(rng, model, T)
+
+    # Forward pass: store filtered distributions
+    kf = KF()
+    filtered = Vector{MvNormal}(undef, T)
+
+    let state = initialise(rng, prior(model), kf)
+        for t in 1:T
+            pred = predict(rng, dyn(model), kf, t, state, ys[t])
+            state, _ = update(obs(model), kf, t, pred, ys[t])
+            filtered[t] = state
+        end
+    end
+
+    # Backward information pass: compute p(y_{t_smooth+1:T} | x_{t_smooth})
+    # We do predict+update from T-1 down to t_smooth+1, then only predict at t_smooth
+    bip = BackwardInformationPredictor()
+    back_lik = let lik = backward_initialise(rng, obs(model), bip, T, ys[T])
+        for t in (T - 1):-1:(t_smooth + 1)
+            lik = backward_predict(rng, dyn(model), bip, t, lik)
+            lik = backward_update(obs(model), bip, t, lik, ys[t])
+        end
+        # Final predict at t_smooth (no update - we don't include y_{t_smooth} in backward lik)
+        backward_predict(rng, dyn(model), bip, t_smooth, lik)
+    end
+
+    # Two-filter smooth at t_smooth
+    smoothed_2f = two_filter_smooth(filtered[t_smooth], back_lik)
+
+    # Compare to RTS smoother result
+    smoothed_rts = foldl((T - 1):-1:t_smooth; init=filtered[T]) do smoothed, t
+        backward_smooth(dyn(model), kf, t, filtered[t], smoothed)
+    end
+
+    @test smoothed_2f.μ ≈ smoothed_rts.μ
+    @test smoothed_2f.Σ ≈ smoothed_rts.Σ
 end
 
 @testitem "Bootstrap filter test" begin
@@ -617,29 +745,26 @@ end
     # Extract inner and outer trajectories
     x_trajectories = getproperty.(getindex.(trajectory_samples, t_smooth), :x)
 
-    # Manually perform smoothing until we have a cleaner interface
-    A = hier_model.inner_model.dyn.A
-    b = hier_model.inner_model.dyn.b
-    C = hier_model.inner_model.dyn.C
-    Q = hier_model.inner_model.dyn.Q
+    # Smooth the inner (z) component using backward_smooth
+    inner_dyn = hier_model.inner_model.dyn
     z_smoothed_means = Vector{T}(undef, N_sample)
     for i in 1:N_sample
-        μ = trajectory_samples[i][K].z.μ
-        Σ = trajectory_samples[i][K].z.Σ
+        smoothed_z = trajectory_samples[i][K].z
 
         for t in (K - 1):-1:t_smooth
-            μ_filt = trajectory_samples[i][t].z.μ
-            Σ_filt = trajectory_samples[i][t].z.Σ
-            μ_pred = A * μ_filt + b + C * trajectory_samples[i][t].x
-            Σ_pred = X_A_Xt(Σ_filt, A) + Q
-            Σ_pred = PDMat(Symmetric(Σ_pred))
-
-            G = Σ_filt * A' / Σ_pred
-            μ = μ_filt .+ G * (μ .- μ_pred)
-            Σ = Σ_filt .+ G * (Σ .- Σ_pred) * G'
+            filtered_z = trajectory_samples[i][t].z
+            # Pass prev_outer to condition the inner dynamics on the outer trajectory
+            smoothed_z = backward_smooth(
+                inner_dyn,
+                KF(),
+                t,
+                filtered_z,
+                smoothed_z;
+                prev_outer=trajectory_samples[i][t].x,
+            )
         end
 
-        z_smoothed_means[i] = only(μ)
+        z_smoothed_means[i] = only(smoothed_z.μ)
     end
 
     # Compare to ground truth
@@ -770,28 +895,26 @@ end
     # Extract inner and outer trajectories
     x_trajectories = getproperty.(getindex.(trajectory_samples, t_smooth), :x)
 
-    # Manually perform smoothing until we have a cleaner interface
-    A = hier_model.inner_model.dyn.A
-    b = hier_model.inner_model.dyn.b
-    C = hier_model.inner_model.dyn.C
-    Q = hier_model.inner_model.dyn.Q
+    # Smooth the inner (z) component using backward_smooth
+    inner_dyn = hier_model.inner_model.dyn
     z_smoothed_means = Vector{T}(undef, N_sample)
     for i in 1:N_sample
-        μ = trajectory_samples[i][K].z.μ
-        Σ = trajectory_samples[i][K].z.Σ
+        smoothed_z = trajectory_samples[i][K].z
 
         for t in (K - 1):-1:t_smooth
-            μ_filt = trajectory_samples[i][t].z.μ
-            Σ_filt = trajectory_samples[i][t].z.Σ
-            μ_pred = A * μ_filt + b + C * trajectory_samples[i][t].x
-            Σ_pred = A * Σ_filt * A' + Q
-
-            G = Σ_filt * A' * inv(Σ_pred)
-            μ = μ_filt .+ G * (μ .- μ_pred)
-            Σ = Σ_filt .+ G * (Σ .- Σ_pred) * G'
+            filtered_z = trajectory_samples[i][t].z
+            # Pass prev_outer to condition the inner dynamics on the outer trajectory
+            smoothed_z = backward_smooth(
+                inner_dyn,
+                KF(),
+                t,
+                filtered_z,
+                smoothed_z;
+                prev_outer=trajectory_samples[i][t].x,
+            )
         end
 
-        z_smoothed_means[i] = only(μ)
+        z_smoothed_means[i] = only(smoothed_z.μ)
     end
 
     # Compare to ground truth

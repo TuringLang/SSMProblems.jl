@@ -1,11 +1,9 @@
-export KalmanFilter, filter
 using CUDA: i32
 import PDMats: PDMat, X_A_Xt, Xt_A_X, X_invA_Xt, Xt_invA_X
 import LinearAlgebra: Symmetric
 
 export KalmanFilter, KF, KalmanSmoother, KS
 export BackwardInformationPredictor
-export backward_initialise, backward_predict, backward_update
 
 """
     KalmanFilter(; jitter=nothing)
@@ -98,6 +96,48 @@ struct KalmanSmoother <: AbstractSmoother end
 
 const KS = KalmanSmoother()
 
+# Linear Gaussian implementation of backward_smooth.
+# Uses the RTS equations: G = Σ_filt * A' * Σ_pred⁻¹
+function backward_smooth(
+    dyn::LinearGaussianLatentDynamics,
+    algo::KalmanFilter,
+    step::Integer,
+    filtered::MvNormal,
+    smoothed_next::MvNormal;
+    predicted::Union{Nothing,MvNormal}=nothing,
+    kwargs...,
+)
+    # Extract filtered and smoothed parameters
+    μ_filt, Σ_filt = params(filtered)
+    μ_smooth_next, Σ_smooth_next = params(smoothed_next)
+
+    # Get dynamics parameters for the transition from step to step+1
+    A, b, Q = calc_params(dyn, step + 1; kwargs...)
+
+    # Compute predicted distribution if not provided
+    if isnothing(predicted)
+        μ_pred = A * μ_filt + b
+        Σ_pred = X_A_Xt(Σ_filt, A) + Q
+    else
+        μ_pred, Σ_pred = params(predicted)
+    end
+
+    # Compute smoothing gain
+    G = Σ_filt * A' / Σ_pred
+
+    # RTS update
+    μ_smooth = μ_filt + G * (μ_smooth_next - μ_pred)
+
+    # Σ_pred - Σ_smooth_next may be singular (even though it is PSD) so we cannot use
+    # X_A_Xt with Cholesky decomposition
+    Σ_smooth = Σ_filt + G * (Σ_smooth_next - Σ_pred) * G'
+
+    # Force symmetry and wrap in PDMat
+    Σ_smooth = PDMat(Symmetric(Σ_smooth))
+
+    return MvNormal(μ_smooth, Σ_smooth)
+end
+
 mutable struct StateCallback <: AbstractCallback
     proposed_states
     filtered_states
@@ -157,46 +197,20 @@ function smooth(
         rng, model, KalmanFilter(), observations; callback=cache, kwargs...
     )
 
-    back_state = filtered
+    smoothed = filtered
     for t in (length(observations) - 1):-1:t_smooth
-        back_state = backward(
-            rng, model, algo, t, back_state, observations[t]; states_cache=cache, kwargs...
+        smoothed = backward_smooth(
+            dyn(model),
+            KalmanFilter(),
+            t,
+            cache.filtered_states[t],
+            smoothed;
+            predicted=cache.proposed_states[t + 1],
+            kwargs...,
         )
     end
 
-    return back_state, ll
-end
-
-import LinearAlgebra: eigen
-
-function backward(
-    rng::AbstractRNG,
-    model::LinearGaussianStateSpaceModel,
-    algo::KalmanSmoother,
-    iter::Integer,
-    back_state::MvNormal,
-    obs;
-    states_cache,
-    kwargs...,
-)
-    # Extract filtered and predicted states
-    μ_filt, Σ_filt = params(states_cache.filtered_states[iter])
-    μ_pred, Σ_pred = params(states_cache.proposed_states[iter + 1])
-    μ_back, Σ_back = params(back_state)
-
-    dyn_params = calc_params(model.dyn, iter + 1; kwargs...)
-    A, b, Q = dyn_params
-
-    G = Σ_filt * A' / Σ_pred
-    μ̂ = μ_filt + G * (μ_back - μ_pred)
-
-    # Σ_pred - Σ_back  may be singular (even though it is PSD) so cannot use X_A_Xt with Cholesky
-    Σ̂ = Σ_filt + G * (Σ_back - Σ_pred) * G'
-
-    # Force symmetry
-    Σ̂ = PDMat(Symmetric(Σ̂))
-
-    return MvNormal(μ̂, Σ̂)
+    return smoothed, ll
 end
 
 ## BACKWARD INFORMATION FILTER #############################################################
@@ -309,4 +323,28 @@ function backward_update(
     Ω̂ = PDMat(Ω + Xt_A_X(R_inv, H))
 
     return InformationLikelihood(λ̂, Ω̂)
+end
+
+## TWO-FILTER SMOOTHING ####################################################################
+
+# Linear Gaussian implementation of two_filter_smooth.
+# Combines distributions using the product of Gaussians in information form:
+#   J_smooth = Σ⁻¹ + Ω,  h_smooth = Σ⁻¹μ + λ
+function two_filter_smooth(filtered::MvNormal, backward_lik::InformationLikelihood)
+    μ_filt, Σ_filt = params(filtered)
+    λ_back, Ω_back = natural_params(backward_lik)
+
+    # Convert filtered distribution to information form
+    Σ_filt_inv = inv(Σ_filt)
+    λ_filt = Σ_filt_inv * μ_filt
+
+    # Combine in information form (product of Gaussians)
+    Ω_smooth = PDMat(Σ_filt_inv + Ω_back)
+    λ_smooth = λ_filt + λ_back
+
+    # Convert back to moment form
+    Σ_smooth = inv(Ω_smooth)
+    μ_smooth = Σ_smooth * λ_smooth
+
+    return MvNormal(μ_smooth, Σ_smooth)
 end

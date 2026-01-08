@@ -12,8 +12,6 @@ using StatsBase
 using CUDA
 using NNlib
 
-export initialise, step, predict, update, filter
-
 # Filtering utilities
 include("callbacks.jl")
 include("containers.jl")
@@ -24,41 +22,8 @@ include("resamplers.jl")
 abstract type AbstractFilter <: AbstractSampler end
 abstract type AbstractBackwardPredictor <: AbstractSampler end
 
-"""
-    initialise([rng,] model, algo; kwargs...)
-
-Propose an initial state distribution.
-"""
-function initialise end
-
-"""
-    step([rng,] model, algo, iter, state, observation; kwargs...)
-
-Perform a combined predict and update call of the filtering on the state.
-"""
-function step end
-
-"""
-    predict([rng,] model, algo, iter, filtered; kwargs...)
-
-Propagate the filtered distribution forward in time.
-"""
-function predict end
-
-"""
-    update(model, algo, iter, proposed, observation; kwargs...)
-
-Update beliefs on the propagated distribution given an observation.
-"""
-function update end
-
-function initialise(model, algo; kwargs...)
-    return initialise(default_rng(), model, algo; kwargs...)
-end
-
-function predict(model, algo, step, filtered, observation; kwargs...)
-    return predict(default_rng(), model, algo, step, filtered, observation; kwargs...)
-end
+# Abstract interface definitions (filtering, smoothing, backward likelihood)
+include("algorithms/interface.jl")
 
 function filter(
     rng::AbstractRNG,
@@ -142,9 +107,6 @@ end
 ## SMOOTHING BASE ##########################################################################
 
 abstract type AbstractSmoother <: AbstractSampler end
-
-# function smooth end
-# function backward end
 
 # Model types
 include("models/linear_gaussian.jl")
