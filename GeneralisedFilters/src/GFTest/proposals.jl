@@ -17,8 +17,8 @@ end
 
 function SSMProblems.distribution(prop::OptimalProposal, step::Integer, x, y; kwargs...)
     # Get parameters
-    dyn_params = GeneralisedFilters.calc_params(prop.dyn, step; kwargs...)
-    obs_params = GeneralisedFilters.calc_params(prop.obs, step; kwargs...)
+    dyn_params = calc_params(prop.dyn, step; kwargs...)
+    obs_params = calc_params(prop.obs, step; kwargs...)
     A, b, Q = dyn_params
 
     # Predicted state: p(x_t | x_{t-1})
@@ -43,7 +43,7 @@ end
 function SSMProblems.distribution(
     prop::OverdispersedProposal, step::Integer, x, y; kwargs...
 )
-    A, b, Q = GeneralisedFilters.calc_params(prop.dyn, step; kwargs...)
+    A, b, Q = calc_params(prop.dyn, step; kwargs...)
     Q = prop.k * Q  # overdisperse
     μ = A * x + b
     return MvNormal(μ, Q)

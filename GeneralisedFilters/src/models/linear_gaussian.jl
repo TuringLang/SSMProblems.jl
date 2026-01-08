@@ -7,6 +7,11 @@ export HomogeneousGaussianPrior
 export HomogeneousLinearGaussianLatentDynamics
 export HomogeneousLinearGaussianObservationProcess
 
+export calc_μ0, calc_Σ0
+export calc_A, calc_b, calc_Q
+export calc_H, calc_c, calc_R
+export calc_initial, calc_params
+
 import SSMProblems: distribution, simulate_from_dist
 import Distributions: MvNormal, params
 import LinearAlgebra: cholesky

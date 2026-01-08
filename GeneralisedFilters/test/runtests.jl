@@ -82,8 +82,8 @@ end
         )
 
         # Assuming homogenous
-        A, b, Q = GeneralisedFilters.calc_params(model.dyn, T - 1)
-        H, c, R = GeneralisedFilters.calc_params(model.obs, T;)
+        A, b, Q = calc_params(model.dyn, T - 1)
+        H, c, R = calc_params(model.obs, T;)
         F = [H; H * A; H * A^2]
         g = [c; H * b + c; H * (A * b + b) + c]
 
@@ -137,11 +137,11 @@ end
     )
 
     # Compute analytical result with time-varying parameters
-    A_Tm1, b_Tm1, Q_Tm1 = GeneralisedFilters.calc_params(model.dyn, T - 1)
-    A_T, b_T, Q_T = GeneralisedFilters.calc_params(model.dyn, T)
-    H_Tm2, c_Tm2, R_Tm2 = GeneralisedFilters.calc_params(model.obs, T - 2)
-    H_Tm1, c_Tm1, R_Tm1 = GeneralisedFilters.calc_params(model.obs, T - 1)
-    H_T, c_T, R_T = GeneralisedFilters.calc_params(model.obs, T)
+    A_Tm1, b_Tm1, Q_Tm1 = calc_params(model.dyn, T - 1)
+    A_T, b_T, Q_T = calc_params(model.dyn, T)
+    H_Tm2, c_Tm2, R_Tm2 = calc_params(model.obs, T - 2)
+    H_Tm1, c_Tm1, R_Tm1 = calc_params(model.obs, T - 1)
+    H_T, c_T, R_T = calc_params(model.obs, T)
 
     # Projection matrix F from x_{T-2} to [Y_{T-2}, Y_{T-1}, Y_T]
     F = [H_Tm2; H_Tm1 * A_Tm1; H_T * A_T * A_Tm1]

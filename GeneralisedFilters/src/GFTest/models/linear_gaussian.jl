@@ -115,14 +115,14 @@ function _compute_joint_nonhomogeneous(model, T::Integer)
     (; μ0, Σ0) = model.prior
     dyn = model.dyn
     obs = model.obs
-    Dy, Dx = size(GeneralisedFilters.calc_H(obs, 1))
+    Dy, Dx = size(calc_H(obs, 1))
 
     # Let Z = [X0, X1, ..., XT, Y1, ..., YT] be the joint state vector
     # Write Z = P.Z + ϵ, where ϵ ~ N(μ_ϵ, Σ_ϵ)
     P = zeros(Dx + T * (Dx + Dy), Dx + T * (Dx + Dy))
     for t in 1:T
-        A_t = GeneralisedFilters.calc_A(dyn, t)
-        H_t = GeneralisedFilters.calc_H(obs, t)
+        A_t = calc_A(dyn, t)
+        H_t = calc_H(obs, t)
 
         iA = t * Dx + 1
         jA = (t - 1) * Dx + 1
@@ -136,8 +136,8 @@ function _compute_joint_nonhomogeneous(model, T::Integer)
     μ_ϵ = zeros(Dx + T * (Dx + Dy))
     μ_ϵ[1:Dx] .= μ0
     for t in 1:T
-        b_t = GeneralisedFilters.calc_b(dyn, t)
-        c_t = GeneralisedFilters.calc_c(obs, t)
+        b_t = calc_b(dyn, t)
+        c_t = calc_c(obs, t)
 
         ib = t * Dx + 1
         μ_ϵ[ib:(ib + Dx - 1)] = b_t
@@ -149,8 +149,8 @@ function _compute_joint_nonhomogeneous(model, T::Integer)
     Σ_ϵ = zeros(Dx + T * (Dx + Dy), Dx + T * (Dx + Dy))
     Σ_ϵ[1:Dx, 1:Dx] .= Σ0
     for t in 1:T
-        Q_t = GeneralisedFilters.calc_Q(dyn, t)
-        R_t = GeneralisedFilters.calc_R(obs, t)
+        Q_t = calc_Q(dyn, t)
+        R_t = calc_R(obs, t)
 
         iQ = t * Dx + 1
         Σ_ϵ[iQ:(iQ + Dx - 1), iQ:(iQ + Dx - 1)] = Q_t
