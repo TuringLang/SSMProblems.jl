@@ -373,10 +373,9 @@ end
     T = 5
     t_smooth = 2
 
-    # HACK: inverse of SArray backed PDMat fails due to Hermitian error — waiting to fix upstream
     rng = StableRNG(SEED)
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
-        rng, Dx, Dy; static_arrays=false
+        rng, Dx, Dy; static_arrays=true
     )
     _, _, ys = sample(rng, model, T)
 
