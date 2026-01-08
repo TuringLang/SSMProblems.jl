@@ -946,14 +946,9 @@ end
             bf_state = resample(rng, resampler(rbpf), bf_state; ref_state=ref_traj)
 
             if !isnothing(ref_traj)
+                ref_rb_state = RBState(ref_traj[t], predictive_likelihoods[t])
                 ancestor_weights = map(bf_state.particles) do particle
-                    GeneralisedFilters.log_weight(particle) + ancestor_weight(
-                        dyn(hier_model),
-                        rbpf,
-                        t,
-                        particle.state,
-                        RBState(ref_traj[t], predictive_likelihoods[t]),
-                    )
+                    ancestor_weight(particle, dyn(hier_model), rbpf, t, ref_rb_state)
                 end
                 ancestor_idx = sample(
                     rng, 1:N_particles, weights(softmax(ancestor_weights))
