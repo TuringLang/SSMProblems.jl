@@ -152,9 +152,9 @@ end
     # Covariance Σ of [Y_{T-2}, Y_{T-1}, Y_T] given x_{T-2}
     #! format: off
     Σ = [
-        R_Tm2                                         zeros(Dy, Dy)                                       zeros(Dy, Dy);
-        zeros(Dy, Dy)                                 H_Tm1 * Q_Tm1 * H_Tm1' + R_Tm1                      H_Tm1 * Q_Tm1 * A_T' * H_T';
-        zeros(Dy, Dy)                                 H_T * A_T * Q_Tm1 * H_Tm1'                          H_T * A_T * Q_Tm1 * A_T' * H_T' + H_T * Q_T * H_T' + R_T
+        R_Tm2            zeros(Dy, Dy)                     zeros(Dy, Dy);
+        zeros(Dy, Dy)    H_Tm1 * Q_Tm1 * H_Tm1' + R_Tm1    H_Tm1 * Q_Tm1 * A_T' * H_T';
+        zeros(Dy, Dy)    H_T * A_T * Q_Tm1 * H_Tm1'        H_T * A_T * Q_Tm1 * A_T' * H_T' + H_T * Q_T * H_T' + R_T
     ]
     #! format: on
 
