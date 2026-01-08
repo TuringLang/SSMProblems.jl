@@ -56,31 +56,15 @@ function update_with_cache(
     μ_pred, Σ_pred = params(state)
     H, c, R = calc_params(obs, iter; kwargs...)
 
-    # Compute innovation
-    z = observation - H * μ_pred - c
+    z = _compute_innovation(μ_pred, H, c, observation)
+    S = _compute_innovation_cov(Σ_pred, H, R)
+    K = _compute_kalman_gain(Σ_pred, H, S)
+    I_KH, Σ_filt_raw = _compute_joseph_update(Σ_pred, K, H, R)
 
-    # Innovation covariance
-    S = PDMat(X_A_Xt(Σ_pred, H) + R)
-
-    # Kalman gain
-    K = Σ_pred * H' / S
-
-    # Joseph form update
-    I_KH = I - K * H
     μ_filt = μ_pred + K * z
-    Σ_filt_raw = X_A_Xt(Σ_pred, I_KH) + X_A_Xt(R, K)
+    Σ_filt = _apply_jitter_and_wrap(Σ_filt_raw, algo.jitter)
 
-    # Apply jitter if specified
-    if !isnothing(algo.jitter)
-        Σ_filt_raw = Σ_filt_raw + algo.jitter * I
-    end
-
-    Σ_filt = PDMat(Symmetric(Σ_filt_raw))
-
-    # Create filtered state
     filtered_state = MvNormal(μ_filt, Σ_filt)
-
-    # Compute log-likelihood
     ll = logpdf(MvNormal(H * μ_pred + c, S), observation)
 
     cache = KalmanGradientCache(μ_pred, Σ_pred, μ_filt, Σ_filt, S, K, z, I_KH)

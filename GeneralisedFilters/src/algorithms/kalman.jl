@@ -49,6 +49,23 @@ function kalman_predict(state, dyn_params)
     return MvNormal(μ̂, Σ̂)
 end
 
+_compute_innovation(μ, H, c, y) = y - H * μ - c
+_compute_innovation_cov(Σ, H, R) = PDMat(X_A_Xt(Σ, H) + R)
+_compute_kalman_gain(Σ, H, S) = Σ * H' / S
+
+function _compute_joseph_update(Σ, K, H, R)
+    I_KH = I - K * H
+    Σ̂_raw = X_A_Xt(Σ, I_KH) + X_A_Xt(R, K)
+    return I_KH, Σ̂_raw
+end
+
+function _apply_jitter_and_wrap(Σ_raw, jitter)
+    if !isnothing(jitter)
+        Σ_raw = Σ_raw + jitter * I
+    end
+    return PDMat(Symmetric(Σ_raw))
+end
+
 function update(
     obs::LinearGaussianObservationProcess,
     algo::KalmanFilter,
@@ -66,28 +83,17 @@ function kalman_update(state, obs_params, observation, jitter)
     μ, Σ = params(state)
     H, c, R = obs_params
 
-    # Compute innovation distribution
-    m = H * μ + c
-    S = PDMat(X_A_Xt(Σ, H) + R)
-    ȳ = observation - m
-    K = Σ * H' / S
+    z = _compute_innovation(μ, H, c, observation)
+    S = _compute_innovation_cov(Σ, H, R)
+    K = _compute_kalman_gain(Σ, H, S)
+    _, Σ̂_raw = _compute_joseph_update(Σ, K, H, R)
 
-    # Update parameters using Joseph form to ensure numerical stability
-    μ̂ = μ + K * ȳ
-    Σ̂ = X_A_Xt(Σ, I - K * H) + X_A_Xt(R, K)
+    μ̂ = μ + K * z
+    Σ̂ = _apply_jitter_and_wrap(Σ̂_raw, jitter)
 
-    # Optionally add jitter for numerical stability and convert to PDMat
-    if !isnothing(jitter)
-        Σ̂ += jitter * I
-    end
-    Σ̂ = PDMat(Symmetric(Σ̂))
+    ll = logpdf(MvNormal(z, S), zero(z))
 
-    state = MvNormal(μ̂, Σ̂)
-
-    # Compute log-likelihood
-    ll = logpdf(MvNormal(m, S), observation)
-
-    return state, ll
+    return MvNormal(μ̂, Σ̂), ll
 end
 
 ## KALMAN SMOOTHER #########################################################################
