@@ -183,6 +183,38 @@ function (callback::StateCallback)(
     return nothing
 end
 
+"""
+    smooth([rng,] model, algo, observations; t_smooth=1, callback=nothing, kwargs...)
+
+Run a forward-backward smoothing pass to compute the smoothed distribution at time `t_smooth`.
+
+This function first runs a forward filtering pass using the Kalman filter, caching all
+filtered distributions, then performs backward smoothing using the Rauch-Tung-Striebel
+equations from time T back to `t_smooth`.
+
+# Arguments
+- `rng`: Random number generator (optional, defaults to `default_rng()`)
+- `model`: A linear Gaussian state space model
+- `algo`: The smoothing algorithm (e.g., `KalmanSmoother()`)
+- `observations`: Vector of observations y₁, ..., yₜ
+
+# Keyword Arguments
+- `t_smooth=1`: The time step at which to return the smoothed distribution
+- `callback=nothing`: Optional callback for the forward filtering pass
+
+# Returns
+A tuple `(smoothed, log_likelihood)` where:
+- `smoothed`: The smoothed distribution p(xₜ | y₁:ₜ) at time `t_smooth`
+- `log_likelihood`: The total log-likelihood from the forward pass
+
+# Example
+```julia
+model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
+smoothed, ll = smooth(model, KalmanSmoother(), observations)
+```
+
+See also: [`backward_smooth`](@ref), [`filter`](@ref)
+"""
 function smooth(
     rng::AbstractRNG,
     model::LinearGaussianStateSpaceModel,
