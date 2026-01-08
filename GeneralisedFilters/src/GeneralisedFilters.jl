@@ -24,6 +24,37 @@ abstract type AbstractBackwardPredictor <: AbstractSampler end
 # Abstract interface definitions (filtering, smoothing, backward likelihood)
 include("algorithms/interface.jl")
 
+"""
+    filter([rng,] model, algo, observations; callback=nothing, kwargs...)
+
+Run a filtering algorithm on a state-space model.
+
+Performs sequential Bayesian inference by iterating through observations,
+calling [`predict`](@ref) and [`update`](@ref) at each time step.
+
+# Arguments
+- `rng::AbstractRNG`: Random number generator (optional, defaults to `default_rng()`)
+- `model::AbstractStateSpaceModel`: The state-space model to filter
+- `algo::AbstractFilter`: The filtering algorithm (e.g., `KalmanFilter()`, `BootstrapFilter(N)`)
+- `observations::AbstractVector`: Vector of observations y₁:ₜ
+
+# Keyword Arguments
+- `callback`: Optional callback for recording intermediate states
+- `kwargs...`: Additional arguments passed to model parameter functions
+
+# Returns
+A tuple `(state, log_likelihood)` where:
+- `state`: The final filtered state (algorithm-dependent type)
+- `log_likelihood`: The total log-marginal likelihood log p(y₁:ₜ)
+
+# Example
+```julia
+model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
+state, ll = filter(model, KalmanFilter(), observations)
+```
+
+See also: [`predict`](@ref), [`update`](@ref), [`step`](@ref), [`smooth`](@ref)
+"""
 function filter(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
