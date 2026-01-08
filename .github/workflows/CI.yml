@@ -19,11 +19,8 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          # - '1.6' # LTS version for SSMProblems
-          # - '1.10' # Minimum for GeneralisedFilters
-          - '1.11'
-          - 'lts'   # Latest stable
-          - 'pre' # Nightly
+          - '1'    # Latest stable
+          - 'lts'  # Long Term Support
         os:
           - ubuntu-latest
           - windows-latest
@@ -35,11 +32,6 @@ jobs:
             dir: './SSMProblems'
           - name: GeneralisedFilters
             dir: './GeneralisedFilters'
-        exclude:
-          # GeneralisedFilters requires Julia 1.10+
-          - version: '1.6'
-            pkg:
-              name: GeneralisedFilters
 
     steps:
       - uses: actions/checkout@v4
