@@ -1,16 +1,24 @@
-export ForwardAlgorithm, FW
+export DiscreteFilter, DF
+export BackwardDiscretePredictor
 
-struct ForwardAlgorithm <: AbstractFilter end
-const FW = ForwardAlgorithm
+"""
+    DiscreteFilter <: AbstractFilter
 
-function initialise(rng::AbstractRNG, prior::DiscretePrior, ::ForwardAlgorithm; kwargs...)
+Forward filtering algorithm for discrete (finite) state space models.
+
+Computes the filtered distribution π_t(i) = p(x_t = i | y_{1:t}) recursively.
+"""
+struct DiscreteFilter <: AbstractFilter end
+const DF = DiscreteFilter
+
+function initialise(rng::AbstractRNG, prior::DiscretePrior, ::DiscreteFilter; kwargs...)
     return calc_α0(prior; kwargs...)
 end
 
 function predict(
     rng::AbstractRNG,
     dyn::DiscreteLatentDynamics,
-    filter::ForwardAlgorithm,
+    filter::DiscreteFilter,
     step::Integer,
     states::AbstractVector,
     observation;
@@ -22,7 +30,7 @@ end
 
 function update(
     obs::ObservationProcess,
-    filter::ForwardAlgorithm,
+    filter::DiscreteFilter,
     step::Integer,
     states::AbstractVector,
     observation;
@@ -38,4 +46,92 @@ function update(
     filtered_states = b .* states
     likelihood = sum(filtered_states)
     return (filtered_states / likelihood), log(likelihood)
+end
+
+## BACKWARD DISCRETE PREDICTOR #############################################################
+
+"""
+    BackwardDiscretePredictor <: AbstractBackwardPredictor
+
+Algorithm to recursively compute the backward likelihood β_t(i) = p(y_{t:T} | x_t = i)
+for discrete state space models.
+
+All computations are performed in log-space using logsumexp for numerical stability.
+The resulting `DiscreteLikelihood` stores log β values internally.
+"""
+struct BackwardDiscretePredictor <: AbstractBackwardPredictor end
+
+"""
+    backward_initialise(rng, obs, algo::BackwardDiscretePredictor, iter, y; kwargs...)
+
+Initialize the backward likelihood at time T with observation y_T.
+
+Returns a `DiscreteLikelihood` where log β_T(i) = log p(y_T | x_T = i).
+"""
+function backward_initialise(
+    rng::AbstractRNG,
+    obs::ObservationProcess,
+    ::BackwardDiscretePredictor,
+    iter::Integer,
+    y;
+    num_states::Integer,
+    kwargs...,
+)
+    log_β = map(i -> SSMProblems.logdensity(obs, iter, i, y; kwargs...), 1:num_states)
+    return DiscreteLikelihood(log_β)
+end
+
+"""
+    backward_predict(rng, dyn, algo::BackwardDiscretePredictor, iter, state; kwargs...)
+
+Backward prediction step: marginalize through dynamics without incorporating observations.
+
+Takes p(y_{t+1:T} | x_{t+1}) and computes p(y_{t+1:T} | x_t) by marginalizing over x_{t+1}:
+    p(y_{t+1:T} | x_t = i) = Σ_j P_{ij} p(y_{t+1:T} | x_{t+1} = j)
+
+In log-space: log p(y_{t+1:T} | x_t = i) = logsumexp_j(log P_{ij} + log p(y_{t+1:T} | x_{t+1} = j))
+"""
+function backward_predict(
+    rng::AbstractRNG,
+    dyn::DiscreteLatentDynamics,
+    ::BackwardDiscretePredictor,
+    iter::Integer,
+    state::DiscreteLikelihood;
+    kwargs...,
+)
+    log_β_next = log_likelihoods(state)
+    P = calc_P(dyn, iter + 1; kwargs...)
+    K = length(log_β_next)
+
+    log_β = map(1:K) do i
+        logsumexp(log.(P[i, :]) .+ log_β_next)
+    end
+
+    return DiscreteLikelihood(log_β)
+end
+
+"""
+    backward_update(obs, algo::BackwardDiscretePredictor, iter, state, y; kwargs...)
+
+Incorporate observation y_t into the backward likelihood.
+
+Updates: log β(i) += log p(y_t | x_t = i)
+
+This transforms p(y_{t+1:T} | x_t) into β_t = p(y_{t:T} | x_t).
+"""
+function backward_update(
+    obs::ObservationProcess,
+    ::BackwardDiscretePredictor,
+    iter::Integer,
+    state::DiscreteLikelihood,
+    y;
+    kwargs...,
+)
+    log_β = log_likelihoods(state)
+    K = length(log_β)
+
+    log_emission = map(i -> SSMProblems.logdensity(obs, iter, i, y; kwargs...), 1:K)
+    log_β_new = log_β .+ log_emission
+
+    return DiscreteLikelihood(log_β_new)
 end

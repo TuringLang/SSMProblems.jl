@@ -465,7 +465,7 @@ end
     @test llkf ≈ llgf atol = 1e-3
 end
 
-@testitem "Forward algorithm test" begin
+@testitem "Discrete filter test" begin
     using GeneralisedFilters
     using Distributions
     using StableRNGs
@@ -500,8 +500,8 @@ end
 
     observations = [rand(rng)]
 
-    fw = ForwardAlgorithm()
-    state, ll = GeneralisedFilters.filter(model, fw, observations)
+    df = DiscreteFilter()
+    state, ll = GeneralisedFilters.filter(model, df, observations)
 
     # Brute force calculations of each conditional path probability p(x_{1:T} | y_{1:T})
     T = 1
@@ -518,6 +518,82 @@ end
     filtered_paths = Base.filter(((k, v),) -> k[end] == 1, path_probs)
     @test state[1] ≈ sum(values(filtered_paths)) / marginal
     @test ll ≈ log(marginal)
+end
+
+@testitem "Backward discrete predictor test" begin
+    using GeneralisedFilters
+    using Distributions
+    using Random
+    using SSMProblems
+    using LogExpFunctions
+
+    # Simple 3-state HMM with Gaussian emissions
+    K = 3
+    T = 4
+
+    α0 = [0.5, 0.3, 0.2]
+    P = [
+        0.7 0.2 0.1
+        0.1 0.8 0.1
+        0.2 0.2 0.6
+    ]
+
+    struct BackwardTestObservation{T<:Real,MT<:AbstractVector{T}} <: ObservationProcess
+        μs::MT
+    end
+
+    function SSMProblems.logdensity(
+        obs::BackwardTestObservation{T},
+        step::Integer,
+        state::Integer,
+        observation;
+        kwargs...,
+    ) where {T}
+        return logpdf(Normal(obs.μs[state], one(T)), observation)
+    end
+
+    μs = [0.0, 2.0, 4.0]
+    obs = BackwardTestObservation(μs)
+
+    observations = [0.5, 1.8, 3.5, 2.1]
+
+    # Run backward predictor
+    algo = BackwardDiscretePredictor()
+    rng = Random.default_rng()
+    dyn = HomogeneousDiscreteLatentDynamics(P)
+
+    # Initialize at time T and run backward pass
+    β = (
+        let lik = GeneralisedFilters.backward_initialise(
+                rng, obs, algo, T, observations[T]; num_states=K
+            )
+            for t in (T - 1):-1:1
+                lik = GeneralisedFilters.backward_predict(rng, dyn, algo, t, lik)
+                lik = GeneralisedFilters.backward_update(obs, algo, t, lik, observations[t])
+            end
+            lik
+        end
+    )
+
+    # Brute force: compute β_1(i) = p(y_{1:T} | x_1 = i) by enumerating all paths
+    log_β_bruteforce = zeros(K)
+    for x1 in 1:K
+        log_prob = -Inf
+        for x2 in 1:K, x3 in 1:K, x4 in 1:K
+            log_path_prob = 0.0
+            # Transitions
+            log_path_prob += log(P[x1, x2]) + log(P[x2, x3]) + log(P[x3, x4])
+            # Emissions
+            log_path_prob += logpdf(Normal(μs[x1], 1.0), observations[1])
+            log_path_prob += logpdf(Normal(μs[x2], 1.0), observations[2])
+            log_path_prob += logpdf(Normal(μs[x3], 1.0), observations[3])
+            log_path_prob += logpdf(Normal(μs[x4], 1.0), observations[4])
+            log_prob = logaddexp(log_prob, log_path_prob)
+        end
+        log_β_bruteforce[x1] = log_prob
+    end
+
+    @test log_likelihoods(β) ≈ log_β_bruteforce
 end
 
 @testitem "Rao-Blackwellised BF test" begin
