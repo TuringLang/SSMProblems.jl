@@ -493,7 +493,7 @@ end
 
     μs = [0.0, 1.0, 2.0]
 
-    prior = HomogenousDiscretePrior(α0)
+    prior = HomogeneousDiscretePrior(α0)
     dyn = HomogeneousDiscreteLatentDynamics(P)
     obs = MixtureModelObservation(μs)
     model = StateSpaceModel(prior, dyn, obs)
