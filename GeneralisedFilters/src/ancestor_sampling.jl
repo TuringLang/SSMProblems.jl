@@ -150,3 +150,23 @@ function compute_marginal_predictive_likelihood(
 
     return -0.5 * (logdet(Λ) + ζ)
 end
+
+"""
+    compute_marginal_predictive_likelihood(forward_dist::AbstractVector, backward_dist::DiscreteLikelihood)
+
+Compute the marginal predictive likelihood p(y_{t+1:T} | y_{1:t}) for discrete states.
+
+Given a predicted filtering distribution π_{t+1}(i) = p(x_{t+1} = i | y_{1:t}) and backward
+likelihood β_{t+1}(i) = p(y_{t+1:T} | x_{t+1} = i), computes:
+
+    p(y_{t+1:T} | y_{1:t}) = Σ_i π_{t+1}(i) * β_{t+1}(i)
+
+All computations are performed in log-space for numerical stability.
+"""
+function compute_marginal_predictive_likelihood(
+    forward_dist::AbstractVector, backward_dist::DiscreteLikelihood
+)
+    log_forward = log.(forward_dist)
+    log_β = log_likelihoods(backward_dist)
+    return logsumexp(log_forward .+ log_β)
+end
