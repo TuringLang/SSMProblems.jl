@@ -1,6 +1,6 @@
 using LogExpFunctions
 
-export InformationLikelihood
+export AbstractLikelihood, InformationLikelihood, DiscreteLikelihood, log_likelihoods
 
 """Containers used for storing representations of the filtering distribution."""
 
@@ -168,10 +168,20 @@ function marginalise!(state::ParticleDistribution, particles)
     return new_state, ll_increment
 end
 
-## GAUSSIAN STATES #########################################################################
+## LIKELIHOOD CONTAINERS ###################################################################
 
 """
-    InformationLikelihood
+    AbstractLikelihood
+
+Abstract type for backward likelihood representations used in smoothing and ancestor sampling.
+
+Subtypes represent the predictive likelihood p(y | x) in different forms depending
+on the state space structure (continuous Gaussian vs discrete).
+"""
+abstract type AbstractLikelihood end
+
+"""
+    InformationLikelihood <: AbstractLikelihood
 
 A container representing an unnormalized Gaussian likelihood p(y | x) in information form,
 parameterized by natural parameters (λ, Ω).
@@ -191,7 +201,7 @@ p(y_{t:T} | x_t) conditioned on future observations.
 - [`natural_params`](@ref): Extract the natural parameters (λ, Ω)
 - [`BackwardInformationPredictor`](@ref): Algorithm that uses this representation
 """
-struct InformationLikelihood{λT,ΩT}
+struct InformationLikelihood{λT,ΩT} <: AbstractLikelihood
     λ::λT
     Ω::ΩT
 end
@@ -207,3 +217,29 @@ information/precision matrix.
 function natural_params(state::InformationLikelihood)
     return state.λ, state.Ω
 end
+
+"""
+    DiscreteLikelihood <: AbstractLikelihood
+
+A container representing the backward likelihood β_t(i) = p(y | x = i) for discrete
+state spaces, stored in log-space for numerical stability.
+
+This representation is used in backward filtering algorithms for discrete SSMs (HMMs) and
+Rao-Blackwellised particle filtering with discrete inner states.
+
+# Fields
+- `log_β::VT`: Vector of log backward likelihoods, where `log_β[i] = log p(y | x = i)`
+
+# See also
+- [`BackwardDiscretePredictor`](@ref): Algorithm that uses this representation
+"""
+struct DiscreteLikelihood{VT<:AbstractVector} <: AbstractLikelihood
+    log_β::VT
+end
+
+"""
+    log_likelihoods(state::DiscreteLikelihood)
+
+Extract the log backward likelihoods from a DiscreteLikelihood.
+"""
+log_likelihoods(state::DiscreteLikelihood) = state.log_β

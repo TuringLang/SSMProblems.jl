@@ -1,6 +1,6 @@
 export DiscreteLatentDynamics
 export DiscreteStateSpaceModel
-export HomogenousDiscretePrior, HomogeneousDiscreteLatentDynamics
+export HomogeneousDiscretePrior, HomogeneousDiscreteLatentDynamics
 
 import SSMProblems: distribution
 import Distributions: Categorical
@@ -35,7 +35,7 @@ end
 #### HOMOGENEOUS DISCRETE MODEL ####
 ####################################
 
-struct HomogenousDiscretePrior{AT<:AbstractVector} <: DiscretePrior
+struct HomogeneousDiscretePrior{AT<:AbstractVector} <: DiscretePrior
     α0::AT
 end
 
@@ -43,5 +43,5 @@ struct HomogeneousDiscreteLatentDynamics{PT<:AbstractMatrix} <: DiscreteLatentDy
     P::PT
 end
 
-calc_α0(prior::HomogenousDiscretePrior; kwargs...) = prior.α0
+calc_α0(prior::HomogeneousDiscretePrior; kwargs...) = prior.α0
 calc_P(dyn::HomogeneousDiscreteLatentDynamics, ::Integer; kwargs...) = dyn.P

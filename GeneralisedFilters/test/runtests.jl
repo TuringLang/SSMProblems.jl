@@ -465,7 +465,7 @@ end
     @test llkf ≈ llgf atol = 1e-3
 end
 
-@testitem "Forward algorithm test" begin
+@testitem "Discrete filter test" begin
     using GeneralisedFilters
     using Distributions
     using StableRNGs
@@ -493,15 +493,15 @@ end
 
     μs = [0.0, 1.0, 2.0]
 
-    prior = HomogenousDiscretePrior(α0)
+    prior = HomogeneousDiscretePrior(α0)
     dyn = HomogeneousDiscreteLatentDynamics(P)
     obs = MixtureModelObservation(μs)
     model = StateSpaceModel(prior, dyn, obs)
 
     observations = [rand(rng)]
 
-    fw = ForwardAlgorithm()
-    state, ll = GeneralisedFilters.filter(model, fw, observations)
+    df = DiscreteFilter()
+    state, ll = GeneralisedFilters.filter(model, df, observations)
 
     # Brute force calculations of each conditional path probability p(x_{1:T} | y_{1:T})
     T = 1
@@ -518,6 +518,458 @@ end
     filtered_paths = Base.filter(((k, v),) -> k[end] == 1, path_probs)
     @test state[1] ≈ sum(values(filtered_paths)) / marginal
     @test ll ≈ log(marginal)
+end
+
+@testitem "Backward discrete predictor test" begin
+    using GeneralisedFilters
+    using Distributions
+    using Random
+    using SSMProblems
+    using LogExpFunctions
+
+    # Simple 3-state HMM with Gaussian emissions
+    K = 3
+    T = 4
+
+    α0 = [0.5, 0.3, 0.2]
+    P = [
+        0.7 0.2 0.1
+        0.1 0.8 0.1
+        0.2 0.2 0.6
+    ]
+
+    struct BackwardTestObservation{T<:Real,MT<:AbstractVector{T}} <: ObservationProcess
+        μs::MT
+    end
+
+    function SSMProblems.logdensity(
+        obs::BackwardTestObservation{T},
+        step::Integer,
+        state::Integer,
+        observation;
+        kwargs...,
+    ) where {T}
+        return logpdf(Normal(obs.μs[state], one(T)), observation)
+    end
+
+    μs = [0.0, 2.0, 4.0]
+    obs = BackwardTestObservation(μs)
+
+    observations = [0.5, 1.8, 3.5, 2.1]
+
+    # Run backward predictor
+    algo = BackwardDiscretePredictor()
+    rng = Random.default_rng()
+    dyn = HomogeneousDiscreteLatentDynamics(P)
+
+    # Initialize at time T and run backward pass
+    β = (
+        let lik = GeneralisedFilters.backward_initialise(
+                rng, obs, algo, T, observations[T]; num_states=K
+            )
+            for t in (T - 1):-1:1
+                lik = GeneralisedFilters.backward_predict(rng, dyn, algo, t, lik)
+                lik = GeneralisedFilters.backward_update(obs, algo, t, lik, observations[t])
+            end
+            lik
+        end
+    )
+
+    # Brute force: compute β_1(i) = p(y_{1:T} | x_1 = i) by enumerating all paths
+    log_β_bruteforce = zeros(K)
+    for x1 in 1:K
+        log_prob = -Inf
+        for x2 in 1:K, x3 in 1:K, x4 in 1:K
+            log_path_prob = 0.0
+            # Transitions
+            log_path_prob += log(P[x1, x2]) + log(P[x2, x3]) + log(P[x3, x4])
+            # Emissions
+            log_path_prob += logpdf(Normal(μs[x1], 1.0), observations[1])
+            log_path_prob += logpdf(Normal(μs[x2], 1.0), observations[2])
+            log_path_prob += logpdf(Normal(μs[x3], 1.0), observations[3])
+            log_path_prob += logpdf(Normal(μs[x4], 1.0), observations[4])
+            log_prob = logaddexp(log_prob, log_path_prob)
+        end
+        log_β_bruteforce[x1] = log_prob
+    end
+
+    @test log_likelihoods(β) ≈ log_β_bruteforce
+end
+
+@testitem "Discrete smoother test" begin
+    using GeneralisedFilters
+    using Distributions
+    using Random
+    using SSMProblems
+    using LogExpFunctions
+
+    K = 3
+    T = 4
+    t_smooth = 2
+
+    α0 = [0.5, 0.3, 0.2]
+    P = [
+        0.7 0.2 0.1
+        0.1 0.8 0.1
+        0.2 0.2 0.6
+    ]
+
+    struct SmootherTestObservation{T<:Real,MT<:AbstractVector{T}} <: ObservationProcess
+        μs::MT
+    end
+
+    function SSMProblems.logdensity(
+        obs::SmootherTestObservation{T},
+        step::Integer,
+        state::Integer,
+        observation;
+        kwargs...,
+    ) where {T}
+        return logpdf(Normal(obs.μs[state], one(T)), observation)
+    end
+
+    μs = [0.0, 2.0, 4.0]
+    obs = SmootherTestObservation(μs)
+
+    prior = HomogeneousDiscretePrior(α0)
+    dyn = HomogeneousDiscreteLatentDynamics(P)
+    model = StateSpaceModel(prior, dyn, obs)
+
+    observations = [0.5, 1.8, 3.5, 2.1]
+
+    rng = Random.default_rng()
+    smoothed, ll = smooth(rng, model, DiscreteSmoother(), observations; t_smooth=t_smooth)
+
+    # Brute force: compute γ_{t_smooth}(i) = p(x_{t_smooth} = i | y_{1:T})
+    # by enumerating all paths and marginalizing
+    log_joint_probs = Dict{NTuple{5,Int},Float64}()
+    for x0 in 1:K, x1 in 1:K, x2 in 1:K, x3 in 1:K, x4 in 1:K
+        log_prob = 0.0
+        log_prob += log(α0[x0])
+        log_prob += log(P[x0, x1]) + log(P[x1, x2]) + log(P[x2, x3]) + log(P[x3, x4])
+        log_prob += logpdf(Normal(μs[x1], 1.0), observations[1])
+        log_prob += logpdf(Normal(μs[x2], 1.0), observations[2])
+        log_prob += logpdf(Normal(μs[x3], 1.0), observations[3])
+        log_prob += logpdf(Normal(μs[x4], 1.0), observations[4])
+        log_joint_probs[(x0, x1, x2, x3, x4)] = log_prob
+    end
+
+    log_marginal = logsumexp(collect(values(log_joint_probs)))
+
+    # Marginalize to get p(x_{t_smooth} | y_{1:T})
+    # t_smooth=2 corresponds to x2 (index 3 in the tuple since x0 is index 1)
+    γ_bruteforce = zeros(K)
+    for i in 1:K
+        matching_paths = Base.filter(((k, v),) -> k[t_smooth + 1] == i, log_joint_probs)
+        if !isempty(matching_paths)
+            γ_bruteforce[i] = exp(logsumexp(collect(values(matching_paths))) - log_marginal)
+        end
+    end
+
+    @test smoothed ≈ γ_bruteforce
+    @test ll ≈ log_marginal
+end
+
+@testitem "Discrete two-filter smoother test" begin
+    using GeneralisedFilters
+    using Distributions
+    using Random
+    using SSMProblems
+    using LogExpFunctions
+
+    K = 3
+    T = 4
+    t_smooth = 2
+
+    α0 = [0.5, 0.3, 0.2]
+    P = [
+        0.7 0.2 0.1
+        0.1 0.8 0.1
+        0.2 0.2 0.6
+    ]
+
+    struct TwoFilterTestObservation{T<:Real,MT<:AbstractVector{T}} <: ObservationProcess
+        μs::MT
+    end
+
+    function SSMProblems.logdensity(
+        obs::TwoFilterTestObservation{T},
+        step::Integer,
+        state::Integer,
+        observation;
+        kwargs...,
+    ) where {T}
+        return logpdf(Normal(obs.μs[state], one(T)), observation)
+    end
+
+    μs = [0.0, 2.0, 4.0]
+    obs = TwoFilterTestObservation(μs)
+
+    prior = HomogeneousDiscretePrior(α0)
+    dyn = HomogeneousDiscreteLatentDynamics(P)
+    model = StateSpaceModel(prior, dyn, obs)
+
+    observations = [0.5, 1.8, 3.5, 2.1]
+
+    rng = Random.default_rng()
+
+    # Forward pass to get filtered distribution at t_smooth
+    df = DiscreteFilter()
+    filtered = Vector{Vector{Float64}}(undef, T)
+
+    let s = initialise(rng, SSMProblems.prior(model), df)
+        for t in 1:T
+            pred = predict(rng, SSMProblems.dyn(model), df, t, s, observations[t])
+            s, _ = update(SSMProblems.obs(model), df, t, pred, observations[t])
+            filtered[t] = s
+        end
+    end
+
+    # Backward pass to get predictive likelihood at t_smooth
+    # β_{t_smooth}(i) = p(y_{t_smooth+1:T} | x_{t_smooth} = i)
+    bdp = BackwardDiscretePredictor()
+    back_lik = (
+        let lik = GeneralisedFilters.backward_initialise(
+                rng, obs, bdp, T, observations[T]; num_states=K
+            )
+            for t in (T - 1):-1:(t_smooth + 1)
+                lik = GeneralisedFilters.backward_predict(rng, dyn, bdp, t, lik)
+                lik = GeneralisedFilters.backward_update(obs, bdp, t, lik, observations[t])
+            end
+            GeneralisedFilters.backward_predict(rng, dyn, bdp, t_smooth, lik)
+        end
+    )
+
+    # Two-filter smooth
+    smoothed_2f = two_filter_smooth(filtered[t_smooth], back_lik)
+
+    # Compare to RTS smoother
+    smoothed_rts, _ = smooth(
+        rng, model, DiscreteSmoother(), observations; t_smooth=t_smooth
+    )
+
+    @test smoothed_2f ≈ smoothed_rts
+end
+
+@testitem "RBPF with discrete inner filter test" begin
+    using GeneralisedFilters
+    using SSMProblems
+    using StableRNGs
+    using StatsBase: weights
+
+    SEED = 1234
+    K_outer = 3
+    K_inner = 4
+    T = 10
+    N_particles = 10^5
+
+    rng = StableRNG(SEED)
+
+    joint_model, hier_model = GeneralisedFilters.GFTest.create_dummy_discrete_model(
+        rng, K_outer, K_inner; obs_separation=3.0, obs_noise=0.3
+    )
+
+    # Sample observations from the hierarchical model
+    _, _, _, _, observations = sample(rng, hier_model, T)
+
+    # Run joint forward algorithm on the product space
+    joint_state, joint_ll = GeneralisedFilters.filter(rng, joint_model, DF(), observations)
+
+    # Run RBPF with discrete inner filter
+    bf = BF(N_particles)
+    rbpf = RBPF(bf, DiscreteFilter())
+    rbpf_state, rbpf_ll = GeneralisedFilters.filter(rng, hier_model, rbpf, observations)
+
+    # Compare log-likelihoods
+    @test joint_ll ≈ rbpf_ll atol = 0.05
+
+    # Extract marginals from RBPF
+    ws = weights(rbpf_state)
+    outer_states = getfield.(getfield.(rbpf_state.particles, :state), :x)
+    inner_dists = getfield.(getfield.(rbpf_state.particles, :state), :z)
+
+    # Compute marginal outer distribution from RBPF
+    rbpf_outer_marginal = zeros(K_outer)
+    for (x, w) in zip(outer_states, ws)
+        rbpf_outer_marginal[x] += w
+    end
+
+    # Compute marginal outer distribution from joint
+    joint_outer_marginal = zeros(K_outer)
+    for i in 1:K_outer
+        for k in 1:K_inner
+            idx = (i - 1) * K_inner + k
+            joint_outer_marginal[i] += joint_state[idx]
+        end
+    end
+
+    @test rbpf_outer_marginal ≈ joint_outer_marginal rtol = 0.02
+
+    # Compute marginal inner distribution from RBPF (weighted average of inner distributions)
+    rbpf_inner_marginal = zeros(K_inner)
+    for (z, w) in zip(inner_dists, ws)
+        rbpf_inner_marginal .+= w .* z
+    end
+
+    # Compute marginal inner distribution from joint
+    joint_inner_marginal = zeros(K_inner)
+    for i in 1:K_outer
+        for k in 1:K_inner
+            idx = (i - 1) * K_inner + k
+            joint_inner_marginal[k] += joint_state[idx]
+        end
+    end
+
+    @test rbpf_inner_marginal ≈ joint_inner_marginal rtol = 0.02
+end
+
+@testitem "Discrete RBCSMC-AS test" begin
+    using GeneralisedFilters
+    using StableRNGs
+    using StatsBase: sample, weights
+    using Statistics
+    using LogExpFunctions
+
+    import SSMProblems: prior, dyn, obs
+    import GeneralisedFilters: resampler, resample, move, RBState, DiscreteLikelihood
+
+    using OffsetArrays
+
+    SEED = 1234
+    K_outer = 3
+    K_inner = 4
+    T = 5
+    t_smooth = 2
+    N_particles = 10
+    N_burnin = 200
+    N_sample = 5000
+
+    rng = StableRNG(SEED)
+    joint_model, hier_model = GeneralisedFilters.GFTest.create_dummy_discrete_model(
+        rng, K_outer, K_inner; obs_separation=3.0, obs_noise=0.3
+    )
+    _, _, _, _, ys = sample(rng, hier_model, T)
+
+    # Ground truth: smoothed distribution from joint model
+    joint_smoothed, _ = smooth(rng, joint_model, DiscreteSmoother(), ys; t_smooth=t_smooth)
+
+    # Extract marginals from joint smoothed distribution
+    true_outer_marginal = zeros(K_outer)
+    true_inner_marginal = zeros(K_inner)
+    for i in 1:K_outer
+        for k in 1:K_inner
+            idx = (i - 1) * K_inner + k
+            true_outer_marginal[i] += joint_smoothed[idx]
+            true_inner_marginal[k] += joint_smoothed[idx]
+        end
+    end
+
+    N_steps = N_burnin + N_sample
+    rbpf = RBPF(BF(N_particles; threshold=0.8), DiscreteFilter())
+    ref_traj = nothing
+    predictive_likelihoods = Vector{DiscreteLikelihood{Vector{Float64}}}(undef, T)
+    trajectory_samples = []
+
+    for i in 1:N_steps
+        global ref_traj
+        cb = GeneralisedFilters.DenseAncestorCallback(nothing)
+
+        bf_state = initialise(rng, prior(hier_model), rbpf; ref_state=ref_traj)
+        cb(hier_model, rbpf, bf_state, ys, PostInit)
+
+        for t in 1:T
+            bf_state = resample(rng, resampler(rbpf), bf_state; ref_state=ref_traj)
+
+            if !isnothing(ref_traj)
+                ref_rb_state = RBState(ref_traj[t], predictive_likelihoods[t])
+                ancestor_weights = map(bf_state.particles) do particle
+                    ancestor_weight(particle, dyn(hier_model), rbpf, t, ref_rb_state)
+                end
+                ancestor_idx = sample(
+                    rng, 1:N_particles, weights(softmax(ancestor_weights))
+                )
+            end
+
+            bf_state, _ = move(
+                rng, hier_model, rbpf, t, bf_state, ys[t]; ref_state=ref_traj
+            )
+
+            if !isnothing(ref_traj)
+                bf_state.particles[end] = GeneralisedFilters.Particle(
+                    bf_state.particles[end].state,
+                    bf_state.particles[end].log_w,
+                    ancestor_idx,
+                )
+            end
+
+            cb(hier_model, rbpf, t, bf_state, ys[t], PostUpdate)
+        end
+
+        ws = weights(bf_state)
+        sampled_idx = sample(rng, 1:N_particles, ws)
+
+        ref_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
+        if i > N_burnin
+            push!(trajectory_samples, deepcopy(ref_traj))
+        end
+        ref_traj = getproperty.(ref_traj, :x)
+
+        # Compute backward predictive likelihoods for next iteration
+        bdp = BackwardDiscretePredictor()
+        pred_lik = GeneralisedFilters.backward_initialise(
+            rng, hier_model.inner_model.obs, bdp, T, ys[T]; num_states=K_inner
+        )
+        predictive_likelihoods[T] = deepcopy(pred_lik)
+        for t in (T - 1):-1:1
+            pred_lik = GeneralisedFilters.backward_predict(
+                rng, hier_model.inner_model.dyn, bdp, t, pred_lik
+            )
+            pred_lik = GeneralisedFilters.backward_update(
+                hier_model.inner_model.obs, bdp, t, pred_lik, ys[t]
+            )
+            predictive_likelihoods[t] = deepcopy(pred_lik)
+        end
+    end
+
+    # Compute smoothed marginals from CSMC samples
+    csmc_outer_marginal = zeros(K_outer)
+    csmc_inner_marginal = zeros(K_inner)
+
+    for traj in trajectory_samples
+        rb_state = traj[t_smooth]
+        csmc_outer_marginal[rb_state.x] += 1.0
+
+        # The inner state z is a filtered distribution, need to smooth it
+        smoothed_z = let s = traj[T].z
+            for t in (T - 1):-1:t_smooth
+                filtered_z = traj[t].z
+                pred_z = predict(
+                    rng,
+                    hier_model.inner_model.dyn,
+                    DiscreteFilter(),
+                    t + 1,
+                    filtered_z,
+                    nothing,
+                )
+                s = backward_smooth(
+                    hier_model.inner_model.dyn,
+                    DiscreteFilter(),
+                    t,
+                    filtered_z,
+                    s;
+                    predicted=pred_z,
+                )
+            end
+            s
+        end
+        csmc_inner_marginal .+= smoothed_z
+    end
+
+    csmc_outer_marginal ./= N_sample
+    csmc_inner_marginal ./= N_sample
+
+    @test csmc_outer_marginal ≈ true_outer_marginal rtol = 0.05
+    @test csmc_inner_marginal ≈ true_inner_marginal rtol = 0.05
 end
 
 @testitem "Rao-Blackwellised BF test" begin

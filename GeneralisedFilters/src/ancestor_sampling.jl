@@ -55,9 +55,11 @@ The log future conditional density (up to additive constants independent of ``x_
 # Implementations
 - **Generic** (`LatentDynamics`, `AbstractFilter`): Returns `logdensity(dyn, iter, state, ref_state)`
 - **Rao-Blackwellised** (`HierarchicalDynamics`, `RBPF`): Combines outer transition density with
-  marginal predictive likelihood. The `ref_state.z` must be an `InformationLikelihood`.
+  marginal predictive likelihood. The `ref_state.z` must be an `AbstractLikelihood`
+  (`InformationLikelihood` for Gaussian inner states, `DiscreteLikelihood` for discrete inner states).
 
-See also: [`compute_marginal_predictive_likelihood`](@ref), [`BackwardInformationPredictor`](@ref)
+See also: [`compute_marginal_predictive_likelihood`](@ref), [`BackwardInformationPredictor`](@ref),
+[`BackwardDiscretePredictor`](@ref)
 """
 function future_conditional_density(
     dyn::LatentDynamics, ::AbstractFilter, iter::Integer, state, ref_state; kwargs...
@@ -70,7 +72,7 @@ function future_conditional_density(
     algo::RBPF,
     iter::Integer,
     state::RBState,
-    ref_state::RBState{<:Any,<:InformationLikelihood};
+    ref_state::RBState{<:Any,<:AbstractLikelihood};
     kwargs...,
 )
     trans_density = future_conditional_density(
@@ -149,4 +151,24 @@ function compute_marginal_predictive_likelihood(
     ζ = PDMats.quad(Ω, μ) - 2 * dot(λ, μ) - PDMats.invquad(Λ, M)
 
     return -0.5 * (logdet(Λ) + ζ)
+end
+
+"""
+    compute_marginal_predictive_likelihood(forward_dist::AbstractVector, backward_dist::DiscreteLikelihood)
+
+Compute the marginal predictive likelihood p(y_{t+1:T} | y_{1:t}) for discrete states.
+
+Given a predicted filtering distribution π_{t+1}(i) = p(x_{t+1} = i | y_{1:t}) and backward
+likelihood β_{t+1}(i) = p(y_{t+1:T} | x_{t+1} = i), computes:
+
+    p(y_{t+1:T} | y_{1:t}) = Σ_i π_{t+1}(i) * β_{t+1}(i)
+
+All computations are performed in log-space for numerical stability.
+"""
+function compute_marginal_predictive_likelihood(
+    forward_dist::AbstractVector, backward_dist::DiscreteLikelihood
+)
+    log_forward = log.(forward_dist)
+    log_β = log_likelihoods(backward_dist)
+    return logsumexp(log_forward .+ log_β)
 end
