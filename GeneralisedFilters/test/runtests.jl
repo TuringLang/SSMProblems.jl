@@ -670,6 +670,87 @@ end
     @test ll ≈ log_marginal
 end
 
+@testitem "Discrete two-filter smoother test" begin
+    using GeneralisedFilters
+    using Distributions
+    using Random
+    using SSMProblems
+    using LogExpFunctions
+
+    K = 3
+    T = 4
+    t_smooth = 2
+
+    α0 = [0.5, 0.3, 0.2]
+    P = [
+        0.7 0.2 0.1
+        0.1 0.8 0.1
+        0.2 0.2 0.6
+    ]
+
+    struct TwoFilterTestObservation{T<:Real,MT<:AbstractVector{T}} <: ObservationProcess
+        μs::MT
+    end
+
+    function SSMProblems.logdensity(
+        obs::TwoFilterTestObservation{T},
+        step::Integer,
+        state::Integer,
+        observation;
+        kwargs...,
+    ) where {T}
+        return logpdf(Normal(obs.μs[state], one(T)), observation)
+    end
+
+    μs = [0.0, 2.0, 4.0]
+    obs = TwoFilterTestObservation(μs)
+
+    prior = HomogeneousDiscretePrior(α0)
+    dyn = HomogeneousDiscreteLatentDynamics(P)
+    model = StateSpaceModel(prior, dyn, obs)
+
+    observations = [0.5, 1.8, 3.5, 2.1]
+
+    rng = Random.default_rng()
+
+    # Forward pass to get filtered distribution at t_smooth
+    df = DiscreteFilter()
+    filtered = Vector{Vector{Float64}}(undef, T)
+
+    let s = initialise(rng, SSMProblems.prior(model), df)
+        for t in 1:T
+            pred = predict(rng, SSMProblems.dyn(model), df, t, s, observations[t])
+            s, _ = update(SSMProblems.obs(model), df, t, pred, observations[t])
+            filtered[t] = s
+        end
+    end
+
+    # Backward pass to get predictive likelihood at t_smooth
+    # β_{t_smooth}(i) = p(y_{t_smooth+1:T} | x_{t_smooth} = i)
+    bdp = BackwardDiscretePredictor()
+    back_lik = (
+        let lik = GeneralisedFilters.backward_initialise(
+                rng, obs, bdp, T, observations[T]; num_states=K
+            )
+            for t in (T - 1):-1:(t_smooth + 1)
+                lik = GeneralisedFilters.backward_predict(rng, dyn, bdp, t, lik)
+                lik = GeneralisedFilters.backward_update(obs, bdp, t, lik, observations[t])
+            end
+            GeneralisedFilters.backward_predict(rng, dyn, bdp, t_smooth, lik)
+        end
+    )
+
+    # Two-filter smooth
+    smoothed_2f = two_filter_smooth(filtered[t_smooth], back_lik)
+
+    # Compare to RTS smoother
+    smoothed_rts, _ = smooth(
+        rng, model, DiscreteSmoother(), observations; t_smooth=t_smooth
+    )
+
+    @test smoothed_2f ≈ smoothed_rts
+end
+
 # @testitem "Rao-Blackwellised BF test" begin
 #     using Distributions
 #     using GeneralisedFilters

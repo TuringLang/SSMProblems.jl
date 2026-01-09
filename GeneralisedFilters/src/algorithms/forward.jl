@@ -227,3 +227,24 @@ function smooth(
 
     return smoothed, total_ll
 end
+
+## TWO-FILTER SMOOTHING ####################################################################
+
+"""
+    two_filter_smooth(filtered::AbstractVector, backward_lik::DiscreteLikelihood)
+
+Combine forward filtered distribution with backward likelihood to get smoothed distribution.
+
+Returns the normalized smoothed distribution γ_t(i) ∝ π_t(i) * β_t(i).
+
+All computations are performed in log-space for numerical stability.
+"""
+function two_filter_smooth(filtered::AbstractVector, backward_lik::DiscreteLikelihood)
+    log_filtered = log.(filtered)
+    log_β = log_likelihoods(backward_lik)
+
+    log_smoothed = log_filtered .+ log_β
+    log_normalizer = logsumexp(log_smoothed)
+
+    return exp.(log_smoothed .- log_normalizer)
+end
