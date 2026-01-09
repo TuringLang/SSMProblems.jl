@@ -55,9 +55,11 @@ The log future conditional density (up to additive constants independent of ``x_
 # Implementations
 - **Generic** (`LatentDynamics`, `AbstractFilter`): Returns `logdensity(dyn, iter, state, ref_state)`
 - **Rao-Blackwellised** (`HierarchicalDynamics`, `RBPF`): Combines outer transition density with
-  marginal predictive likelihood. The `ref_state.z` must be an `InformationLikelihood`.
+  marginal predictive likelihood. The `ref_state.z` must be an `AbstractLikelihood`
+  (`InformationLikelihood` for Gaussian inner states, `DiscreteLikelihood` for discrete inner states).
 
-See also: [`compute_marginal_predictive_likelihood`](@ref), [`BackwardInformationPredictor`](@ref)
+See also: [`compute_marginal_predictive_likelihood`](@ref), [`BackwardInformationPredictor`](@ref),
+[`BackwardDiscretePredictor`](@ref)
 """
 function future_conditional_density(
     dyn::LatentDynamics, ::AbstractFilter, iter::Integer, state, ref_state; kwargs...
@@ -70,7 +72,7 @@ function future_conditional_density(
     algo::RBPF,
     iter::Integer,
     state::RBState,
-    ref_state::RBState{<:Any,<:InformationLikelihood};
+    ref_state::RBState{<:Any,<:AbstractLikelihood};
     kwargs...,
 )
     trans_density = future_conditional_density(

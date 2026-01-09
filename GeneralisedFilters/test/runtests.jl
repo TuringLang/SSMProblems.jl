@@ -823,6 +823,155 @@ end
     @test rbpf_inner_marginal ≈ joint_inner_marginal rtol = 0.02
 end
 
+@testitem "Discrete RBCSMC-AS test" begin
+    using GeneralisedFilters
+    using StableRNGs
+    using StatsBase: sample, weights
+    using Statistics
+    using LogExpFunctions
+
+    import SSMProblems: prior, dyn, obs
+    import GeneralisedFilters: resampler, resample, move, RBState, DiscreteLikelihood
+
+    using OffsetArrays
+
+    SEED = 1234
+    K_outer = 3
+    K_inner = 4
+    T = 5
+    t_smooth = 2
+    N_particles = 10
+    N_burnin = 200
+    N_sample = 5000
+
+    rng = StableRNG(SEED)
+    joint_model, hier_model = GeneralisedFilters.GFTest.create_dummy_discrete_model(
+        rng, K_outer, K_inner; obs_separation=3.0, obs_noise=0.3
+    )
+    _, _, _, _, ys = sample(rng, hier_model, T)
+
+    # Ground truth: smoothed distribution from joint model
+    joint_smoothed, _ = smooth(rng, joint_model, DiscreteSmoother(), ys; t_smooth=t_smooth)
+
+    # Extract marginals from joint smoothed distribution
+    true_outer_marginal = zeros(K_outer)
+    true_inner_marginal = zeros(K_inner)
+    for i in 1:K_outer
+        for k in 1:K_inner
+            idx = (i - 1) * K_inner + k
+            true_outer_marginal[i] += joint_smoothed[idx]
+            true_inner_marginal[k] += joint_smoothed[idx]
+        end
+    end
+
+    N_steps = N_burnin + N_sample
+    rbpf = RBPF(BF(N_particles; threshold=0.8), DiscreteFilter())
+    ref_traj = nothing
+    predictive_likelihoods = Vector{DiscreteLikelihood{Vector{Float64}}}(undef, T)
+    trajectory_samples = []
+
+    for i in 1:N_steps
+        global ref_traj
+        cb = GeneralisedFilters.DenseAncestorCallback(nothing)
+
+        bf_state = initialise(rng, prior(hier_model), rbpf; ref_state=ref_traj)
+        cb(hier_model, rbpf, bf_state, ys, PostInit)
+
+        for t in 1:T
+            bf_state = resample(rng, resampler(rbpf), bf_state; ref_state=ref_traj)
+
+            if !isnothing(ref_traj)
+                ref_rb_state = RBState(ref_traj[t], predictive_likelihoods[t])
+                ancestor_weights = map(bf_state.particles) do particle
+                    ancestor_weight(particle, dyn(hier_model), rbpf, t, ref_rb_state)
+                end
+                ancestor_idx = sample(
+                    rng, 1:N_particles, weights(softmax(ancestor_weights))
+                )
+            end
+
+            bf_state, _ = move(
+                rng, hier_model, rbpf, t, bf_state, ys[t]; ref_state=ref_traj
+            )
+
+            if !isnothing(ref_traj)
+                bf_state.particles[end] = GeneralisedFilters.Particle(
+                    bf_state.particles[end].state,
+                    bf_state.particles[end].log_w,
+                    ancestor_idx,
+                )
+            end
+
+            cb(hier_model, rbpf, t, bf_state, ys[t], PostUpdate)
+        end
+
+        ws = weights(bf_state)
+        sampled_idx = sample(rng, 1:N_particles, ws)
+
+        ref_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
+        if i > N_burnin
+            push!(trajectory_samples, deepcopy(ref_traj))
+        end
+        ref_traj = getproperty.(ref_traj, :x)
+
+        # Compute backward predictive likelihoods for next iteration
+        bdp = BackwardDiscretePredictor()
+        pred_lik = GeneralisedFilters.backward_initialise(
+            rng, hier_model.inner_model.obs, bdp, T, ys[T]; num_states=K_inner
+        )
+        predictive_likelihoods[T] = deepcopy(pred_lik)
+        for t in (T - 1):-1:1
+            pred_lik = GeneralisedFilters.backward_predict(
+                rng, hier_model.inner_model.dyn, bdp, t, pred_lik
+            )
+            pred_lik = GeneralisedFilters.backward_update(
+                hier_model.inner_model.obs, bdp, t, pred_lik, ys[t]
+            )
+            predictive_likelihoods[t] = deepcopy(pred_lik)
+        end
+    end
+
+    # Compute smoothed marginals from CSMC samples
+    csmc_outer_marginal = zeros(K_outer)
+    csmc_inner_marginal = zeros(K_inner)
+
+    for traj in trajectory_samples
+        rb_state = traj[t_smooth]
+        csmc_outer_marginal[rb_state.x] += 1.0
+
+        # The inner state z is a filtered distribution, need to smooth it
+        smoothed_z = let s = traj[T].z
+            for t in (T - 1):-1:t_smooth
+                filtered_z = traj[t].z
+                pred_z = predict(
+                    rng,
+                    hier_model.inner_model.dyn,
+                    DiscreteFilter(),
+                    t + 1,
+                    filtered_z,
+                    nothing,
+                )
+                s = backward_smooth(
+                    hier_model.inner_model.dyn,
+                    DiscreteFilter(),
+                    t,
+                    filtered_z,
+                    s;
+                    predicted=pred_z,
+                )
+            end
+            s
+        end
+        csmc_inner_marginal .+= smoothed_z
+    end
+
+    csmc_outer_marginal ./= N_sample
+    csmc_inner_marginal ./= N_sample
+
+    @test csmc_outer_marginal ≈ true_outer_marginal rtol = 0.05
+    @test csmc_inner_marginal ≈ true_inner_marginal rtol = 0.05
+end
+
 # @testitem "Rao-Blackwellised BF test" begin
 #     using Distributions
 #     using GeneralisedFilters
