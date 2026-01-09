@@ -19,14 +19,14 @@
     μ0 = sum(ws .* xs)
 end
 
-@testitem "Test CPU categorical resampling" setup = [CPUResamplingTestSetup] begin
+@testitem "CPU multinomial resampling" setup = [CPUResamplingTestSetup] begin
     idxs = GeneralisedFilters.sample_ancestors(rng, Multinomial(), ws)
     @test length(idxs) == N
     μ1 = sum(xs[idxs]) / N
     @test μ0 ≈ μ1 rtol = 1e-1
 end
 
-@testitem "Test CPU systematic resampling" setup = [CPUResamplingTestSetup] begin
+@testitem "CPU systematic resampling" setup = [CPUResamplingTestSetup] begin
     idxs = GeneralisedFilters.sample_ancestors(rng, Systematic(), ws)
     @test length(idxs) == N
     μ1 = sum(xs[idxs]) / N
@@ -52,28 +52,28 @@ end
     μ0 = sum(ws .* xs)
 end
 
-@testitem "Test GPU categorical resampling" setup = [GPUResamplingTestSetup] tags = [:gpu] begin
+@testitem "GPU multinomial resampling" setup = [GPUResamplingTestSetup] tags = [:gpu] begin
     idxs = GeneralisedFilters.sample_ancestors(rng, Multinomial(), ws)
     @test length(idxs) == N
     μ1 = sum(xs[idxs]) / N
     @test μ0 ≈ μ1 rtol = 1e-1
 end
 
-@testitem "Test GPU systematic resampling" setup = [GPUResamplingTestSetup] tags = [:gpu] begin
+@testitem "GPU systematic resampling" setup = [GPUResamplingTestSetup] tags = [:gpu] begin
     idxs = GeneralisedFilters.sample_ancestors(rng, Systematic(), ws)
     @test length(idxs) == N
     μ1 = sum(xs[idxs]) / N
     @test μ0 ≈ μ1 rtol = 1e-1
 end
 
-@testitem "Test GPU stratified resampling" setup = [GPUResamplingTestSetup] tags = [:gpu] begin
+@testitem "GPU stratified resampling" setup = [GPUResamplingTestSetup] tags = [:gpu] begin
     idxs = GeneralisedFilters.sample_ancestors(rng, Stratified(), ws)
     @test length(idxs) == N
     μ1 = sum(xs[idxs]) / N
     @test μ0 ≈ μ1 rtol = 1e-1
 end
 
-@testitem "Test GPU offspring-to-ancestors" tags = [:gpu] begin
+@testitem "GPU offspring-to-ancestors" tags = [:gpu] begin
     using CUDA
     offspring = CuVector{Int}([0, 2, 2, 3, 5])
     true_ancestors = CuVector{Int}([2, 2, 4, 5, 5])
@@ -81,7 +81,7 @@ end
     @test ancestors == true_ancestors
 end
 
-@testitem "Test GPU ancestors-to-offspring" tags = [:gpu] begin
+@testitem "GPU ancestors-to-offspring" tags = [:gpu] begin
     using CUDA
     ancestors = CuVector{Int}([4, 2, 2, 3, 1])
     true_offspring = CuVector{Int}([1, 2, 1, 1, 0])

@@ -2,7 +2,7 @@
 
 ## Bootstrap Filter #########################################################################
 
-@testitem "Bootstrap filter test" begin
+@testitem "Bootstrap filter" begin
     using SSMProblems
     using StableRNGs
     using StatsBase: weights
@@ -28,7 +28,7 @@ end
 
 ## Guided Filter ############################################################################
 
-@testitem "Guided filter test" begin
+@testitem "Guided filter" begin
     using SSMProblems
     using StableRNGs
     using StatsBase: weights
@@ -54,7 +54,7 @@ end
 
 ## Auxiliary Bootstrap Filter ###############################################################
 
-@testitem "ABF test" begin
+@testitem "ABF" begin
     using Distributions
     using GeneralisedFilters
     using LinearAlgebra

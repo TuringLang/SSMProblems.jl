@@ -1,4 +1,6 @@
-@testitem "Particle Filter type stability" begin
+"""Type stability tests using JET.jl."""
+
+@testitem "Particle filter type stability" begin
     using GeneralisedFilters
     using SSMProblems
     using StableRNGs

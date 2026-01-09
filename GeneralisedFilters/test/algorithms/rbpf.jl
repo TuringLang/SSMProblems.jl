@@ -2,7 +2,7 @@
 
 ## RBPF with Kalman Inner Filter ############################################################
 
-@testitem "RBPF Kalman inner test" begin
+@testitem "RBPF Kalman inner" begin
     using Distributions
     using GeneralisedFilters
     using LinearAlgebra
@@ -33,7 +33,7 @@
     @test llkf ≈ llrbbf atol = 1e-3
 end
 
-@testitem "RBPF guided Kalman inner test" begin
+@testitem "RBPF guided Kalman inner" begin
     using SSMProblems
     using StableRNGs
     using StatsBase: weights
@@ -61,7 +61,7 @@ end
     @test llkf ≈ llrbgf atol = 1e-3
 end
 
-@testitem "ARBF test" begin
+@testitem "ARBF" begin
     using Distributions
     using GeneralisedFilters
     using LinearAlgebra
@@ -94,7 +94,7 @@ end
 
 ## RBPF with Discrete Inner Filter ##########################################################
 
-@testitem "RBPF discrete inner test" begin
+@testitem "RBPF discrete inner" begin
     using GeneralisedFilters
     using SSMProblems
     using StableRNGs
@@ -168,7 +168,7 @@ end
 
 ## BF on Hierarchical Models ################################################################
 
-@testitem "BF on hierarchical model test" begin
+@testitem "BF on hierarchical model" begin
     using SSMProblems
     using StableRNGs
     using StatsBase: weights
@@ -208,7 +208,7 @@ end
 
 ## Ancestry Tracking ########################################################################
 
-@testitem "RBPF ancestry test" begin
+@testitem "RBPF ancestry" begin
     using SSMProblems
     using StableRNGs
 
@@ -233,7 +233,7 @@ end
     @test length(paths) == N_particles
 end
 
-@testitem "Dense ancestry test" begin
+@testitem "Dense ancestry" begin
     using GeneralisedFilters
     using StableRNGs
     using PDMats

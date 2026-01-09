@@ -17,4 +17,4 @@ include("components/kalman_gradient.jl")
 
 # Quality tests
 include("support/type_stability.jl")
-include("support/Aqua.jl")
+include("support/aqua.jl")

@@ -2,7 +2,7 @@
 
 ## Forward Filtering ########################################################################
 
-@testitem "Kalman filter test" begin
+@testitem "Kalman filter" begin
     using GeneralisedFilters
     using Distributions
     using LinearAlgebra
@@ -42,7 +42,7 @@
     end
 end
 
-@testitem "Kalman filter StaticArrays test" begin
+@testitem "Kalman filter StaticArrays" begin
     using GeneralisedFilters
     using SSMProblems
     using StableRNGs
@@ -80,7 +80,7 @@ end
 
 ## Backward Information Filtering ###########################################################
 
-@testitem "Backward information predictor test" begin
+@testitem "Backward information predictor" begin
     using GeneralisedFilters
     using Distributions
     using LinearAlgebra
@@ -136,7 +136,7 @@ end
     end
 end
 
-@testitem "Backward information predictor non-homogeneous test" begin
+@testitem "Backward information predictor non-homogeneous" begin
     using GeneralisedFilters
     using Distributions
     using LinearAlgebra
@@ -200,7 +200,7 @@ end
 
 ## RTS Smoothing ############################################################################
 
-@testitem "Kalman smoother test" begin
+@testitem "Kalman smoother" begin
     using GeneralisedFilters
     using Distributions
     using LinearAlgebra
@@ -259,7 +259,7 @@ end
     end
 end
 
-@testitem "Kalman smoother non-homogeneous test" begin
+@testitem "Kalman smoother non-homogeneous" begin
     using GeneralisedFilters
     using Distributions
     using LinearAlgebra
@@ -310,7 +310,7 @@ end
     @test smoothed.Σ ≈ Σ_X1
 end
 
-@testitem "RTS smoother predicted cache test" begin
+@testitem "RTS smoother predicted cache" begin
     using GeneralisedFilters
     using Distributions
     using LinearAlgebra
@@ -360,7 +360,7 @@ end
 
 ## Two-Filter Smoothing #####################################################################
 
-@testitem "Kalman two-filter smoother test" begin
+@testitem "Kalman two-filter smoother" begin
     using GeneralisedFilters
     using Distributions
     using LinearAlgebra

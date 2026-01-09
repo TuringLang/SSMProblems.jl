@@ -2,7 +2,7 @@
 
 ## Forward Filtering ########################################################################
 
-@testitem "Discrete filter test" begin
+@testitem "Discrete filter" begin
     using GeneralisedFilters
     using GeneralisedFilters.GFTest: MixtureObservation
     using Distributions
@@ -46,7 +46,7 @@ end
 
 ## Backward Filtering #######################################################################
 
-@testitem "Backward discrete predictor test" begin
+@testitem "Backward discrete predictor" begin
     using GeneralisedFilters
     using GeneralisedFilters.GFTest: MixtureObservation
     using Distributions
@@ -111,7 +111,7 @@ end
 
 ## RTS-style Smoothing ######################################################################
 
-@testitem "Discrete smoother test" begin
+@testitem "Discrete smoother" begin
     using GeneralisedFilters
     using GeneralisedFilters.GFTest: MixtureObservation
     using Distributions
@@ -174,7 +174,7 @@ end
 
 ## Two-Filter Smoothing #####################################################################
 
-@testitem "Discrete two-filter smoother test" begin
+@testitem "Discrete two-filter smoother" begin
     using GeneralisedFilters
     using GeneralisedFilters.GFTest: MixtureObservation
     using Distributions

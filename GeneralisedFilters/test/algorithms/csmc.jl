@@ -2,7 +2,7 @@
 
 ## Standard CSMC ############################################################################
 
-@testitem "CSMC test" begin
+@testitem "CSMC" begin
     using GeneralisedFilters
     using StableRNGs
     using PDMats
@@ -65,7 +65,7 @@ end
 
 ## Rao-Blackwellised CSMC ###################################################################
 
-@testitem "RBCSMC test" begin
+@testitem "RBCSMC" begin
     using GeneralisedFilters
     using StableRNGs
     using PDMats
@@ -155,7 +155,7 @@ end
 
 ## RBCSMC with Ancestor Sampling ############################################################
 
-@testitem "RBCSMC-AS test" begin
+@testitem "RBCSMC-AS" begin
     using GeneralisedFilters
     using StableRNGs
     using PDMats
@@ -304,7 +304,7 @@ end
     @test state.μ[2] ≈ mean(z_smoothed_means) rtol = 1e-3
 end
 
-@testitem "Discrete RBCSMC-AS test" begin
+@testitem "Discrete RBCSMC-AS" begin
     using GeneralisedFilters
     using StableRNGs
     using StatsBase: sample, weights
@@ -457,7 +457,7 @@ end
 
 ## Backward Simulation ######################################################################
 
-@testitem "Backward simulation test" begin
+@testitem "Backward simulation" begin
     using GeneralisedFilters
     using StableRNGs
     using PDMats
@@ -538,7 +538,7 @@ end
     @test bs_mean ≈ only(ks_state.μ) rtol = 5e-2
 end
 
-@testitem "RB backward simulation test" begin
+@testitem "RB backward simulation" begin
     using GeneralisedFilters
     using StableRNGs
     using PDMats
