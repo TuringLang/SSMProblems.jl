@@ -146,6 +146,7 @@ include("models/hierarchical.jl")
 # Filtering/smoothing algorithms
 include("algorithms/particles.jl")
 include("algorithms/kalman.jl")
+include("algorithms/srkf.jl")
 include("algorithms/kalman_gradient.jl")
 include("algorithms/forward.jl")
 include("algorithms/rbpf.jl")
