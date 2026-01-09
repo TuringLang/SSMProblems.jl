@@ -1,5 +1,6 @@
 export DiscreteFilter, DF
 export BackwardDiscretePredictor
+export DiscreteSmoother
 
 """
     DiscreteFilter <: AbstractFilter
@@ -134,4 +135,95 @@ function backward_update(
     log_β_new = log_β .+ log_emission
 
     return DiscreteLikelihood(log_β_new)
+end
+
+## DISCRETE SMOOTHER #######################################################################
+
+"""
+    DiscreteSmoother <: AbstractSmoother
+
+A forward-backward smoother for discrete state space models.
+"""
+struct DiscreteSmoother <: AbstractSmoother end
+
+"""
+    backward_smooth(dyn, algo::DiscreteFilter, step, filtered, smoothed_next; predicted, kwargs...)
+
+Perform one step of backward smoothing for discrete state spaces.
+
+Computes γ_t(i) = π_t(i) * Σ_j [P_{ij} * γ_{t+1}(j) / π̂_{t+1}(j)]
+
+where:
+- π_t(i) is the filtered distribution at time t
+- γ_{t+1}(j) is the smoothed distribution at time t+1
+- π̂_{t+1}(j) is the predicted distribution at time t+1
+- P_{ij} is the transition probability from state i to state j
+"""
+function backward_smooth(
+    dyn::DiscreteLatentDynamics,
+    ::DiscreteFilter,
+    step::Integer,
+    filtered::AbstractVector,
+    smoothed_next::AbstractVector;
+    predicted::AbstractVector,
+    kwargs...,
+)
+    P = calc_P(dyn, step + 1; kwargs...)
+    K = length(filtered)
+
+    smoothed = map(1:K) do i
+        correction = sum(1:K) do j
+            P[i, j] * smoothed_next[j] / predicted[j]
+        end
+        filtered[i] * correction
+    end
+
+    return smoothed
+end
+
+"""
+    smooth(rng, model::DiscreteStateSpaceModel, algo::DiscreteSmoother, observations; t_smooth=1, kwargs...)
+
+Run forward-backward smoothing for discrete state space models.
+
+Returns the smoothed distribution at time `t_smooth` and the log-likelihood.
+"""
+function smooth(
+    rng::AbstractRNG,
+    model::DiscreteStateSpaceModel,
+    ::DiscreteSmoother,
+    observations::AbstractVector;
+    t_smooth=1,
+    kwargs...,
+)
+    T = length(observations)
+    df = DiscreteFilter()
+
+    # Forward pass: store filtered and predicted distributions
+    filtered = Vector{Vector{Float64}}(undef, T)
+    predicted = Vector{Vector{Float64}}(undef, T)
+
+    total_ll = 0.0
+    state = let s = initialise(rng, prior(model), df; kwargs...)
+        for t in 1:T
+            pred = predict(rng, dyn(model), df, t, s, observations[t]; kwargs...)
+            predicted[t] = pred
+            s, ll = update(obs(model), df, t, pred, observations[t]; kwargs...)
+            filtered[t] = s
+            total_ll += ll
+        end
+        s
+    end
+
+    # Backward pass
+    smoothed = let s = filtered[T]
+        for t in (T - 1):-1:t_smooth
+            s = backward_smooth(
+                dyn(model), df, t, filtered[t], s; predicted=predicted[t + 1], kwargs...
+            )
+        end
+        s
+    end
+
+    return smoothed, total_ll
 end
