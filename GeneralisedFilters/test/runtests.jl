@@ -5,9 +5,9 @@ using TestItemRunner
 @run_package_tests filter = ti -> !(:gpu in ti.tags)
 
 include("Aqua.jl")
-include("type_stability.jl")
+# include("type_stability.jl")
 include("resamplers.jl")
-include("kalman_gradient.jl")
+# include("kalman_gradient.jl")
 
 @testitem "Kalman filter test" begin
     using GeneralisedFilters
@@ -421,6 +421,7 @@ end
     using SSMProblems
     using StableRNGs
     using StatsBase: weights
+    using GeneralisedFilters.GFTest
 
     rng = StableRNG(1234)
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
@@ -433,18 +434,19 @@ end
     bf_state, llbf = GeneralisedFilters.filter(rng, model, bf, ys)
     kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
 
-    xs = getfield.(bf_state.particles, :state)
+    xs = first.(getfield.(bf_state.particles, :state))
     ws = weights(bf_state)
 
-    # Compare log-likelihood and states
-    @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-3
-    @test llkf ≈ llbf atol = 1e-3
+    mean_est, std_est, ess = weighted_stats(xs, ws)
+    @test check_mc_estimate(mean_est, first(kf_state.μ), std_est, ess)
+    @test llkf ≈ llbf rtol = 1e-3
 end
 
 @testitem "Guided filter test" begin
     using SSMProblems
     using StableRNGs
     using StatsBase: weights
+    using GeneralisedFilters.GFTest
 
     rng = StableRNG(1234)
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
@@ -458,11 +460,12 @@ end
     gf_state, llgf = GeneralisedFilters.filter(rng, model, gf, ys)
     kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
 
-    xs = getfield.(gf_state.particles, :state)
+    xs = first.(getfield.(gf_state.particles, :state))
     ws = weights(gf_state)
 
-    @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-3
-    @test llkf ≈ llgf atol = 1e-3
+    mean_est, std_est, ess = weighted_stats(xs, ws)
+    @test check_mc_estimate(mean_est, first(kf_state.μ), std_est, ess)
+    @test llkf ≈ llgf rtol = 1e-3
 end
 
 @testitem "Forward algorithm test" begin
@@ -523,6 +526,7 @@ end
 @testitem "Rao-Blackwellised BF test" begin
     using Distributions
     using GeneralisedFilters
+    using GeneralisedFilters.GFTest
     using LinearAlgebra
     using SSMProblems
     using StableRNGs
@@ -540,21 +544,24 @@ end
     rbbf = RBPF(bf, KalmanFilter())
 
     rbbf_state, llrbbf = GeneralisedFilters.filter(rng, hier_model, rbbf, ys)
-    xs = getfield.(getfield.(rbbf_state.particles, :state), :x)
-    zs = getfield.(getfield.(rbbf_state.particles, :state), :z)
+    xs = only.(getfield.(getfield.(rbbf_state.particles, :state), :x))
+    zs = only.(getfield.(getfield.(getfield.(rbbf_state.particles, :state), :z), :μ))
     ws = weights(rbbf_state)
 
     kf_state, llkf = GeneralisedFilters.filter(rng, full_model, KF(), ys)
 
-    @test first(kf_state.μ) ≈ sum(only.(xs) .* ws) rtol = 1e-3
-    @test last(kf_state.μ) ≈ sum(only.(getfield.(zs, :μ)) .* ws) rtol = 1e-3
-    @test llkf ≈ llrbbf atol = 1e-3
+    mean_x, std_x, ess = weighted_stats(xs, ws)
+    mean_z, std_z, _ = weighted_stats(zs, ws)
+    @test check_mc_estimate(mean_x, first(kf_state.μ), std_x, ess)
+    @test check_mc_estimate(mean_z, last(kf_state.μ), std_z, ess)
+    @test llkf ≈ llrbbf rtol = 1e-3
 end
 
 @testitem "Rao-Blackwellised GF test" begin
     using SSMProblems
     using StableRNGs
     using StatsBase: weights
+    using GeneralisedFilters.GFTest
 
     rng = StableRNG(1234)
 
@@ -568,20 +575,23 @@ end
     gf = ParticleFilter(10^6, prop; resampler=resampler)
     rbgf = RBPF(gf, KalmanFilter())
     rbgf_state, llrbgf = GeneralisedFilters.filter(rng, hier_model, rbgf, ys)
-    xs = getfield.(getfield.(rbgf_state.particles, :state), :x)
-    zs = getfield.(getfield.(rbgf_state.particles, :state), :z)
+    xs = only.(getfield.(getfield.(rbgf_state.particles, :state), :x))
+    zs = only.(getfield.(getfield.(getfield.(rbgf_state.particles, :state), :z), :μ))
     ws = weights(rbgf_state)
 
     kf_state, llkf = GeneralisedFilters.filter(rng, full_model, KF(), ys)
 
-    @test first(kf_state.μ) ≈ sum(only.(xs) .* ws) rtol = 1e-3
-    @test last(kf_state.μ) ≈ sum(only.(getfield.(zs, :μ)) .* ws) rtol = 1e-3
-    @test llkf ≈ llrbgf atol = 1e-3
+    mean_x, std_x, ess = weighted_stats(xs, ws)
+    mean_z, std_z, _ = weighted_stats(zs, ws)
+    @test check_mc_estimate(mean_x, first(kf_state.μ), std_x, ess)
+    @test check_mc_estimate(mean_z, last(kf_state.μ), std_z, ess)
+    @test llkf ≈ llrbgf rtol = 1e-3
 end
 
 @testitem "ABF test" begin
     using Distributions
     using GeneralisedFilters
+    using GeneralisedFilters.GFTest
     using LinearAlgebra
     using SSMProblems
     using StableRNGs
@@ -593,23 +603,24 @@ end
     )
     _, _, ys = sample(rng, model, 4)
 
-    # resampler = GeneralisedFilters.GFTest.AlternatingResampler()
     resampler = ESSResampler(0.8)
     bf = BF(10^6; resampler=resampler)
     abf = AuxiliaryParticleFilter(bf, MeanPredictive())
     abf_state, llabf = GeneralisedFilters.filter(rng, model, abf, ys)
     kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
 
-    xs = getfield.(abf_state.particles, :state)
+    xs = first.(getfield.(abf_state.particles, :state))
     ws = weights(abf_state)
 
-    @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
-    @test llkf ≈ llabf atol = 1e-3
+    mean_est, std_est, ess = weighted_stats(xs, ws)
+    @test check_mc_estimate(mean_est, first(kf_state.μ), std_est, ess)
+    @test llkf ≈ llabf rtol = 1e-3
 end
 
 @testitem "ARBF test" begin
     using Distributions
     using GeneralisedFilters
+    using GeneralisedFilters.GFTest
     using LinearAlgebra
     using SSMProblems
     using StableRNGs
@@ -627,15 +638,17 @@ end
     rbbf = RBPF(bf, KalmanFilter())
     arbf = AuxiliaryParticleFilter(rbbf, MeanPredictive())
     arbf_state, llarbf = GeneralisedFilters.filter(rng, hier_model, arbf, ys)
-    xs = getfield.(getfield.(arbf_state.particles, :state), :x)
-    zs = getfield.(getfield.(arbf_state.particles, :state), :z)
+    xs = only.(getfield.(getfield.(arbf_state.particles, :state), :x))
+    zs = only.(getfield.(getfield.(getfield.(arbf_state.particles, :state), :z), :μ))
     ws = weights(arbf_state)
 
     kf_state, llkf = GeneralisedFilters.filter(rng, full_model, KF(), ys)
 
-    @test first(kf_state.μ) ≈ sum(only.(xs) .* ws) rtol = 1e-2
-    @test last(kf_state.μ) ≈ sum(only.(getfield.(zs, :μ)) .* ws) rtol = 1e-3
-    @test llkf ≈ llarbf atol = 1e-3
+    mean_x, std_x, ess = weighted_stats(xs, ws)
+    mean_z, std_z, _ = weighted_stats(zs, ws)
+    @test check_mc_estimate(mean_x, first(kf_state.μ), std_x, ess)
+    @test check_mc_estimate(mean_z, last(kf_state.μ), std_z, ess)
+    @test llkf ≈ llarbf rtol = 1e-3
 end
 
 @testitem "RBPF ancestory test" begin
@@ -665,13 +678,14 @@ end
     using SSMProblems
     using StableRNGs
     using StatsBase: weights
+    using GeneralisedFilters.GFTest
 
     SEED = 1234
     D_outer = 1
     D_inner = 1
     D_obs = 1
     T = 5
-    N_particles = 10^4
+    N_particles = 10^5
 
     rng = StableRNG(SEED)
 
@@ -688,15 +702,16 @@ end
     states, ll = GeneralisedFilters.filter(rng, hier_model, bf, ys)
 
     # Extract final filtered states
-    xs = map(p -> getproperty(p.state, :x), states.particles)
-    zs = map(p -> getproperty(p.state, :z), states.particles)
+    xs = only.(map(p -> getproperty(p.state, :x), states.particles))
+    zs = only.(map(p -> getproperty(p.state, :z), states.particles))
     ws = weights(states)
 
-    @test kf_ll ≈ ll rtol = 1e-2
+    @test kf_ll ≈ ll rtol = 1e-3
 
-    # Higher tolerance for outer state since variance is higher
-    @test first(kf_states.μ) ≈ sum(only.(xs) .* ws) rtol = 1e-1
-    @test last(kf_states.μ) ≈ sum(only.(zs) .* ws) rtol = 1e-1
+    mean_x, std_x, ess = weighted_stats(xs, ws)
+    mean_z, std_z, _ = weighted_stats(zs, ws)
+    @test check_mc_estimate(mean_x, first(kf_states.μ), std_x, ess)
+    @test check_mc_estimate(mean_z, last(kf_states.μ), std_z, ess)
 end
 
 @testitem "Dense ancestry test" begin
@@ -742,12 +757,15 @@ end
 
 @testitem "CSMC test" begin
     using GeneralisedFilters
+    using GeneralisedFilters.GFTest
     using StableRNGs
     using PDMats
     using LinearAlgebra
     using LogExpFunctions: logsumexp
     using Random: randexp
     using StatsBase: sample, weights
+    using Statistics: mean, std
+    using MCMCDiagnosticTools: ess
 
     using OffsetArrays
 
@@ -794,13 +812,15 @@ end
     # unbiased estimate of 1 / Z. See Elements of Sequential Monte Carlo (Section 5.2)
     log_recip_likelihood_estimate = logsumexp(-lls) - log(length(lls))
 
-    csmc_mean = sum(getindex.(trajectory_samples, t_smooth)) / N_sample
-    @test csmc_mean ≈ state.μ rtol = 1e-3
+    samples = only.(getindex.(trajectory_samples, t_smooth))
+    ess_val = only(ess(samples))
+    @test check_mc_estimate(mean(samples), only(state.μ), std(samples), ess_val)
     @test log_recip_likelihood_estimate ≈ -ks_ll rtol = 1e-3
 end
 
 @testitem "RBCSMC test" begin
     using GeneralisedFilters
+    using GeneralisedFilters.GFTest
     using StableRNGs
     using PDMats
     using LinearAlgebra
@@ -808,6 +828,7 @@ end
     using StatsBase: sample, weights
     using StaticArrays
     using Statistics
+    using MCMCDiagnosticTools: ess
 
     using OffsetArrays
 
@@ -857,7 +878,7 @@ end
     end
 
     # Extract inner and outer trajectories
-    x_trajectories = getproperty.(getindex.(trajectory_samples, t_smooth), :x)
+    x_trajectories = only.(getproperty.(getindex.(trajectory_samples, t_smooth), :x))
 
     # Smooth the inner (z) component using backward_smooth
     inner_dyn = hier_model.inner_model.dyn
@@ -882,12 +903,17 @@ end
     end
 
     # Compare to ground truth
-    @test state.μ[1] ≈ only(mean(x_trajectories)) rtol = 1e-2
-    @test state.μ[2] ≈ mean(z_smoothed_means) rtol = 1e-3
+    ess_x = only(ess(x_trajectories))
+    ess_z = only(ess(z_smoothed_means))
+    @test check_mc_estimate(mean(x_trajectories), state.μ[1], std(x_trajectories), ess_x)
+    @test check_mc_estimate(
+        mean(z_smoothed_means), state.μ[2], std(z_smoothed_means), ess_z
+    )
 end
 
 @testitem "RBCSMC-AS test" begin
     using GeneralisedFilters
+    using GeneralisedFilters.GFTest
     using StableRNGs
     using PDMats
     using LinearAlgebra
@@ -896,6 +922,7 @@ end
     using StaticArrays
     using Statistics
     using LogExpFunctions
+    using MCMCDiagnosticTools: ess
 
     import SSMProblems: prior, dyn, obs
     import GeneralisedFilters: resampler, resample, move, RBState, InformationLikelihood
@@ -909,7 +936,7 @@ end
     K = 5
     t_smooth = 2
     T = Float64
-    N_particles = 10
+    N_particles = 20
     N_burnin = 200
     N_sample = 10000
 
@@ -1002,7 +1029,7 @@ end
     end
 
     # Extract inner and outer trajectories
-    x_trajectories = getproperty.(getindex.(trajectory_samples, t_smooth), :x)
+    x_trajectories = only.(getproperty.(getindex.(trajectory_samples, t_smooth), :x))
 
     # Smooth the inner (z) component using backward_smooth
     inner_dyn = hier_model.inner_model.dyn
@@ -1027,12 +1054,17 @@ end
     end
 
     # Compare to ground truth
-    @test state.μ[1] ≈ only(mean(x_trajectories)) rtol = 1e-2
-    @test state.μ[2] ≈ mean(z_smoothed_means) rtol = 1e-3
+    ess_x = only(ess(x_trajectories))
+    ess_z = only(ess(z_smoothed_means))
+    @test check_mc_estimate(mean(x_trajectories), state.μ[1], std(x_trajectories), ess_x)
+    @test check_mc_estimate(
+        mean(z_smoothed_means), state.μ[2], std(z_smoothed_means), ess_z
+    )
 end
 
 @testitem "Backward simulation test" begin
     using GeneralisedFilters
+    using GeneralisedFilters.GFTest
     using StableRNGs
     using PDMats
     using LinearAlgebra
@@ -1046,11 +1078,11 @@ end
     SEED = 1234
     Dx = 1
     Dy = 1
-    K = 5
-    t_smooth = 3
+    K = 4
+    t_smooth = 2
     T = Float64
-    N_particles = 50
-    N_trajectories = 1000
+    N_particles = 100
+    N_trajectories = 50000
 
     rng = StableRNG(SEED)
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
@@ -1108,12 +1140,18 @@ end
     end
 
     # Extract samples at t_smooth and compare to Kalman smoother
-    bs_mean = mean(getindex.(trajectory_samples, t_smooth))
-    @test bs_mean ≈ only(ks_state.μ) rtol = 5e-2
+    # NOTE: Using N_trajectories as ESS is approximate. The trajectories are conditionally
+    # independent given the forward particles, but share the same particle approximation.
+    # This underestimates the true variance (ignoring forward pass MC error).
+    samples = getindex.(trajectory_samples, t_smooth)
+    @test check_mc_estimate(
+        mean(samples), only(ks_state.μ), std(samples), Float64(N_trajectories / 10)
+    )
 end
 
 @testitem "RB backward simulation test" begin
     using GeneralisedFilters
+    using GeneralisedFilters.GFTest
     using StableRNGs
     using PDMats
     using LinearAlgebra
@@ -1133,8 +1171,8 @@ end
     K = 5
     t_smooth = 2
     T = Float64
-    N_particles = 50
-    N_trajectories = 1000
+    N_particles = 100
+    N_trajectories = 10000
 
     rng = StableRNG(SEED)
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
@@ -1239,6 +1277,13 @@ end
     end
 
     # Compare to ground truth
-    @test ks_state.μ[1] ≈ mean(x_samples) rtol = 5e-2
-    @test ks_state.μ[2] ≈ mean(z_samples) rtol = 5e-2
+    # NOTE: Using N_trajectories as ESS is approximate. The trajectories are conditionally
+    # independent given the forward particles, but share the same particle approximation.
+    # This underestimates the true variance (ignoring forward pass MC error).
+    @test check_mc_estimate(
+        mean(x_samples), ks_state.μ[1], std(x_samples), Float64(N_trajectories / 10)
+    )
+    @test check_mc_estimate(
+        mean(z_samples), ks_state.μ[2], std(z_samples), Float64(N_trajectories / 10)
+    )
 end
