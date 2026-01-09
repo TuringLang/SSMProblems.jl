@@ -751,6 +751,78 @@ end
     @test smoothed_2f ≈ smoothed_rts
 end
 
+@testitem "RBPF with discrete inner filter test" begin
+    using GeneralisedFilters
+    using SSMProblems
+    using StableRNGs
+    using StatsBase: weights
+
+    SEED = 1234
+    K_outer = 3
+    K_inner = 4
+    T = 10
+    N_particles = 10^5
+
+    rng = StableRNG(SEED)
+
+    joint_model, hier_model = GeneralisedFilters.GFTest.create_dummy_discrete_model(
+        rng, K_outer, K_inner; obs_separation=3.0, obs_noise=0.3
+    )
+
+    # Sample observations from the hierarchical model
+    _, _, _, _, observations = sample(rng, hier_model, T)
+
+    # Run joint forward algorithm on the product space
+    joint_state, joint_ll = GeneralisedFilters.filter(rng, joint_model, DF(), observations)
+
+    # Run RBPF with discrete inner filter
+    bf = BF(N_particles)
+    rbpf = RBPF(bf, DiscreteFilter())
+    rbpf_state, rbpf_ll = GeneralisedFilters.filter(rng, hier_model, rbpf, observations)
+
+    # Compare log-likelihoods
+    @test joint_ll ≈ rbpf_ll atol = 0.05
+
+    # Extract marginals from RBPF
+    ws = weights(rbpf_state)
+    outer_states = getfield.(getfield.(rbpf_state.particles, :state), :x)
+    inner_dists = getfield.(getfield.(rbpf_state.particles, :state), :z)
+
+    # Compute marginal outer distribution from RBPF
+    rbpf_outer_marginal = zeros(K_outer)
+    for (x, w) in zip(outer_states, ws)
+        rbpf_outer_marginal[x] += w
+    end
+
+    # Compute marginal outer distribution from joint
+    joint_outer_marginal = zeros(K_outer)
+    for i in 1:K_outer
+        for k in 1:K_inner
+            idx = (i - 1) * K_inner + k
+            joint_outer_marginal[i] += joint_state[idx]
+        end
+    end
+
+    @test rbpf_outer_marginal ≈ joint_outer_marginal rtol = 0.02
+
+    # Compute marginal inner distribution from RBPF (weighted average of inner distributions)
+    rbpf_inner_marginal = zeros(K_inner)
+    for (z, w) in zip(inner_dists, ws)
+        rbpf_inner_marginal .+= w .* z
+    end
+
+    # Compute marginal inner distribution from joint
+    joint_inner_marginal = zeros(K_inner)
+    for i in 1:K_outer
+        for k in 1:K_inner
+            idx = (i - 1) * K_inner + k
+            joint_inner_marginal[k] += joint_state[idx]
+        end
+    end
+
+    @test rbpf_inner_marginal ≈ joint_inner_marginal rtol = 0.02
+end
+
 # @testitem "Rao-Blackwellised BF test" begin
 #     using Distributions
 #     using GeneralisedFilters
