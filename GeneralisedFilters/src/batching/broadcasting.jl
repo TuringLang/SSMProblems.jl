@@ -36,7 +36,6 @@ maybe_convert_ref(r::Base.RefValue{<:CuMatrix}) = SharedCuMatrix(r[])
 # Structural Operations (Pass-through)
 # =============================================================================
 
-broadcasted(::typeof(tuple), args...) = tuple(args...)
 broadcasted(::typeof(getproperty), x, s::Symbol) = getproperty(x, s)
 broadcasted(::typeof(getfield), x, s::Symbol) = getfield(x, s)
 broadcasted(::typeof(getfield), x, i::Int) = getfield(x, i)
@@ -44,6 +43,16 @@ broadcasted(::typeof(getfield), x, i::Int) = getfield(x, i)
 # Special handling for RefValue - unwrap before indexing
 broadcasted(::typeof(getfield), r::Base.RefValue, i::Int) = getfield(r[], i)
 broadcasted(::typeof(getfield), r::Base.RefValue, s::Symbol) = getfield(r[], s)
+
+# StructArray{<:Tuple} destructuring: extract the i-th component array
+function broadcasted(::typeof(Base.indexed_iterate), sa::StructArray{<:Tuple}, i::Int)
+    return (StructArrays.component(sa, i), i + 1)
+end
+function broadcasted(
+    ::typeof(Base.indexed_iterate), sa::StructArray{<:Tuple}, i::Int, ::Any
+)
+    return (StructArrays.component(sa, i), i + 1)
+end
 
 # =============================================================================
 # StructArray Wrapping
@@ -91,19 +100,44 @@ end
 broadcasted(::typeof(adjoint), A::BatchedOrShared) = broadcasted(Adjoint, A)
 broadcasted(::typeof(transpose), A::BatchedOrShared) = broadcasted(Transpose, A)
 
+# Batched tuple creation: returns StructArray{Tuple{...}}
+function broadcasted(::typeof(tuple), args::Vararg{BatchedOrShared})
+    ElType = Tuple{map(eltype, args)...}
+    return StructArray{ElType}(args)
+end
+
 # =============================================================================
 # IR Transformation
 # =============================================================================
 
-const SKIP_BROADCAST = Set{Any}([tuple, Core.tuple, getfield, getproperty])
+const SKIP_BROADCAST = Set{Any}([getfield, getproperty])
 
 const BROADCAST_TYPES = Set{Any}([PDMat])
 
-maybe_wrap_scalar(x) = x
-maybe_wrap_scalar(x::UniformScaling) = Ref(x)
+# Don't wrap: batched arrays (already batched), callables (functions/types), modules, symbols, integers, already-wrapped refs
+maybe_wrap_scalar(x::Union{BatchedOrShared,StructArray}) = x
+maybe_wrap_scalar(x::Union{Type,Module,Symbol,Integer,Base.RefValue}) = x
+maybe_wrap_scalar(x) = typeof(x) <: Function ? x : Ref(x)
 
 @inline function broadcast_and_materialize(f, args...)
     wrapped_args = map(maybe_wrap_scalar, args)
+
+    # Check if any argument is actually batched (not just Ref-wrapped scalar)
+    has_batched = any(arg -> arg isa Union{BatchedOrShared,StructArray}, wrapped_args)
+
+    if !has_batched
+        # All scalars - unwrap, execute scalar operation, re-wrap result
+        unwrapped_args = map(a -> a isa Base.RefValue ? a[] : a, wrapped_args)
+        result = f(unwrapped_args...)
+        # Don't wrap code/metadata, batched results, or already-wrapped values
+        should_wrap = !(
+            typeof(result) <: Function ||
+            result isa Union{Type,Module,Symbol,BatchedOrShared,StructArray,Base.RefValue}
+        )
+        return should_wrap ? Ref(result) : result
+    end
+
+    # Has batched inputs - normal broadcast path
     result = broadcasted(f, wrapped_args...)
     if result isa Broadcasted
         return Broadcast.materialize(result)
@@ -168,6 +202,7 @@ end
 
 ir_element_type(::Type{T}) where {T} = T
 ir_element_type(::Type{<:StructArray{T}}) where {T} = T
+ir_element_type(::Type{<:Base.RefValue{T}}) where {T} = T
 
 function generate_batched_function(f, argtypes::Type{<:Tuple})
     element_types = Tuple{map(ir_element_type, argtypes.parameters)...}

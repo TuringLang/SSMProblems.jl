@@ -1,4 +1,5 @@
 import PDMats: X_A_Xt
+import LinearAlgebra: norm
 
 # =============================================================================
 # GEMM-Compatible Types
@@ -158,6 +159,67 @@ function broadcasted(
 end
 
 # =============================================================================
+# Matrix Plus Scaled Identity (A + λI) Custom Kernel
+# =============================================================================
+
+function plus_scaled_identity_kernel!(C, A, λ, m, n)
+    batch_idx = blockIdx().z
+    i = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+    j = (blockIdx().y - Int32(1)) * blockDim().y + threadIdx().y
+
+    if i <= m && j <= n
+        if i == j
+            @inbounds C[i, j, batch_idx] = A[i, j, batch_idx] + λ
+        else
+            @inbounds C[i, j, batch_idx] = A[i, j, batch_idx]
+        end
+    end
+    return nothing
+end
+
+function plus_scaled_identity_batched!(C::CuArray{T,3}, A::CuArray{T,3}, λ::T) where {T}
+    m, n, N = size(A)
+    threads = (16, 16)
+    blocks = (cld(m, 16), cld(n, 16), N)
+    @cuda threads = threads blocks = blocks plus_scaled_identity_kernel!(C, A, λ, m, n)
+    return C
+end
+
+# A + Ref(I) where I is unscaled identity
+function broadcasted(
+    ::typeof(+), A::BatchedCuMatrix{T}, ::Base.RefValue{UniformScaling{Bool}}
+) where {T}
+    C = CuArray{T}(undef, size(A.data))
+    plus_scaled_identity_batched!(C, A.data, one(T))
+    return BatchedCuMatrix(C)
+end
+
+function broadcasted(
+    ::typeof(+), ::Base.RefValue{UniformScaling{Bool}}, A::BatchedCuMatrix{T}
+) where {T}
+    C = CuArray{T}(undef, size(A.data))
+    plus_scaled_identity_batched!(C, A.data, one(T))
+    return BatchedCuMatrix(C)
+end
+
+# A + λI where λI is a scaled UniformScaling
+function broadcasted(
+    ::typeof(+), A::BatchedCuMatrix{T}, J::Base.RefValue{<:UniformScaling{T}}
+) where {T}
+    C = CuArray{T}(undef, size(A.data))
+    plus_scaled_identity_batched!(C, A.data, J[].λ)
+    return BatchedCuMatrix(C)
+end
+
+function broadcasted(
+    ::typeof(+), J::Base.RefValue{<:UniformScaling{T}}, A::BatchedCuMatrix{T}
+) where {T}
+    C = CuArray{T}(undef, size(A.data))
+    plus_scaled_identity_batched!(C, A.data, J[].λ)
+    return BatchedCuMatrix(C)
+end
+
+# =============================================================================
 # PDMat Broadcasting
 # =============================================================================
 
@@ -250,4 +312,40 @@ function broadcasted(
     symmetrize_lower!(result)
 
     return result
+end
+
+# =============================================================================
+# Batched norm
+# =============================================================================
+
+# Compute 2-norm for each vector in the batch, returns a CuVector of scalars
+function broadcasted(::typeof(norm), v::BatchedCuVector{T}) where {T}
+    # v.data is D×N, compute norm of each column
+    return vec(sqrt.(sum(abs2, v.data; dims=1)))
+end
+
+# =============================================================================
+# Batched ifelse (for conditional selection with batched conditions)
+# =============================================================================
+
+# Select entire vectors: x[:,j] if cond[j], else y[:,j]
+function broadcasted(
+    ::typeof(ifelse), cond::CuVector{Bool}, x::BatchedCuVector{T}, y::BatchedCuVector{T}
+) where {T}
+    # cond is length N (one bool per batch element)
+    # x.data and y.data are D×N
+    mask = reshape(T.(cond), 1, :)  # 1×N mask for column selection
+    result = mask .* x.data .+ (one(T) .- mask) .* y.data
+    return BatchedCuVector(result)
+end
+
+# Select entire matrices: x[:,:,j] if cond[j], else y[:,:,j]
+function broadcasted(
+    ::typeof(ifelse), cond::CuVector{Bool}, x::BatchedCuMatrix{T}, y::BatchedCuMatrix{T}
+) where {T}
+    # cond is length N (one bool per batch element)
+    # x.data and y.data are D×D×N
+    mask = reshape(T.(cond), 1, 1, :)  # 1×1×N mask for batch selection
+    result = mask .* x.data .+ (one(T) .- mask) .* y.data
+    return BatchedCuMatrix(result)
 end
