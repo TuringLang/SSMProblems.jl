@@ -100,8 +100,11 @@ end
 broadcasted(::typeof(adjoint), A::BatchedOrShared) = broadcasted(Adjoint, A)
 broadcasted(::typeof(transpose), A::BatchedOrShared) = broadcasted(Transpose, A)
 
+# Union of all types that represent batched data
+const BatchedData = Union{BatchedOrShared,StructArray,CuVector}
+
 # Batched tuple creation: returns StructArray{Tuple{...}}
-function broadcasted(::typeof(tuple), args::Vararg{BatchedOrShared})
+function broadcasted(::typeof(tuple), args::Vararg{BatchedData})
     ElType = Tuple{map(eltype, args)...}
     return StructArray{ElType}(args)
 end
@@ -114,16 +117,16 @@ const SKIP_BROADCAST = Set{Any}([getfield, getproperty])
 
 const BROADCAST_TYPES = Set{Any}([PDMat])
 
-# Don't wrap: batched arrays (already batched), callables (functions/types), modules, symbols, integers, already-wrapped refs
-maybe_wrap_scalar(x::Union{BatchedOrShared,StructArray}) = x
+# Don't wrap: batched data, callables, modules, symbols, integers, already-wrapped refs
+maybe_wrap_scalar(x::BatchedData) = x
 maybe_wrap_scalar(x::Union{Type,Module,Symbol,Integer,Base.RefValue}) = x
 maybe_wrap_scalar(x) = typeof(x) <: Function ? x : Ref(x)
 
 @inline function broadcast_and_materialize(f, args...)
     wrapped_args = map(maybe_wrap_scalar, args)
 
-    # Check if any argument is actually batched (not just Ref-wrapped scalar)
-    has_batched = any(arg -> arg isa Union{BatchedOrShared,StructArray}, wrapped_args)
+    # Check if any argument is actually batched
+    has_batched = any(arg -> arg isa BatchedData, wrapped_args)
 
     if !has_batched
         # All scalars - unwrap, execute scalar operation, re-wrap result
@@ -132,7 +135,7 @@ maybe_wrap_scalar(x) = typeof(x) <: Function ? x : Ref(x)
         # Don't wrap code/metadata, batched results, or already-wrapped values
         should_wrap = !(
             typeof(result) <: Function ||
-            result isa Union{Type,Module,Symbol,BatchedOrShared,StructArray,Base.RefValue}
+            result isa Union{Type,Module,Symbol,BatchedData,Base.RefValue}
         )
         return should_wrap ? Ref(result) : result
     end

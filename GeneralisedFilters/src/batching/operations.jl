@@ -349,3 +349,79 @@ function broadcasted(
     result = mask .* x.data .+ (one(T) .- mask) .* y.data
     return BatchedCuMatrix(result)
 end
+
+# =============================================================================
+# Batched zero
+# =============================================================================
+
+function broadcasted(::typeof(zero), v::BatchedCuVector{T}) where {T}
+    return BatchedCuVector(CUDA.zeros(T, size(v.data)))
+end
+
+function broadcasted(::typeof(zero), A::BatchedCuMatrix{T}) where {T}
+    return BatchedCuMatrix(CUDA.zeros(T, size(A.data)))
+end
+
+# =============================================================================
+# Batched logdetcov and invquad (for _logpdf)
+# =============================================================================
+
+import Distributions: logdetcov, sqmahal
+import PDMats: invquad
+
+# length for BatchedCuVector: returns the inner dimension (same for all batch elements)
+function broadcasted(::typeof(length), v::BatchedCuVector)
+    return size(v.data, 1)
+end
+
+# logdetcov for StructArray{MvNormal}: delegates to the covariance matrix
+function broadcasted(::typeof(logdetcov), d::StructArray{<:MvNormal{T}}) where {T}
+    return broadcasted(logdetcov, d.Σ)
+end
+
+# logdetcov for StructArray{PDMat}: 2 * sum(log.(diag(L))) for each batch element
+function broadcasted(::typeof(logdetcov), P::StructArray{<:PDMat{T}}) where {T}
+    # P.chol.factors is StructArray{LowerTriangular}, .data is BatchedCuMatrix
+    L_data = P.chol.factors.data.data  # D×D×N CuArray
+    D, _, N = size(L_data)
+
+    # Extract diagonal: L_data[i,i,k] for each i,k
+    diag_indices = [CartesianIndex(i, i, k) for k in 1:N for i in 1:D]
+    diag_flat = L_data[diag_indices]  # (D*N,) vector
+    diag_matrix = reshape(diag_flat, D, N)  # D×N
+
+    # logdet = 2 * sum(log.(diag(L)))
+    return vec(T(2) .* sum(log.(diag_matrix); dims=1))
+end
+
+# invquad for StructArray{PDMat} and BatchedCuVector: x' * inv(P) * x
+# Computed as: solve P*y = x (via potrs), then dot(x, y)
+function broadcasted(
+    ::typeof(invquad), P::StructArray{<:PDMat{T}}, x::BatchedCuVector{T}
+) where {T}
+    L = P.chol.factors.data  # BatchedCuMatrix (D×D×N)
+    D, N = size(x.data)
+
+    # Reshape x to matrix for potrs: D×N -> D×1×N
+    x_mat = BatchedCuMatrix(reshape(copy(x.data), D, 1, N))
+
+    # Solve L*L'*y = x in-place
+    potrs_batched!('L', L, x_mat)
+
+    # y is now in x_mat, compute dot(x, y) = sum(x .* y) for each batch
+    y_vec = reshape(x_mat.data, D, N)
+    return vec(sum(x.data .* y_vec; dims=1))
+end
+
+# sqmahal for StructArray{MvNormal} and BatchedCuVector: (x - μ)' * inv(Σ) * (x - μ)
+function broadcasted(
+    ::typeof(sqmahal), d::StructArray{<:MvNormal{T}}, x::BatchedCuVector{T}
+) where {T}
+    diff = broadcasted(-, x, d.μ)
+    return broadcasted(invquad, d.Σ, diff)
+end
+
+# oftype for CuVector result: convert scalar to element type
+function broadcasted(::typeof(oftype), x::CuVector{T}, y::Base.RefValue) where {T}
+    return T(y[])
+end

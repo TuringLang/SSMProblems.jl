@@ -42,7 +42,7 @@ Rs = PDMat.(Rs);
 
 # Observations
 observations = BatchedCuVector(CUDA.randn(Float32, D_obs, N))
-jitter = 1f-6
+jitter = 1.0f-6
 
 dyn_params = tuple.(As, bs, Qs)
 obs_params = tuple.(Hs, cs, Rs)
@@ -68,11 +68,13 @@ function kalman_step(state, dyn_params, obs_params, observation, jitter)
     μ = μ + K * z
     Σ = PDMat(_maybe_apply_jitter(Σ̂_raw, jitter))
 
-    # ll = logpdf(MvNormal(z, S), zero(z))
+    ll = Distributions._logpdf(MvNormal(z, S), zero(z))
 
-    return MvNormal(μ, Σ)
+    return MvNormal(μ, Σ), ll
 end
 
 res = kalman_step.(Gs, dyn_params, obs_params, observations, Ref(jitter))
-println(typeof(res))
-println(eltype(res))
+println("\nFull type: ", typeof(res))
+println("\nElement type: ", eltype(res))
+
+lls = StructArrays.component(res, 2)
