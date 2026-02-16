@@ -21,6 +21,7 @@ using GeneralisedFilters
 using SSMProblems
 using AdvancedHMC
 using PDMats
+using StaticArrays
 using LinearAlgebra
 using Random
 using StableRNGs
@@ -33,6 +34,7 @@ using Plots
 using ProgressMeter
 using LaTeXStrings
 using JLD2
+using MCMCDiagnosticTools: ess as mcmc_ess
 
 import SSMProblems: prior, dyn, obs
 import GeneralisedFilters: resampler, resample, move
@@ -161,9 +163,9 @@ function make_logdensity_and_gradient(fixed, ys, x_traj_ref::Ref)
     Q_x_inv = inv(fixed.Q_x)
 
     function ℓπ_and_∂ℓπ(θ_vec)
-        b_x = θ_vec[1:Dx]
-        b_z = θ_vec[(Dx + 1):(Dx + Dz)]
-        c_obs = θ_vec[(Dx + Dz + 1):end]
+        b_x = SVector{Dx}(θ_vec[1:Dx])
+        b_z = SVector{Dz}(θ_vec[(Dx + 1):(Dx + Dz)])
+        c_obs = SVector{Dy}(θ_vec[(Dx + Dz + 1):end])
         x_traj = x_traj_ref[]
 
         # ── Prior ──
@@ -219,10 +221,10 @@ function make_logdensity_and_gradient(fixed, ys, x_traj_ref::Ref)
         R = fixed.R
         A_z = fixed.A_z
 
-        ∂μ = zeros(Dz)
-        ∂Σ = zeros(Dz, Dz)
-        ∂b_z_nll = zeros(Dz)
-        ∂c_nll = zeros(Dy)
+        ∂μ = zero(b_z)
+        ∂Σ = zero(fixed.A_z)
+        ∂b_z_nll = zero(b_z)
+        ∂c_nll = zero(c_obs)
 
         for t in T_len:-1:1
             ∂c_nll += GeneralisedFilters.gradient_c(∂μ, caches[t])
@@ -237,7 +239,7 @@ function make_logdensity_and_gradient(fixed, ys, x_traj_ref::Ref)
         ∂b_z -= ∂b_z_nll
         ∂c -= ∂c_nll
 
-        ∂θ = vcat(∂b_x, ∂b_z, ∂c)
+        ∂θ = Vector(vcat(∂b_x, ∂b_z, ∂c))
         return ll, ∂θ
     end
 
@@ -251,6 +253,57 @@ function make_logdensity_and_gradient(fixed, ys, x_traj_ref::Ref)
     end
 
     return ℓπ, ∂ℓπ
+end
+
+## ── MH Log-Density (gradient-free) ───────────────────────────────────────────
+
+function make_logdensity(fixed, ys, x_traj_ref::Ref)
+    Dx, Dz, Dy = fixed.Dx, fixed.Dz, fixed.Dy
+    T_len = length(ys)
+    Q_x_inv = inv(fixed.Q_x)
+
+    function ℓπ(θ_vec)
+        b_x = SVector{Dx}(θ_vec[1:Dx])
+        b_z = SVector{Dz}(θ_vec[(Dx + 1):(Dx + Dz)])
+        c_obs = SVector{Dy}(θ_vec[(Dx + Dz + 1):end])
+        x_traj = x_traj_ref[]
+
+        # Prior
+        ll = -0.5 * dot(b_x, b_x) / fixed.σ²_b
+        ll += -0.5 * dot(b_z, b_z) / fixed.σ²_b
+        ll += -0.5 * dot(c_obs, c_obs) / fixed.σ²_c
+
+        # Outer transitions
+        for t in 1:T_len
+            residual = x_traj[t] - fixed.A_x * x_traj[t - 1] - b_x
+            ll += -0.5 * dot(residual, Q_x_inv * residual)
+        end
+
+        # Inner Kalman filter forward pass
+        inner_dyn = GeneralisedFilters.GFTest.InnerDynamics(
+            fixed.A_z, b_z, fixed.C, fixed.Q_z
+        )
+        inner_obs = HomogeneousLinearGaussianObservationProcess(fixed.H, c_obs, fixed.R)
+
+        state = MvNormal(fixed.μ0_z, fixed.Σ0_z)
+        for t in 1:T_len
+            state = GeneralisedFilters.predict(
+                Random.default_rng(),
+                inner_dyn,
+                KF(),
+                t,
+                state,
+                nothing;
+                prev_outer=x_traj[t - 1],
+            )
+            state, ll_inc = GeneralisedFilters.update(inner_obs, KF(), t, state, ys[t])
+            ll += ll_inc
+        end
+
+        return ll
+    end
+
+    return ℓπ
 end
 
 ## ── CSMC-AS with RBPF ──────────────────────────────────────────────────────
@@ -287,6 +340,9 @@ function run_rbcsmc_as(rng, model, rbpf, ys, ref_traj, predictive_likelihoods)
             )
         end
 
+        # push!(container.particles, deepcopy(getfield.(bf_state.particles, :state)))
+        # push!(container.weights, deepcopy(getfield.(bf_state.particles, :log_w)))
+        # push!(container.ancestors, deepcopy(getfield.(bf_state.particles, :ancestor)))
         push!(container.particles, deepcopy(getfield.(bf_state.particles, :state)))
         push!(container.weights, deepcopy(getfield.(bf_state.particles, :log_w)))
         push!(container.ancestors, deepcopy(getfield.(bf_state.particles, :ancestor)))
@@ -333,17 +389,17 @@ Dz = 2
 Dy = 2
 
 # Fixed model parameters
-A_x = [0.8 0.1; -0.1 0.7]
-Q_x = PDMat(Symmetric([0.3 0.05; 0.05 0.2]))
-A_z = [0.6 0.15; -0.05 0.5]
-C = [0.3 -0.1; 0.1 0.2]
-Q_z = PDMat(Symmetric([0.2 0.03; 0.03 0.15]))
-H = [1.0 0.0; 0.5 1.0]
-R = PDMat(Symmetric([0.4 0.05; 0.05 0.3]))
-μ0_x = zeros(Dx)
-Σ0_x = PDMat(Matrix(1.0 * I(Dx)))
-μ0_z = zeros(Dz)
-Σ0_z = PDMat(Matrix(1.0 * I(Dz)))
+A_x = @SMatrix [0.8 0.1; -0.1 0.7]
+Q_x = PDMat(Symmetric(@SMatrix [0.3 0.05; 0.05 0.2]))
+A_z = @SMatrix [0.6 0.15; -0.05 0.5]
+C = @SMatrix [0.3 -0.1; 0.1 0.2]
+Q_z = PDMat(Symmetric(@SMatrix [0.2 0.03; 0.03 0.15]))
+H = @SMatrix [1.0 0.0; 0.5 1.0]
+R = PDMat(Symmetric(@SMatrix [0.4 0.05; 0.05 0.3]))
+μ0_x = @SVector zeros(2)
+Σ0_x = PDMat(Symmetric(@SMatrix [1.0 0.0; 0.0 1.0]))
+μ0_z = @SVector zeros(2)
+Σ0_z = PDMat(Symmetric(@SMatrix [1.0 0.0; 0.0 1.0]))
 
 # Prior hyperparameters
 σ²_b = 4.0
@@ -352,13 +408,13 @@ R = PDMat(Symmetric([0.4 0.05; 0.05 0.3]))
 fixed = (; Dx, Dz, Dy, A_x, Q_x, A_z, C, Q_z, H, R, μ0_x, Σ0_x, μ0_z, Σ0_z, σ²_b, σ²_c)
 
 # True parameter values
-true_b_x = [1.0, -0.5]
-true_b_z = [0.5, 0.3]
-true_c = [-0.2, 0.4]
+true_b_x = @SVector [1.0, -0.5]
+true_b_z = @SVector [0.5, 0.3]
+true_c = @SVector [-0.2, 0.4]
 
 T_len = 20
-N_particles = 100
-N_iter = 5000
+N_particles = 200
+N_iter = 10000
 N_adapts = min(div(N_iter, 10), 2_000)
 # N_adapts = 5
 
@@ -385,7 +441,7 @@ function run_gibbs(rng, fixed, ys, N_particles, N_iter, N_adapts, traj_thin=50)
 
     # ── Initialise CSMC-AS ──
     θ_vec = zeros(θ_dim)
-    b_x, b_z, c_obs = zeros(Dx), zeros(Dz), zeros(Dy)
+    b_x, b_z, c_obs = zero(fixed.μ0_x), zero(fixed.μ0_z), zero(ys[1])
 
     init_model = build_model(b_x, b_z, c_obs, fixed)
     rbpf = RBPF(BF(N_particles; threshold=0.8), KalmanFilter())
@@ -430,9 +486,9 @@ function run_gibbs(rng, fixed, ys, N_particles, N_iter, N_adapts, traj_thin=50)
         )
 
         θ_vec = nuts_trans.z.θ
-        b_x = θ_vec[1:Dx]
-        b_z = θ_vec[(Dx + 1):(Dx + Dz)]
-        c_obs = θ_vec[(Dx + Dz + 1):end]
+        b_x = SVector{Dx}(θ_vec[1:Dx])
+        b_z = SVector{Dz}(θ_vec[(Dx + 1):(Dx + Dz)])
+        c_obs = SVector{Dy}(θ_vec[(Dx + Dz + 1):end])
 
         b_x_samples[:, i] = b_x
         b_z_samples[:, i] = b_z
@@ -476,38 +532,118 @@ function run_gibbs(rng, fixed, ys, N_particles, N_iter, N_adapts, traj_thin=50)
     )
 end
 
-results = run_gibbs(rng, fixed, ys, N_particles, N_iter, N_adapts)
+function run_gibbs_mh(rng, fixed, ys, N_particles, N_iter, Σ_prop; burn=0, traj_thin=50)
+    (; Dx, Dz, Dy) = fixed
+    θ_dim = Dx + Dz + Dy
 
-## ── Results ─────────────────────────────────────────────────────────────────
+    # Asymptotically optimal RW-MH proposal: (2.38)^2/d * Σ
+    prop_cov = (2.38^2 / θ_dim) * Σ_prop
+    prop_dist = MvNormal(zeros(θ_dim), Symmetric(prop_cov))
 
-(;
-    b_x_samples,
-    b_z_samples,
-    c_samples,
-    acceptance_rates,
-    step_sizes,
-    tree_depths,
-    traj_samples,
-) = results
+    # ── Initialise CSMC-AS ──
+    θ_vec = zeros(θ_dim)
+    b_x, b_z, c_obs = zero(fixed.μ0_x), zero(fixed.μ0_z), zero(ys[1])
+
+    init_model = build_model(b_x, b_z, c_obs, fixed)
+    rbpf = RBPF(BF(N_particles; threshold=0.8), KalmanFilter())
+    x_traj, pred_liks = run_rbcsmc_as(rng, init_model, rbpf, ys, nothing, nothing)
+
+    # ── Initialise MH ──
+    x_traj_ref = Ref(x_traj)
+    ℓπ = make_logdensity(fixed, ys, x_traj_ref)
+    ll_current = ℓπ(θ_vec)
+
+    # ── Storage ──
+    b_x_samples = Matrix{Float64}(undef, Dx, N_iter)
+    b_z_samples = Matrix{Float64}(undef, Dz, N_iter)
+    c_samples = Matrix{Float64}(undef, Dy, N_iter)
+    accepted = Vector{Bool}(undef, N_iter)
+    traj_samples = Vector{typeof(x_traj)}()
+
+    running_bx = zeros(Dx)
+    running_bz = zeros(Dz)
+    running_c = zeros(Dy)
+    n_accepted = 0
+
+    prog = Progress(N_iter; dt=1, desc="RB-PGAS-MH ")
+    for i in 1:N_iter
+        # ── MH step for θ given x_{0:T} ──
+        θ_proposed = θ_vec + rand(rng, prop_dist)
+        ll_proposed = ℓπ(θ_proposed)
+
+        if log(rand(rng)) < ll_proposed - ll_current
+            θ_vec = θ_proposed
+            ll_current = ll_proposed
+            n_accepted += 1
+            accepted[i] = true
+        else
+            accepted[i] = false
+        end
+
+        b_x = SVector{Dx}(θ_vec[1:Dx])
+        b_z = SVector{Dz}(θ_vec[(Dx + 1):(Dx + Dz)])
+        c_obs = SVector{Dy}(θ_vec[(Dx + Dz + 1):end])
+
+        b_x_samples[:, i] = b_x
+        b_z_samples[:, i] = b_z
+        c_samples[:, i] = c_obs
+
+        running_bx .+= (b_x .- running_bx) ./ i
+        running_bz .+= (b_z .- running_bz) ./ i
+        running_c .+= (c_obs .- running_c) ./ i
+
+        # ── CSMC-AS step for x_{0:T} given θ ──
+        current_model = build_model(b_x, b_z, c_obs, fixed)
+        x_traj, pred_liks = run_rbcsmc_as(rng, current_model, rbpf, ys, x_traj, pred_liks)
+        x_traj_ref[] = x_traj
+        ll_current = ℓπ(θ_vec)
+
+        if i > burn && (i - burn) % traj_thin == 0
+            push!(traj_samples, deepcopy(x_traj))
+        end
+
+        next!(
+            prog;
+            showvalues=[
+                ("mean(b_x)", round.(running_bx; digits=3)),
+                ("mean(b_z)", round.(running_bz; digits=3)),
+                ("mean(c)", round.(running_c; digits=3)),
+                ("accept rate", round(n_accepted / i; digits=3)),
+            ],
+        )
+    end
+
+    return (; b_x_samples, b_z_samples, c_samples, accepted, traj_samples)
+end
+
+nuts_time = @elapsed results_nuts = run_gibbs(rng, fixed, ys, N_particles, N_iter, N_adapts)
+
+## ── NUTS Results ──────────────────────────────────────────────────────────────
+
+nuts_bx = results_nuts.b_x_samples
+nuts_bz = results_nuts.b_z_samples
+nuts_c = results_nuts.c_samples
+nuts_acc = results_nuts.acceptance_rates
+nuts_steps = results_nuts.step_sizes
+nuts_depths = results_nuts.tree_depths
+nuts_trajs = results_nuts.traj_samples
 
 burn = N_adapts
-post_bx = b_x_samples[:, (burn + 1):end]
-post_bz = b_z_samples[:, (burn + 1):end]
-post_c = c_samples[:, (burn + 1):end]
-post_acc = acceptance_rates[(burn + 1):end]
-post_depths = tree_depths[(burn + 1):end]
+post_nuts_bx = nuts_bx[:, (burn + 1):end]
+post_nuts_bz = nuts_bz[:, (burn + 1):end]
+post_nuts_c = nuts_c[:, (burn + 1):end]
 
 kf_bx_idx = (Dx + Dz + 1):(2Dx + Dz)
 kf_bz_idx = (2Dx + Dz + 1):(2Dx + 2Dz)
 kf_c_idx = (2Dx + 2Dz + 1):(2Dx + 2Dz + Dy)
 
 println("\n=== RB-PGAS-NUTS Posterior ===")
-println("  b_x mean: $(round.(mean(post_bx; dims=2)[:]; digits=4))")
-println("  b_x std:  $(round.(std(post_bx; dims=2)[:]; digits=4))")
-println("  b_z mean: $(round.(mean(post_bz; dims=2)[:]; digits=4))")
-println("  b_z std:  $(round.(std(post_bz; dims=2)[:]; digits=4))")
-println("  c   mean: $(round.(mean(post_c; dims=2)[:]; digits=4))")
-println("  c   std:  $(round.(std(post_c; dims=2)[:]; digits=4))")
+println("  b_x mean: $(round.(mean(post_nuts_bx; dims=2)[:]; digits=4))")
+println("  b_x std:  $(round.(std(post_nuts_bx; dims=2)[:]; digits=4))")
+println("  b_z mean: $(round.(mean(post_nuts_bz; dims=2)[:]; digits=4))")
+println("  b_z std:  $(round.(std(post_nuts_bz; dims=2)[:]; digits=4))")
+println("  c   mean: $(round.(mean(post_nuts_c; dims=2)[:]; digits=4))")
+println("  c   std:  $(round.(std(post_nuts_c; dims=2)[:]; digits=4))")
 
 println("\n=== Augmented KF Ground Truth ===")
 println("  b_x mean: $(round.(kf_state.μ[kf_bx_idx]; digits=4))")
@@ -523,32 +659,89 @@ println("  b_z: $true_b_z")
 println("  c:   $true_c")
 
 println("\n=== NUTS Diagnostics (post-warmup) ===")
-println("  Acceptance rate: $(round(mean(post_acc); digits=3))")
-println("  Final step size: $(round(step_sizes[end]; digits=4))")
-println("  Mean tree depth: $(round(mean(post_depths); digits=1))")
-println("  Max tree depth:  $(maximum(post_depths))")
+println("  Acceptance rate: $(round(mean(nuts_acc[(burn + 1):end]); digits=3))")
+println("  Final step size: $(round(nuts_steps[end]; digits=4))")
+println("  Mean tree depth: $(round(mean(nuts_depths[(burn + 1):end]); digits=1))")
+println("  Max tree depth:  $(maximum(nuts_depths[(burn + 1):end]))")
 
-## ── Trace Plots ─────────────────────────────────────────────────────────────
+## ── Run MH-within-PGAS ───────────────────────────────────────────────────────
+
+# Estimate proposal covariance from NUTS posterior
+θ_post_nuts = vcat(post_nuts_bx, post_nuts_bz, post_nuts_c)'  # (n_post, θ_dim)
+Σ_nuts = cov(θ_post_nuts)
+
+mh_time = @elapsed results_mh = run_gibbs_mh(
+    StableRNG(42), fixed, ys, N_particles, N_iter, Σ_nuts; burn=burn
+)
+
+mh_bx = results_mh.b_x_samples
+mh_bz = results_mh.b_z_samples
+mh_c = results_mh.c_samples
+mh_accepted = results_mh.accepted
+mh_trajs = results_mh.traj_samples
+
+post_mh_bx = mh_bx[:, (burn + 1):end]
+post_mh_bz = mh_bz[:, (burn + 1):end]
+post_mh_c = mh_c[:, (burn + 1):end]
+
+println("\n=== RB-PGAS-MH Posterior ===")
+println("  b_x mean: $(round.(mean(post_mh_bx; dims=2)[:]; digits=4))")
+println("  b_x std:  $(round.(std(post_mh_bx; dims=2)[:]; digits=4))")
+println("  b_z mean: $(round.(mean(post_mh_bz; dims=2)[:]; digits=4))")
+println("  b_z std:  $(round.(std(post_mh_bz; dims=2)[:]; digits=4))")
+println("  c   mean: $(round.(mean(post_mh_c; dims=2)[:]; digits=4))")
+println("  c   std:  $(round.(std(post_mh_c; dims=2)[:]; digits=4))")
+println("  Accept rate: $(round(mean(mh_accepted[(burn + 1):end]); digits=3))")
+
+## ── ESS / Wall-Time Comparison ───────────────────────────────────────────────
+
+param_labels = ["b_x[1]", "b_x[2]", "b_z[1]", "b_z[2]", "c[1]", "c[2]"]
+
+# Stack post-warmup samples: (n_post, n_params) → reshape to (n_post, 1, n_params)
+nuts_samples = vcat(post_nuts_bx, post_nuts_bz, post_nuts_c)'
+mh_samples = vcat(post_mh_bx, post_mh_bz, post_mh_c)'
+
+nuts_ess = mcmc_ess(reshape(nuts_samples, :, 1, size(nuts_samples, 2)))
+mh_ess = mcmc_ess(reshape(mh_samples, :, 1, size(mh_samples, 2)))
+
+println("\n=== ESS / Wall-Time Comparison ===")
+println("  NUTS wall time: $(round(nuts_time; digits=1))s")
+println("  MH   wall time: $(round(mh_time; digits=1))s")
+println()
+println("  Parameter   NUTS ESS   MH ESS   NUTS ESS/s   MH ESS/s")
+println("  " * "─"^60)
+for (i, name) in enumerate(param_labels)
+    ne = nuts_ess[i]
+    me = mh_ess[i]
+    println(
+        "  $(rpad(name, 12))" *
+        "$(lpad(round(ne; digits=1), 8))   " *
+        "$(lpad(round(me; digits=1), 7))   " *
+        "$(lpad(round(ne / nuts_time; digits=1), 10))   " *
+        "$(lpad(round(me / mh_time; digits=1), 8))",
+    )
+end
+println()
+println(
+    "  Min ESS/s:  NUTS=$(round(minimum(nuts_ess) / nuts_time; digits=1))  " *
+    "MH=$(round(minimum(mh_ess) / mh_time; digits=1))",
+)
+
+## ── Comparison Trace Plots ──────────────────────────────────────────────────
 
 param_names = [[L"b_{x,1}", L"b_{x,2}"], [L"b_{z,1}", L"b_{z,2}"], [L"c_1", L"c_2"]]
-all_samples = [post_bx, post_bz, post_c]
+nuts_all = [post_nuts_bx, post_nuts_bz, post_nuts_c]
+mh_all = [post_mh_bx, post_mh_bz, post_mh_c]
 kf_indices = [kf_bx_idx, kf_bz_idx, kf_c_idx]
 
 trace_plots = []
-for (samples, idx, names) in zip(all_samples, kf_indices, param_names)
+for (nuts_s, mh_s, idx, names) in zip(nuts_all, mh_all, kf_indices, param_names)
     for d in 1:2
         kf_mean = kf_state.μ[idx[d]]
         kf_std = sqrt(diag(kf_state.Σ)[idx[d]])
-        p = plot(
-            samples[d, :];
-            label="MCMC",
-            alpha=0.3,
-            linewidth=0.5,
-            color=:steelblue,
-            ylabel=names[d],
-            legend=:topright,
-            size=(800, 200),
-        )
+        p = plot(; ylabel=names[d], legend=:topright, size=(800, 200))
+        plot!(p, nuts_s[d, :]; label="NUTS", alpha=0.3, linewidth=0.5, color=:steelblue)
+        plot!(p, mh_s[d, :]; label="MH", alpha=0.3, linewidth=0.5, color=:darkorange)
         hline!(p, [kf_mean]; color=:red, linewidth=2, label="KF mean")
         hline!(
             p,
@@ -569,6 +762,28 @@ p_trace = plot(
     left_margin=5Plots.mm,
 )
 
+## ── ESS/s Bar Chart ─────────────────────────────────────────────────────────
+
+param_names_flat = [L"b_{x,1}", L"b_{x,2}", L"b_{z,1}", L"b_{z,2}", L"c_1", L"c_2"]
+nuts_ess_per_s = nuts_ess ./ nuts_time
+mh_ess_per_s = mh_ess ./ mh_time
+
+x_pos = collect(1:length(param_names_flat))
+bw = 0.35
+p_ess = bar(
+    x_pos .- bw / 2,
+    nuts_ess_per_s;
+    bar_width=bw,
+    label="NUTS",
+    color=:steelblue,
+    ylabel="ESS/s",
+    title="Effective Samples per Second",
+    xticks=(x_pos, param_names_flat),
+    size=(700, 400),
+    legend=:topright,
+)
+bar!(p_ess, x_pos .+ bw / 2, mh_ess_per_s; bar_width=bw, label="MH", color=:darkorange)
+
 ## ── Smoothed Trajectory Plots ───────────────────────────────────────────────
 
 # Ground truth: RTS smoother on augmented model
@@ -579,10 +794,10 @@ ts = 1:T_len
 smooth_x_mean = hcat([s.μ[1:Dx] for s in smoothed_states]...)
 smooth_x_std = hcat([sqrt.(diag(s.Σ)[1:Dx]) for s in smoothed_states]...)
 
-# Subsample trajectories for plotting
-N_traj_plot = min(200, length(traj_samples))
+# Subsample NUTS trajectories for plotting
+N_traj_plot = min(200, length(nuts_trajs))
 plot_indices = sort(
-    sb_sample(StableRNG(123), 1:length(traj_samples), N_traj_plot; replace=false)
+    sb_sample(StableRNG(123), 1:length(nuts_trajs), N_traj_plot; replace=false)
 )
 
 traj_plots = []
@@ -591,7 +806,7 @@ for d in 1:Dx
 
     # Plot sampled trajectories
     for (j, idx) in enumerate(plot_indices)
-        traj = traj_samples[idx]
+        traj = nuts_trajs[idx]
         plot!(
             p,
             0:T_len,
