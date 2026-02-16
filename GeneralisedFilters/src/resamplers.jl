@@ -161,9 +161,9 @@ function maybe_resample(
     end
 end
 
-struct ESSResampler <: AbstractConditionalResampler
+struct ESSResampler{RS<:AbstractResampler} <: AbstractConditionalResampler
     threshold::Float64
-    resampler::AbstractResampler
+    resampler::RS
     function ESSResampler(threshold, resampler::AbstractResampler=Systematic())
         return new(threshold, resampler)
     end
