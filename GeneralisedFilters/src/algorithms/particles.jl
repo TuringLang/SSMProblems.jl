@@ -101,7 +101,7 @@ function ParticleFilter(
     N::Integer, proposal::PT; threshold::Real=1.0, resampler::AbstractResampler=Systematic()
 ) where {PT<:AbstractProposal}
     conditional_resampler = ESSResampler(threshold, resampler)
-    return ParticleFilter{ESSResampler,PT}(N, conditional_resampler, proposal)
+    return ParticleFilter(N, conditional_resampler, proposal)
 end
 
 num_particles(algo::ParticleFilter) = algo.N
