@@ -5,21 +5,15 @@
 @testitem "CSMC" begin
     using GeneralisedFilters
     using StableRNGs
-    using PDMats
-    using LinearAlgebra
     using LogExpFunctions: logsumexp
-    using Random: randexp
-    using StatsBase: sample, weights
-
-    using OffsetArrays
+    using StatsBase: sample
 
     SEED = 1234
     Dx = 1
     Dy = 1
     K = 10
     t_smooth = 2
-    T = Float64
-    N_particles = 10  # Use small particle number so impact of ref state is significant
+    N_particles = 10
     N_burnin = 1000
     N_sample = 100000
 
@@ -27,35 +21,27 @@
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
     _, _, ys = sample(rng, model, K)
 
-    # Kalman smoother
+    # Kalman smoother ground truth
     state, ks_ll = GeneralisedFilters.smooth(
         rng, model, KalmanSmoother(), ys; t_smooth=t_smooth
     )
 
-    N_steps = N_burnin + N_sample
-    bf = BF(N_particles; threshold=0.6)
+    csmc = CSMC(BF(N_particles; threshold=0.6))
     trajectory_samples = []
-    lls = []
+    lls = Float64[]
 
-    # Run CSMC chain
     let ref_traj = nothing
-        for i in 1:N_steps
-            cb = GeneralisedFilters.DenseAncestorCallback(nothing)
-            bf_state, ll = GeneralisedFilters.filter(
-                rng, model, bf, ys; ref_state=ref_traj, callback=cb
-            )
-            ws = weights(bf_state)
-            sampled_idx = sample(rng, 1:N_particles, ws)
-            ref_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
+        for i in 1:(N_burnin + N_sample)
+            traj, ll = GeneralisedFilters._csmc_sample(rng, model, csmc, ys, ref_traj)
+            ref_traj = traj
             if i > N_burnin
-                push!(trajectory_samples, ref_traj)
+                push!(trajectory_samples, traj)
                 push!(lls, ll)
             end
         end
     end
 
-    # The CSMC estimate of the evidence Z = p(y_{1:T}) is biased but 1 / ̂Z is actually an
-    # unbiased estimate of 1 / Z. See Elements of Sequential Monte Carlo (Section 5.2)
+    # 1/Ẑ is an unbiased estimate of 1/Z (Elements of SMC, Section 5.2)
     log_recip_likelihood_estimate = logsumexp(-lls) - log(length(lls))
 
     csmc_mean = sum(getindex.(trajectory_samples, t_smooth)) / N_sample
@@ -68,14 +54,9 @@ end
 @testitem "RBCSMC" begin
     using GeneralisedFilters
     using StableRNGs
-    using PDMats
-    using LinearAlgebra
-    using Random: randexp
-    using StatsBase: sample, weights
     using StaticArrays
     using Statistics
-
-    using OffsetArrays
+    using StatsBase: sample
 
     SEED = 1234
     D_outer = 1
@@ -84,7 +65,7 @@ end
     K = 5
     t_smooth = 2
     T = Float64
-    N_particles = 10  # Use small particle number so impact of ref state is significant
+    N_particles = 10
     N_burnin = 1000
     N_sample = 10000
 
@@ -93,37 +74,27 @@ end
         rng, D_outer, D_inner, D_obs, T; static_arrays=true
     )
     _, _, ys = sample(rng, full_model, K)
-    # Convert to static arrays
     ys = [SVector{1,T}(y) for y in ys]
 
-    # Kalman smoother
+    # Kalman smoother ground truth
     state, _ = GeneralisedFilters.smooth(
         rng, full_model, KalmanSmoother(), ys; t_smooth=t_smooth
     )
 
-    N_steps = N_burnin + N_sample
-    rbpf = RBPF(BF(N_particles; threshold=0.8), KalmanFilter())
+    csmc = CSMC(RBPF(BF(N_particles; threshold=0.8), KalmanFilter()))
     trajectory_samples = []
 
-    cb = GeneralisedFilters.DenseAncestorCallback(nothing)
     let ref_traj = nothing
-        for i in 1:N_steps
-            bf_state, _ = GeneralisedFilters.filter(
-                rng, hier_model, rbpf, ys; ref_state=ref_traj, callback=cb
-            )
-            ws = weights(bf_state)
-            sampled_idx = sample(rng, 1:N_particles, ws)
-
-            full_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
+        for i in 1:(N_burnin + N_sample)
+            traj, _ = GeneralisedFilters._csmc_sample(rng, hier_model, csmc, ys, ref_traj)
+            ref_traj = traj
             if i > N_burnin
-                push!(trajectory_samples, deepcopy(full_traj))
+                push!(trajectory_samples, deepcopy(traj))
             end
-            # Reference trajectory should only be nonlinear state for RBPF
-            ref_traj = getproperty.(full_traj, :x)
         end
     end
 
-    # Extract inner and outer trajectories
+    # Extract outer trajectories at t_smooth
     x_trajectories = getproperty.(getindex.(trajectory_samples, t_smooth), :x)
 
     # Smooth the inner (z) component using backward_smooth
@@ -131,10 +102,8 @@ end
     z_smoothed_means = Vector{T}(undef, N_sample)
     for i in 1:N_sample
         smoothed_z = trajectory_samples[i][K].z
-
         for t in (K - 1):-1:t_smooth
             filtered_z = trajectory_samples[i][t].z
-            # Pass prev_outer to condition the inner dynamics on the outer trajectory
             smoothed_z = backward_smooth(
                 inner_dyn,
                 KF(),
@@ -144,11 +113,9 @@ end
                 prev_outer=trajectory_samples[i][t].x,
             )
         end
-
         z_smoothed_means[i] = only(smoothed_z.μ)
     end
 
-    # Compare to ground truth
     @test state.μ[1] ≈ only(mean(x_trajectories)) rtol = 1e-2
     @test state.μ[2] ≈ mean(z_smoothed_means) rtol = 1e-3
 end
@@ -158,18 +125,8 @@ end
 @testitem "RBCSMC-AS" begin
     using GeneralisedFilters
     using StableRNGs
-    using PDMats
-    using LinearAlgebra
-    using Random: randexp
-    using StatsBase: sample, weights
-    using StaticArrays
     using Statistics
-    using LogExpFunctions
-
-    import SSMProblems: prior, dyn, obs
-    import GeneralisedFilters: resampler, resample, move, RBState, InformationLikelihood
-
-    using OffsetArrays
+    using StatsBase: sample
 
     SEED = 1234
     D_outer = 1
@@ -188,93 +145,25 @@ end
     )
     _, _, ys = sample(rng, full_model, K)
 
-    # Kalman smoother
+    # Kalman smoother ground truth
     state, _ = GeneralisedFilters.smooth(
         rng, full_model, KalmanSmoother(), ys; t_smooth=t_smooth
     )
 
-    N_steps = N_burnin + N_sample
-    rbpf = RBPF(BF(N_particles; threshold=0.8), KalmanFilter())
+    csmc = CSMCAS(RBPF(BF(N_particles; threshold=0.8), KalmanFilter()))
     trajectory_samples = []
 
-    let ref_traj = nothing,
-        predictive_likelihoods = Vector{InformationLikelihood{Vector{T},PDMat{T,Matrix{T}}}}(
-            undef, K
-        )
-
-        for i in 1:N_steps
-            cb = GeneralisedFilters.DenseAncestorCallback(nothing)
-
-            # Manual filtering with ancestor resampling
-            bf_state = initialise(rng, prior(hier_model), rbpf; ref_state=ref_traj)
-
-            # Post-Init callback
-            cb(hier_model, rbpf, bf_state, ys, PostInit)
-
-            for t in 1:K
-                bf_state = resample(rng, resampler(rbpf), bf_state; ref_state=ref_traj)
-
-                ancestor_idx = nothing
-                if !isnothing(ref_traj)
-                    ref_rb_state = RBState(ref_traj[t], predictive_likelihoods[t])
-                    ancestor_weights = map(bf_state.particles) do particle
-                        ancestor_weight(particle, dyn(hier_model), rbpf, t, ref_rb_state)
-                    end
-                    ancestor_idx = sample(
-                        rng, 1:N_particles, weights(softmax(ancestor_weights))
-                    )
-                end
-
-                bf_state, ll = move(
-                    rng, hier_model, rbpf, t, bf_state, ys[t]; ref_state=ref_traj
-                )
-
-                # Set ancestor index
-                if !isnothing(ref_traj)
-                    bf_state.particles[end] = GeneralisedFilters.Particle(
-                        bf_state.particles[end].state,
-                        bf_state.particles[end].log_w,
-                        ancestor_idx,
-                    )
-                end
-
-                # Manually trigger callback
-                cb(hier_model, rbpf, t, bf_state, ys[t], PostUpdate)
-            end
-
-            ws = weights(bf_state)
-            sampled_idx = sample(rng, 1:N_particles, ws)
-
-            full_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
+    let ref_traj = nothing
+        for i in 1:(N_burnin + N_sample)
+            traj, _ = GeneralisedFilters._csmc_sample(rng, hier_model, csmc, ys, ref_traj)
+            ref_traj = traj
             if i > N_burnin
-                push!(trajectory_samples, deepcopy(full_traj))
-            end
-            # Reference trajectory should only be nonlinear state for RBPF
-            ref_traj = getproperty.(full_traj, :x)
-
-            bip = BackwardInformationPredictor(; initial_jitter=1e-8)
-
-            pred_lik = backward_initialise(rng, hier_model.inner_model.obs, bip, K, ys[K])
-            predictive_likelihoods[K] = deepcopy(pred_lik)
-            for t in (K - 1):-1:1
-                pred_lik = backward_predict(
-                    rng,
-                    hier_model.inner_model.dyn,
-                    bip,
-                    t,
-                    pred_lik;
-                    prev_outer=ref_traj[t],
-                    new_outer=ref_traj[t + 1],
-                )
-                pred_lik = backward_update(
-                    hier_model.inner_model.obs, bip, t, pred_lik, ys[t]
-                )
-                predictive_likelihoods[t] = deepcopy(pred_lik)
+                push!(trajectory_samples, deepcopy(traj))
             end
         end
     end
 
-    # Extract inner and outer trajectories
+    # Extract outer trajectories at t_smooth
     x_trajectories = getproperty.(getindex.(trajectory_samples, t_smooth), :x)
 
     # Smooth the inner (z) component using backward_smooth
@@ -282,10 +171,8 @@ end
     z_smoothed_means = Vector{T}(undef, N_sample)
     for i in 1:N_sample
         smoothed_z = trajectory_samples[i][K].z
-
         for t in (K - 1):-1:t_smooth
             filtered_z = trajectory_samples[i][t].z
-            # Pass prev_outer to condition the inner dynamics on the outer trajectory
             smoothed_z = backward_smooth(
                 inner_dyn,
                 KF(),
@@ -295,11 +182,9 @@ end
                 prev_outer=trajectory_samples[i][t].x,
             )
         end
-
         z_smoothed_means[i] = only(smoothed_z.μ)
     end
 
-    # Compare to ground truth
     @test state.μ[1] ≈ only(mean(x_trajectories)) rtol = 1e-2
     @test state.μ[2] ≈ mean(z_smoothed_means) rtol = 1e-3
 end
@@ -307,14 +192,8 @@ end
 @testitem "Discrete RBCSMC-AS" begin
     using GeneralisedFilters
     using StableRNGs
-    using StatsBase: sample, weights
+    using StatsBase: sample
     using Statistics
-    using LogExpFunctions
-
-    import SSMProblems: prior, dyn, obs
-    import GeneralisedFilters: resampler, resample, move, RBState, DiscreteLikelihood
-
-    using OffsetArrays
 
     SEED = 1234
     K_outer = 3
@@ -334,7 +213,6 @@ end
     # Ground truth: smoothed distribution from joint model
     joint_smoothed, _ = smooth(rng, joint_model, DiscreteSmoother(), ys; t_smooth=t_smooth)
 
-    # Extract marginals from joint smoothed distribution
     true_outer_marginal = zeros(K_outer)
     true_inner_marginal = zeros(K_inner)
     for i in 1:K_outer
@@ -345,71 +223,15 @@ end
         end
     end
 
-    N_steps = N_burnin + N_sample
-    rbpf = RBPF(BF(N_particles; threshold=0.8), DiscreteFilter())
+    csmc = CSMCAS(RBPF(BF(N_particles; threshold=0.8), DiscreteFilter()))
     trajectory_samples = []
 
-    let ref_traj = nothing,
-        predictive_likelihoods = Vector{DiscreteLikelihood{Vector{Float64}}}(undef, T)
-
-        for i in 1:N_steps
-            cb = GeneralisedFilters.DenseAncestorCallback(nothing)
-
-            bf_state = initialise(rng, prior(hier_model), rbpf; ref_state=ref_traj)
-            cb(hier_model, rbpf, bf_state, ys, PostInit)
-
-            for t in 1:T
-                bf_state = resample(rng, resampler(rbpf), bf_state; ref_state=ref_traj)
-
-                ancestor_idx = nothing
-                if !isnothing(ref_traj)
-                    ref_rb_state = RBState(ref_traj[t], predictive_likelihoods[t])
-                    ancestor_weights = map(bf_state.particles) do particle
-                        ancestor_weight(particle, dyn(hier_model), rbpf, t, ref_rb_state)
-                    end
-                    ancestor_idx = sample(
-                        rng, 1:N_particles, weights(softmax(ancestor_weights))
-                    )
-                end
-
-                bf_state, _ = move(
-                    rng, hier_model, rbpf, t, bf_state, ys[t]; ref_state=ref_traj
-                )
-
-                if !isnothing(ref_traj)
-                    bf_state.particles[end] = GeneralisedFilters.Particle(
-                        bf_state.particles[end].state,
-                        bf_state.particles[end].log_w,
-                        ancestor_idx,
-                    )
-                end
-
-                cb(hier_model, rbpf, t, bf_state, ys[t], PostUpdate)
-            end
-
-            ws = weights(bf_state)
-            sampled_idx = sample(rng, 1:N_particles, ws)
-
-            full_traj = GeneralisedFilters.get_ancestry(cb.container, sampled_idx)
+    let ref_traj = nothing
+        for i in 1:(N_burnin + N_sample)
+            traj, _ = GeneralisedFilters._csmc_sample(rng, hier_model, csmc, ys, ref_traj)
+            ref_traj = traj
             if i > N_burnin
-                push!(trajectory_samples, deepcopy(full_traj))
-            end
-            ref_traj = getproperty.(full_traj, :x)
-
-            # Compute backward predictive likelihoods for next iteration
-            bdp = BackwardDiscretePredictor()
-            pred_lik = GeneralisedFilters.backward_initialise(
-                rng, hier_model.inner_model.obs, bdp, T, ys[T]; num_states=K_inner
-            )
-            predictive_likelihoods[T] = deepcopy(pred_lik)
-            for t in (T - 1):-1:1
-                pred_lik = GeneralisedFilters.backward_predict(
-                    rng, hier_model.inner_model.dyn, bdp, t, pred_lik
-                )
-                pred_lik = GeneralisedFilters.backward_update(
-                    hier_model.inner_model.obs, bdp, t, pred_lik, ys[t]
-                )
-                predictive_likelihoods[t] = deepcopy(pred_lik)
+                push!(trajectory_samples, deepcopy(traj))
             end
         end
     end
@@ -453,6 +275,47 @@ end
 
     @test csmc_outer_marginal ≈ true_outer_marginal rtol = 0.05
     @test csmc_inner_marginal ≈ true_inner_marginal rtol = 0.05
+end
+
+## CSMC AbstractMCMC Interface ##############################################################
+
+@testitem "CSMC AbstractMCMC interface" begin
+    using GeneralisedFilters
+    using AbstractMCMC: AbstractMCMC
+    using StableRNGs
+    using StatsBase: sample
+
+    rng = StableRNG(1234)
+    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, 1, 1)
+    _, _, ys = sample(rng, model, 5)
+
+    csmc_model = CSMCModel(model, ys)
+    csmc = CSMC(BF(10))
+
+    # Initial step (unconditional)
+    transition, state = AbstractMCMC.step(rng, csmc_model, csmc)
+    @test transition isa CSMCState
+    @test state isa CSMCState
+    @test length(state.trajectory) == 6  # T+1 elements (indices 0:5)
+
+    # Subsequent step (conditional)
+    transition2, state2 = AbstractMCMC.step(rng, csmc_model, csmc, state)
+    @test state2 isa CSMCState
+    @test length(state2.trajectory) == 6
+
+    # Works with RBPF too
+    _, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
+        rng, 1, 1, 1; static_arrays=false
+    )
+    _, _, _, _, rb_ys = sample(rng, hier_model, 5)
+
+    rb_model = CSMCModel(hier_model, rb_ys)
+    rb_csmc = CSMCAS(RBPF(BF(10; threshold=0.8), KalmanFilter()))
+
+    _, rb_state = AbstractMCMC.step(rng, rb_model, rb_csmc)
+    @test rb_state isa CSMCState
+    _, rb_state2 = AbstractMCMC.step(rng, rb_model, rb_csmc, rb_state)
+    @test rb_state2 isa CSMCState
 end
 
 ## Backward Simulation ######################################################################

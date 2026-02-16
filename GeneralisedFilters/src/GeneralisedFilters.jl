@@ -153,6 +153,9 @@ include("algorithms/rbpf.jl")
 
 include("ancestor_sampling.jl")
 
+# Conditional SMC (particle Gibbs trajectory sampling)
+include("algorithms/csmc.jl")
+
 # Unit-testing helper module
 include("GFTest/GFTest.jl")
 
