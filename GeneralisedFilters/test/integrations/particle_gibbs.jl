@@ -105,80 +105,22 @@ end
     σ²_b = 4.0
 
     # Generate a random hierarchical model and fix everything except the inner drift b
-    _, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
+    full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, Dx, Dz, Dy; static_arrays=true
     )
-    true_b = hier_model.inner_model.dyn.b
-    x0, _, xs, _, ys = SSMProblems.sample(rng, hier_model, T_len)
+    _, _, _, _, ys = SSMProblems.sample(rng, hier_model, T_len)
 
     # Parameterise: θ controls inner dynamics drift b
     fixed = hier_model
-    function build_hier(θ)
-        inner_dyn = GeneralisedFilters.GFTest.InnerDynamics(
-            fixed.inner_model.dyn.A, θ, fixed.inner_model.dyn.C, fixed.inner_model.dyn.Q
-        )
-        return HierarchicalSSM(
-            fixed.outer_prior,
-            fixed.outer_dyn,
-            fixed.inner_model.prior,
-            inner_dyn,
-            fixed.inner_model.obs,
-        )
-    end
+    build_hier(θ) = GeneralisedFilters.GFTest.with_inner_drift(fixed, θ)
 
-    # Augmented KF ground truth: state = [x; z; b] with b as random walk (tiny noise)
-    A_x = GeneralisedFilters.calc_A(hier_model.outer_dyn, 1)
-    b_x = GeneralisedFilters.calc_b(hier_model.outer_dyn, 1)
-    Q_x = Matrix(GeneralisedFilters.calc_Q(hier_model.outer_dyn, 1))
-    A_z = hier_model.inner_model.dyn.A
-    C_z = hier_model.inner_model.dyn.C
-    Q_z = Matrix(hier_model.inner_model.dyn.Q)
-    H_obs = GeneralisedFilters.calc_H(hier_model.inner_model.obs, 1)
-    c_obs = GeneralisedFilters.calc_c(hier_model.inner_model.obs, 1)
-    R_obs = Matrix(GeneralisedFilters.calc_R(hier_model.inner_model.obs, 1))
-
-    μ0_x = GeneralisedFilters.calc_μ0(hier_model.outer_prior)
-    Σ0_x = Matrix(GeneralisedFilters.calc_Σ0(hier_model.outer_prior))
-    μ0_z = GeneralisedFilters.calc_μ0(hier_model.inner_model.prior)
-    Σ0_z = Matrix(GeneralisedFilters.calc_Σ0(hier_model.inner_model.prior))
-
-    D_aug = Dx + Dz + Dz  # [x; z; b]
-    ε = 1e-12
-
-    # A_aug: x' = A_x x + b_x, z' = A_z z + C_z x + b, b' = b
-    A_aug = zeros(D_aug, D_aug)
-    A_aug[1:Dx, 1:Dx] = A_x
-    A_aug[(Dx + 1):(Dx + Dz), 1:Dx] = C_z
-    A_aug[(Dx + 1):(Dx + Dz), (Dx + 1):(Dx + Dz)] = A_z
-    A_aug[(Dx + 1):(Dx + Dz), (Dx + Dz + 1):end] = I(Dz)  # z gets b as offset
-    A_aug[(Dx + Dz + 1):end, (Dx + Dz + 1):end] = I(Dz)   # b is constant
-
-    b_aug = zeros(D_aug)
-    b_aug[1:Dx] = b_x
-
-    Q_aug = zeros(D_aug, D_aug)
-    Q_aug[1:Dx, 1:Dx] = Q_x
-    Q_aug[(Dx + 1):(Dx + Dz), (Dx + 1):(Dx + Dz)] = Q_z
-    Q_aug[(Dx + Dz + 1):end, (Dx + Dz + 1):end] = ε * I(Dz)
-    Q_aug = PDMat(Symmetric(Q_aug))
-
-    H_aug = zeros(Dy, D_aug)
-    H_aug[:, (Dx + 1):(Dx + Dz)] = H_obs
-    R_aug = PDMat(R_obs)
-
-    μ0_aug = vcat(μ0_x, μ0_z, zeros(Dz))
-    Σ0_aug = zeros(D_aug, D_aug)
-    Σ0_aug[1:Dx, 1:Dx] = Σ0_x
-    Σ0_aug[(Dx + 1):(Dx + Dz), (Dx + 1):(Dx + Dz)] = Σ0_z
-    Σ0_aug[(Dx + Dz + 1):end, (Dx + Dz + 1):end] = σ²_b * I(Dz)
-    Σ0_aug = PDMat(Symmetric(Σ0_aug))
-
-    aug_model = create_homogeneous_linear_gaussian_model(
-        μ0_aug, Σ0_aug, A_aug, b_aug, Q_aug, H_aug, c_obs, R_aug
+    # Augmented KF ground truth using full linear Gaussian model with unknown inner drift
+    drift_indices = (Dx + 1):(Dx + Dz)
+    kf_post = GeneralisedFilters.GFTest.augmented_kf_drift_posterior(
+        full_model, ys, drift_indices; σ²_b=σ²_b, ε=1e-12
     )
-    kf_state, _ = GeneralisedFilters.filter(aug_model, KF(), ys)
-    kf_mean = kf_state.μ[(Dx + Dz + 1):end]
-    kf_std = sqrt.(diag(kf_state.Σ)[(Dx + Dz + 1):end])
+    kf_mean = kf_post.mean
+    kf_std = kf_post.std
 
     # Particle Gibbs with RBPF
     prior = MvNormal(zeros(Dz), σ²_b * I)
@@ -250,21 +192,12 @@ end
     _, _, ys = SSMProblems.sample(rng, true_ssm, T_len)
 
     # Augmented KF ground truth
-    A_aug = [a 1.0; 0.0 1.0]
-    b_aug = [0.0, 0.0]
-    Q_aug = PDMat(Symmetric([q² 0.0; 0.0 1e-12]))
-    H_aug = [1.0 0.0]
-    c_aug = [0.0]
-    R_aug = PDMat([r²;;])
-    μ0_aug = [0.0, 0.0]
-    Σ0_aug = PDMat(Symmetric([σ₀² 0.0; 0.0 σ_b²]))
-
-    aug_model = create_homogeneous_linear_gaussian_model(
-        μ0_aug, Σ0_aug, A_aug, b_aug, Q_aug, H_aug, c_aug, R_aug
+    ref_model = build_ssm([0.0])
+    kf_post = GeneralisedFilters.GFTest.augmented_kf_drift_posterior(
+        ref_model, ys, 1; σ²_b=σ_b², ε=1e-12
     )
-    kf_state, _ = GeneralisedFilters.filter(aug_model, KF(), ys)
-    kf_mean = kf_state.μ[2]
-    kf_std = sqrt(kf_state.Σ[2, 2])
+    kf_mean = kf_post.mean[1]
+    kf_std = kf_post.std[1]
 
     # Particle Gibbs
     prior = MvNormal([0.0], [σ_b²;;])

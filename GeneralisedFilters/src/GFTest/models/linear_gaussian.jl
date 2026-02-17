@@ -1,6 +1,8 @@
 using StaticArrays
 import PDMats: PDMat
 
+export augment_drift_model, augmented_kf_drift_posterior
+
 function create_linear_gaussian_model(
     rng::AbstractRNG,
     Dx::Integer,
@@ -405,4 +407,203 @@ function make_nll_func(model, ys, param::Symbol)
     else
         error("Unknown parameter: $param")
     end
+end
+
+"""
+    augment_drift_model(model, drift_indices; σ²_b=4.0, μ_b=nothing, ε=1e-12, static_arrays=nothing)
+
+Construct an augmented linear Gaussian model where selected drift components are treated as
+latent constants. If `drift_indices = [i1, ..., ik]`, then the augmented state is
+`[x; b_unknown]` with `b_unknown' = b_unknown + ϵ`, `ϵ ~ N(0, εI)`.
+
+Returns a named tuple with:
+- `model`: augmented linear Gaussian model
+- `drift_slice`: index range for unknown drift in the augmented state
+- `drift_indices`: validated drift indices in the original state
+"""
+function augment_drift_model(
+    model,
+    drift_indices;
+    σ²_b::Union{Real,AbstractMatrix}=4.0,
+    μ_b::Union{Nothing,AbstractVector}=nothing,
+    ε::Real=1e-12,
+    static_arrays::Union{Nothing,Bool}=nothing,
+)
+    pr = SSMProblems.prior(model)
+    dy = SSMProblems.dyn(model)
+    ob = SSMProblems.obs(model)
+
+    μ0_raw = GeneralisedFilters.calc_μ0(pr)
+    Σ0_raw = GeneralisedFilters.calc_Σ0(pr)
+    A_raw = GeneralisedFilters.calc_A(dy, 1)
+    b_raw = GeneralisedFilters.calc_b(dy, 1)
+    Q_raw = GeneralisedFilters.calc_Q(dy, 1)
+    H_raw = GeneralisedFilters.calc_H(ob, 1)
+    c_raw = GeneralisedFilters.calc_c(ob, 1)
+    R_raw = GeneralisedFilters.calc_R(ob, 1)
+
+    σ²_b_eltype = σ²_b isa Real ? typeof(σ²_b) : eltype(σ²_b)
+    μ_b_eltype = isnothing(μ_b) ? eltype(b_raw) : eltype(μ_b)
+    T = promote_type(
+        eltype(μ0_raw),
+        eltype(Σ0_raw),
+        eltype(A_raw),
+        eltype(b_raw),
+        eltype(Q_raw),
+        eltype(H_raw),
+        eltype(c_raw),
+        eltype(R_raw),
+        σ²_b_eltype,
+        μ_b_eltype,
+        typeof(ε),
+    )
+
+    μ0 = Vector{T}(μ0_raw)
+    Σ0 = Matrix{T}(Σ0_raw)
+    A = Matrix{T}(A_raw)
+    b = Vector{T}(b_raw)
+    Q = Matrix{T}(Q_raw)
+    H = Matrix{T}(H_raw)
+    c = Vector{T}(c_raw)
+    R = Matrix{T}(R_raw)
+
+    Dx = length(μ0)
+    Dy = length(c)
+    idx = _collect_drift_indices(drift_indices)
+    _validate_drift_indices(idx, Dx)
+    K = length(idx)
+
+    μ_b_vec = if isnothing(μ_b)
+        zeros(T, K)
+    else
+        μ_vec = Vector{T}(μ_b)
+        length(μ_vec) == K || throw(ArgumentError("μ_b must have length $K."))
+        μ_vec
+    end
+    Σ_b = _drift_prior_covariance(σ²_b, K, T)
+
+    b_fixed = copy(b)
+    b_fixed[idx] .= zero(T)
+
+    A_aug = zeros(T, Dx + K, Dx + K)
+    A_aug[1:Dx, 1:Dx] = A
+    for (j, i) in enumerate(idx)
+        A_aug[i, Dx + j] = one(T)
+    end
+    @inbounds for j in 1:K
+        A_aug[Dx + j, Dx + j] = one(T)
+    end
+
+    b_aug = vcat(b_fixed, zeros(T, K))
+
+    Q_aug = zeros(T, Dx + K, Dx + K)
+    Q_aug[1:Dx, 1:Dx] = Q
+    @inbounds for j in 1:K
+        Q_aug[Dx + j, Dx + j] = T(ε)
+    end
+
+    H_aug = zeros(T, Dy, Dx + K)
+    H_aug[:, 1:Dx] = H
+
+    μ0_aug = vcat(μ0, μ_b_vec)
+    Σ0_aug = zeros(T, Dx + K, Dx + K)
+    Σ0_aug[1:Dx, 1:Dx] = Σ0
+    Σ0_aug[(Dx + 1):end, (Dx + 1):end] = Σ_b
+
+    use_static = isnothing(static_arrays) ? _has_static_lg_arrays(model) : static_arrays
+
+    μ0_out = _maybe_static_vector(μ0_aug, use_static)
+    A_out = _maybe_static_matrix(A_aug, use_static)
+    b_out = _maybe_static_vector(b_aug, use_static)
+    H_out = _maybe_static_matrix(H_aug, use_static)
+    c_out = _maybe_static_vector(c, use_static)
+    Σ0_out = _maybe_static_matrix((Σ0_aug + Σ0_aug') / 2, use_static)
+    Q_out = _maybe_static_matrix((Q_aug + Q_aug') / 2, use_static)
+    R_out = _maybe_static_matrix((R + R') / 2, use_static)
+
+    aug_model = create_homogeneous_linear_gaussian_model(
+        μ0_out,
+        PDMat(Σ0_out),
+        A_out,
+        b_out,
+        PDMat(Q_out),
+        H_out,
+        c_out,
+        PDMat(R_out),
+    )
+
+    return (model=aug_model, drift_slice=(Dx + 1):(Dx + K), drift_indices=idx)
+end
+
+"""
+    augmented_kf_drift_posterior(model, observations, drift_indices; kwargs...)
+
+Run a Kalman filter on the augmented model from [`augment_drift_model`](@ref) and return
+posterior mean/std for unknown drift components.
+"""
+function augmented_kf_drift_posterior(model, observations, drift_indices; kwargs...)
+    aug = augment_drift_model(model, drift_indices; kwargs...)
+    state, ll = GeneralisedFilters.filter(aug.model, GeneralisedFilters.KF(), observations)
+    Σ = Matrix(state.Σ)
+    μ_post = state.μ[aug.drift_slice]
+    σ_post = sqrt.(diag(Σ)[aug.drift_slice])
+    return (;
+        state,
+        log_likelihood=ll,
+        mean=μ_post,
+        std=σ_post,
+        augmented_model=aug.model,
+        drift_slice=aug.drift_slice,
+    )
+end
+
+function _collect_drift_indices(drift_indices::Integer)
+    return [Int(drift_indices)]
+end
+
+function _collect_drift_indices(drift_indices)
+    return collect(Int, drift_indices)
+end
+
+function _validate_drift_indices(idx::AbstractVector{<:Integer}, Dx::Integer)
+    isempty(idx) && throw(ArgumentError("drift_indices cannot be empty."))
+    any(i -> i < 1 || i > Dx, idx) &&
+        throw(ArgumentError("drift_indices must be between 1 and $Dx."))
+    length(unique(idx)) == length(idx) ||
+        throw(ArgumentError("drift_indices must not contain duplicates."))
+    return nothing
+end
+
+function _drift_prior_covariance(σ²_b::Real, K::Integer, ::Type{T}) where {T}
+    Σ = zeros(T, K, K)
+    @inbounds for i in 1:K
+        Σ[i, i] = T(σ²_b)
+    end
+    return Σ
+end
+
+function _drift_prior_covariance(σ²_b::AbstractMatrix, K::Integer, ::Type{T}) where {T}
+    size(σ²_b) == (K, K) || throw(ArgumentError("σ²_b matrix must have size ($K, $K)."))
+    return Matrix{T}(σ²_b)
+end
+
+function _has_static_lg_arrays(model)
+    return GeneralisedFilters.calc_μ0(SSMProblems.prior(model)) isa StaticArray ||
+           GeneralisedFilters.calc_A(SSMProblems.dyn(model), 1) isa StaticArray ||
+           GeneralisedFilters.calc_H(SSMProblems.obs(model), 1) isa StaticArray
+end
+
+function _maybe_static_vector(x::AbstractVector, static_arrays::Bool)
+    if static_arrays
+        return SVector{length(x),eltype(x)}(x)
+    end
+    return x
+end
+
+function _maybe_static_matrix(X::AbstractMatrix, static_arrays::Bool)
+    if static_arrays
+        nr, nc = size(X)
+        return SMatrix{nr,nc,eltype(X)}(X)
+    end
+    return X
 end
