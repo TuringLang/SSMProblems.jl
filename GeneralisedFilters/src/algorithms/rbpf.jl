@@ -12,6 +12,7 @@ end
 
 num_particles(algo::RBPF) = num_particles(algo.pf)
 resampler(algo::RBPF) = resampler(algo.pf)
+threading_strategy(algo::RBPF) = threading_strategy(algo.pf)
 
 function initialise_particle(
     rng::AbstractRNG, prior::HierarchicalPrior, algo::RBPF, ref_state; kwargs...

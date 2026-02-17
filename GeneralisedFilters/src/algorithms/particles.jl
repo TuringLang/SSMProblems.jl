@@ -3,6 +3,7 @@ export ParticleFilter, PF, AbstractProposal
 export AuxiliaryParticleFilter
 export AbstractLookAheadScore, RepresentativeStateLookAhead
 export PredictiveStatistic, MeanPredictive, ModePredictive, DrawPredictive
+export AbstractThreadingStrategy, SingleThreaded, MultiThreaded
 
 import SSMProblems: distribution, simulate, logdensity
 
@@ -32,6 +33,111 @@ end
 abstract type AbstractParticleFilter <: AbstractFilter end
 function num_particles end
 function resampler end
+function threading_strategy end
+function make_thread_rng end
+
+abstract type AbstractThreadingStrategy end
+struct SingleThreaded <: AbstractThreadingStrategy end
+struct MultiThreaded <: AbstractThreadingStrategy
+    min_batch_size::Int
+    nworkers::Int
+end
+function MultiThreaded(; min_batch_size::Integer=2_048, nworkers::Union{Nothing,Integer}=nothing)
+    if min_batch_size < 1
+        throw(ArgumentError("min_batch_size must be at least 1"))
+    end
+    if !isnothing(nworkers) && (nworkers < 1)
+        throw(ArgumentError("nworkers must be at least 1 when provided"))
+    end
+    nworkers_int = isnothing(nworkers) ? 0 : Int(nworkers)
+    return MultiThreaded(Int(min_batch_size), nworkers_int)
+end
+
+threading_strategy(::AbstractParticleFilter) = SingleThreaded()
+make_thread_rng(::AbstractRNG, seed::UInt64) = Random.Xoshiro(seed)
+make_thread_rng(::StableRNGs.StableRNG, seed::UInt64) = StableRNGs.StableRNG(seed)
+
+function _effective_nworkers(strategy::MultiThreaded)
+    available = Base.Threads.nthreads()
+    if strategy.nworkers == 0
+        return available
+    end
+    return min(strategy.nworkers, available)
+end
+
+function _chunk_bounds(N::Integer, worker::Integer, nworkers::Integer)
+    lo = ((worker - 1) * N) ÷ nworkers + 1
+    hi = (worker * N) ÷ nworkers
+    return lo, hi
+end
+
+function _map_particle_indices(f, ::SingleThreaded, N::Integer)
+    return map(f, 1:N)
+end
+
+function _map_particle_indices(f, strategy::MultiThreaded, N::Integer)
+    if N <= 0
+        return []
+    end
+
+    nworkers = _effective_nworkers(strategy)
+    if (nworkers == 1) || (N < strategy.min_batch_size)
+        return map(f, 1:N)
+    end
+
+    x1 = f(1)
+    xs = Vector{typeof(x1)}(undef, N)
+    xs[1] = x1
+
+    nworkers = min(nworkers, N)
+    @sync for worker in 1:nworkers
+        Base.Threads.@spawn begin
+            lo, hi = _chunk_bounds(N, worker, nworkers)
+            start = max(lo, 2)
+            @inbounds for i in start:hi
+                xs[i] = f(i)
+            end
+        end
+    end
+    return xs
+end
+
+function _map_particle_indices(f, rng::AbstractRNG, ::SingleThreaded, N::Integer)
+    return map(i -> f(rng, i), 1:N)
+end
+
+function _map_particle_indices(
+    f, rng::AbstractRNG, strategy::MultiThreaded, N::Integer
+)
+    if N <= 0
+        return []
+    end
+
+    nworkers = _effective_nworkers(strategy)
+    if (nworkers == 1) || (N < strategy.min_batch_size)
+        return map(i -> f(rng, i), 1:N)
+    end
+
+    nworkers = min(nworkers, N)
+    thread_seeds = rand(rng, UInt64, nworkers)
+    thread_rngs = map(seed -> make_thread_rng(rng, seed), thread_seeds)
+
+    x1 = f(thread_rngs[1], 1)
+    xs = Vector{typeof(x1)}(undef, N)
+    xs[1] = x1
+
+    @sync for worker in 1:nworkers
+        Base.Threads.@spawn begin
+            lo, hi = _chunk_bounds(N, worker, nworkers)
+            start = max(lo, 2)
+            local_rng = thread_rngs[worker]
+            @inbounds for i in start:hi
+                xs[i] = f(local_rng, i)
+            end
+        end
+    end
+    return xs
+end
 
 function initialise(
     rng::AbstractRNG,
@@ -41,9 +147,10 @@ function initialise(
     kwargs...,
 )
     N = num_particles(algo)
-    particles = map(1:N) do i
+    strategy = threading_strategy(algo)
+    particles = _map_particle_indices(rng, strategy, N) do local_rng, i
         ref = !isnothing(ref_state) && i == 1 ? ref_state[0] : nothing
-        initialise_particle(rng, prior, algo, ref; kwargs...)
+        initialise_particle(local_rng, prior, algo, ref; kwargs...)
     end
 
     return ParticleDistribution(particles, TypelessZero())
@@ -59,10 +166,11 @@ function predict(
     ref_state::Union{Nothing,AbstractVector}=nothing,
     kwargs...,
 )
-    particles = map(1:num_particles(algo)) do i
+    strategy = threading_strategy(algo)
+    particles = _map_particle_indices(rng, strategy, num_particles(algo)) do local_rng, i
         particle = state.particles[i]
         ref = !isnothing(ref_state) && i == 1 ? ref_state[iter] : nothing
-        predict_particle(rng, dyn, algo, iter, particle, observation, ref; kwargs...)
+        predict_particle(local_rng, dyn, algo, iter, particle, observation, ref; kwargs...)
     end
 
     # Accumulate the baseline with LSE of weights after prediction (before update)
@@ -81,7 +189,9 @@ function update(
     observation;
     kwargs...,
 )
-    particles = map(state.particles) do particle
+    strategy = threading_strategy(algo)
+    particles = _map_particle_indices(strategy, length(state.particles)) do i
+        particle = state.particles[i]
         update_particle(obs, algo, iter, particle, observation; kwargs...)
     end
     new_state, ll_increment = marginalise!(state, particles)
@@ -89,23 +199,31 @@ function update(
     return new_state, ll_increment
 end
 
-struct ParticleFilter{RS,PT} <: AbstractParticleFilter
+struct ParticleFilter{RS,PT,TS<:AbstractThreadingStrategy} <: AbstractParticleFilter
     N::Int
     resampler::RS
     proposal::PT
+    threading::TS
 end
 
 const PF = ParticleFilter
 
 function ParticleFilter(
-    N::Integer, proposal::PT; threshold::Real=1.0, resampler::AbstractResampler=Systematic()
+    N::Integer,
+    proposal::PT;
+    threshold::Real=1.0,
+    resampler::AbstractResampler=Systematic(),
+    threading::AbstractThreadingStrategy=SingleThreaded(),
 ) where {PT<:AbstractProposal}
     conditional_resampler = ESSResampler(threshold, resampler)
-    return ParticleFilter(N, conditional_resampler, proposal)
+    return ParticleFilter(N, conditional_resampler, proposal, threading)
 end
+
+ParticleFilter(N::Integer, rs, proposal) = ParticleFilter(N, rs, proposal, SingleThreaded())
 
 num_particles(algo::ParticleFilter) = algo.N
 resampler(algo::ParticleFilter) = algo.resampler
+threading_strategy(algo::ParticleFilter) = algo.threading
 
 function initialise_particle(
     rng::AbstractRNG, prior::StatePrior, algo::ParticleFilter, ref_state; kwargs...
@@ -175,13 +293,13 @@ end
 function propogate(
     rng::AbstractRNG,
     dyn,
-    algo::ParticleFilter,
+    algo::ParticleFilter{RS,PT,TS},
     iter::Integer,
     x,
     observation,
     ref_state;
     kwargs...,
-)
+) where {RS,PT<:AbstractProposal,TS}
     # TODO: use a trait to compute the sample and logpdf in one go if distribution is defined
     new_x = if isnothing(ref_state)
         SSMProblems.simulate(rng, algo.proposal, iter, x, observation; kwargs...)
@@ -196,7 +314,7 @@ end
 
 struct LatentProposal <: AbstractProposal end
 
-const BootstrapFilter{RS} = ParticleFilter{RS,LatentProposal}
+const BootstrapFilter{RS,TS} = ParticleFilter{RS,LatentProposal,TS}
 const BF = BootstrapFilter
 BootstrapFilter(N::Integer; kwargs...) = ParticleFilter(N, LatentProposal(); kwargs...)
 
@@ -228,13 +346,13 @@ end
 function propogate(
     rng::AbstractRNG,
     dyn,
-    algo::BootstrapFilter,
+    algo::ParticleFilter{RS,LatentProposal,TS},
     iter::Integer,
     x,
     observation,
     ref_state;
     kwargs...,
-)
+) where {RS,TS}
     new_x = if isnothing(ref_state)
         SSMProblems.simulate(rng, dyn, iter, x; kwargs...)
     else
@@ -316,6 +434,7 @@ end
 
 resampler(algo::AuxiliaryParticleFilter) = resampler(algo.pf)
 num_particles(algo::AuxiliaryParticleFilter) = num_particles(algo.pf)
+threading_strategy(algo::AuxiliaryParticleFilter) = threading_strategy(algo.pf)
 
 function initialise(
     rng::AbstractRNG,
@@ -339,9 +458,11 @@ function step(
     kwargs...,
 )
     # Compute lookahead weights approximating log p(y_{t+1} | x_{t}^(i))
-    log_ηs = map(state.particles) do particle
+    strategy = threading_strategy(algo)
+    log_ηs = _map_particle_indices(rng, strategy, length(state.particles)) do local_rng, i
+        particle = state.particles[i]
         compute_logeta(
-            rng,
+            local_rng,
             algo.weight_strategy,
             model,
             algo.pf,

@@ -18,19 +18,26 @@
     _, _, ys = sample(rng, full_model, 4)
 
     resampler = GeneralisedFilters.GFTest.AlternatingResampler()
-    bf = BF(10^6; resampler=resampler)
-    rbbf = RBPF(bf, KalmanFilter())
+    threading_strategies = (
+        GeneralisedFilters.SingleThreaded(),
+        GeneralisedFilters.MultiThreaded(min_batch_size=1, nworkers=2),
+    )
 
-    rbbf_state, llrbbf = GeneralisedFilters.filter(rng, hier_model, rbbf, ys)
-    xs = getfield.(getfield.(rbbf_state.particles, :state), :x)
-    zs = getfield.(getfield.(rbbf_state.particles, :state), :z)
-    ws = weights(rbbf_state)
+    for threading in threading_strategies
+        bf = BF(10^6; resampler=resampler, threading=threading)
+        rbbf = RBPF(bf, KalmanFilter())
 
-    kf_state, llkf = GeneralisedFilters.filter(rng, full_model, KF(), ys)
+        rbbf_state, llrbbf = GeneralisedFilters.filter(StableRNG(1234), hier_model, rbbf, ys)
+        xs = getfield.(getfield.(rbbf_state.particles, :state), :x)
+        zs = getfield.(getfield.(rbbf_state.particles, :state), :z)
+        ws = weights(rbbf_state)
 
-    @test first(kf_state.μ) ≈ sum(only.(xs) .* ws) rtol = 1e-3
-    @test last(kf_state.μ) ≈ sum(only.(getfield.(zs, :μ)) .* ws) rtol = 1e-3
-    @test llkf ≈ llrbbf atol = 1e-3
+        kf_state, llkf = GeneralisedFilters.filter(StableRNG(1234), full_model, KF(), ys)
+
+        @test first(kf_state.μ) ≈ sum(only.(xs) .* ws) rtol = 1e-3
+        @test last(kf_state.μ) ≈ sum(only.(getfield.(zs, :μ)) .* ws) rtol = 1e-3
+        @test llkf ≈ llrbbf atol = 1e-3
+    end
 end
 
 @testitem "RBPF guided Kalman inner" begin
@@ -47,18 +54,25 @@ end
 
     prop = GeneralisedFilters.GFTest.OverdispersedProposal(dyn(hier_model).outer_dyn, 1.5)
     resampler = GeneralisedFilters.GFTest.AlternatingResampler()
-    gf = ParticleFilter(10^6, prop; resampler=resampler)
-    rbgf = RBPF(gf, KalmanFilter())
-    rbgf_state, llrbgf = GeneralisedFilters.filter(rng, hier_model, rbgf, ys)
-    xs = getfield.(getfield.(rbgf_state.particles, :state), :x)
-    zs = getfield.(getfield.(rbgf_state.particles, :state), :z)
-    ws = weights(rbgf_state)
+    threading_strategies = (
+        GeneralisedFilters.SingleThreaded(),
+        GeneralisedFilters.MultiThreaded(min_batch_size=1, nworkers=2),
+    )
 
-    kf_state, llkf = GeneralisedFilters.filter(rng, full_model, KF(), ys)
+    for threading in threading_strategies
+        gf = ParticleFilter(10^6, prop; resampler=resampler, threading=threading)
+        rbgf = RBPF(gf, KalmanFilter())
+        rbgf_state, llrbgf = GeneralisedFilters.filter(StableRNG(1234), hier_model, rbgf, ys)
+        xs = getfield.(getfield.(rbgf_state.particles, :state), :x)
+        zs = getfield.(getfield.(rbgf_state.particles, :state), :z)
+        ws = weights(rbgf_state)
 
-    @test first(kf_state.μ) ≈ sum(only.(xs) .* ws) rtol = 1e-3
-    @test last(kf_state.μ) ≈ sum(only.(getfield.(zs, :μ)) .* ws) rtol = 1e-3
-    @test llkf ≈ llrbgf atol = 1e-3
+        kf_state, llkf = GeneralisedFilters.filter(StableRNG(1234), full_model, KF(), ys)
+
+        @test first(kf_state.μ) ≈ sum(only.(xs) .* ws) rtol = 1e-3
+        @test last(kf_state.μ) ≈ sum(only.(getfield.(zs, :μ)) .* ws) rtol = 1e-3
+        @test llkf ≈ llrbgf atol = 1e-3
+    end
 end
 
 @testitem "ARBF" begin
@@ -77,19 +91,26 @@ end
     _, _, ys = sample(rng, hier_model, 4)
 
     resampler = GeneralisedFilters.GFTest.AlternatingResampler()
-    bf = BF(10^6; resampler=resampler)
-    rbbf = RBPF(bf, KalmanFilter())
-    arbf = AuxiliaryParticleFilter(rbbf, MeanPredictive())
-    arbf_state, llarbf = GeneralisedFilters.filter(rng, hier_model, arbf, ys)
-    xs = getfield.(getfield.(arbf_state.particles, :state), :x)
-    zs = getfield.(getfield.(arbf_state.particles, :state), :z)
-    ws = weights(arbf_state)
+    threading_strategies = (
+        GeneralisedFilters.SingleThreaded(),
+        GeneralisedFilters.MultiThreaded(min_batch_size=1, nworkers=2),
+    )
 
-    kf_state, llkf = GeneralisedFilters.filter(rng, full_model, KF(), ys)
+    for threading in threading_strategies
+        bf = BF(10^6; resampler=resampler, threading=threading)
+        rbbf = RBPF(bf, KalmanFilter())
+        arbf = AuxiliaryParticleFilter(rbbf, MeanPredictive())
+        arbf_state, llarbf = GeneralisedFilters.filter(StableRNG(1234), hier_model, arbf, ys)
+        xs = getfield.(getfield.(arbf_state.particles, :state), :x)
+        zs = getfield.(getfield.(arbf_state.particles, :state), :z)
+        ws = weights(arbf_state)
 
-    @test first(kf_state.μ) ≈ sum(only.(xs) .* ws) rtol = 1e-2
-    @test last(kf_state.μ) ≈ sum(only.(getfield.(zs, :μ)) .* ws) rtol = 1e-3
-    @test llkf ≈ llarbf atol = 1e-3
+        kf_state, llkf = GeneralisedFilters.filter(StableRNG(1234), full_model, KF(), ys)
+
+        @test first(kf_state.μ) ≈ sum(only.(xs) .* ws) rtol = 1e-2
+        @test last(kf_state.μ) ≈ sum(only.(getfield.(zs, :μ)) .* ws) rtol = 1e-3
+        @test llkf ≈ llarbf atol = 1e-3
+    end
 end
 
 ## RBPF with Discrete Inner Filter ##########################################################
@@ -119,51 +140,60 @@ end
     joint_state, joint_ll = GeneralisedFilters.filter(rng, joint_model, DF(), observations)
 
     # Run RBPF with discrete inner filter
-    bf = BF(N_particles)
-    rbpf = RBPF(bf, DiscreteFilter())
-    rbpf_state, rbpf_ll = GeneralisedFilters.filter(rng, hier_model, rbpf, observations)
+    threading_strategies = (
+        GeneralisedFilters.SingleThreaded(),
+        GeneralisedFilters.MultiThreaded(min_batch_size=1, nworkers=2),
+    )
 
-    # Compare log-likelihoods
-    @test joint_ll ≈ rbpf_ll atol = 0.05
+    for threading in threading_strategies
+        bf = BF(N_particles; threading=threading)
+        rbpf = RBPF(bf, DiscreteFilter())
+        rbpf_state, rbpf_ll = GeneralisedFilters.filter(
+            StableRNG(SEED), hier_model, rbpf, observations
+        )
 
-    # Extract marginals from RBPF
-    ws = weights(rbpf_state)
-    outer_states = getfield.(getfield.(rbpf_state.particles, :state), :x)
-    inner_dists = getfield.(getfield.(rbpf_state.particles, :state), :z)
+        # Compare log-likelihoods
+        @test joint_ll ≈ rbpf_ll atol = 0.05
 
-    # Compute marginal outer distribution from RBPF
-    rbpf_outer_marginal = zeros(K_outer)
-    for (x, w) in zip(outer_states, ws)
-        rbpf_outer_marginal[x] += w
-    end
+        # Extract marginals from RBPF
+        ws = weights(rbpf_state)
+        outer_states = getfield.(getfield.(rbpf_state.particles, :state), :x)
+        inner_dists = getfield.(getfield.(rbpf_state.particles, :state), :z)
 
-    # Compute marginal outer distribution from joint
-    joint_outer_marginal = zeros(K_outer)
-    for i in 1:K_outer
-        for k in 1:K_inner
-            idx = (i - 1) * K_inner + k
-            joint_outer_marginal[i] += joint_state[idx]
+        # Compute marginal outer distribution from RBPF
+        rbpf_outer_marginal = zeros(K_outer)
+        for (x, w) in zip(outer_states, ws)
+            rbpf_outer_marginal[x] += w
         end
-    end
 
-    @test rbpf_outer_marginal ≈ joint_outer_marginal rtol = 0.02
-
-    # Compute marginal inner distribution from RBPF (weighted average of inner distributions)
-    rbpf_inner_marginal = zeros(K_inner)
-    for (z, w) in zip(inner_dists, ws)
-        rbpf_inner_marginal .+= w .* z
-    end
-
-    # Compute marginal inner distribution from joint
-    joint_inner_marginal = zeros(K_inner)
-    for i in 1:K_outer
-        for k in 1:K_inner
-            idx = (i - 1) * K_inner + k
-            joint_inner_marginal[k] += joint_state[idx]
+        # Compute marginal outer distribution from joint
+        joint_outer_marginal = zeros(K_outer)
+        for i in 1:K_outer
+            for k in 1:K_inner
+                idx = (i - 1) * K_inner + k
+                joint_outer_marginal[i] += joint_state[idx]
+            end
         end
-    end
 
-    @test rbpf_inner_marginal ≈ joint_inner_marginal rtol = 0.02
+        @test rbpf_outer_marginal ≈ joint_outer_marginal rtol = 0.02
+
+        # Compute marginal inner distribution from RBPF (weighted average of inner distributions)
+        rbpf_inner_marginal = zeros(K_inner)
+        for (z, w) in zip(inner_dists, ws)
+            rbpf_inner_marginal .+= w .* z
+        end
+
+        # Compute marginal inner distribution from joint
+        joint_inner_marginal = zeros(K_inner)
+        for i in 1:K_outer
+            for k in 1:K_inner
+                idx = (i - 1) * K_inner + k
+                joint_inner_marginal[k] += joint_state[idx]
+            end
+        end
+
+        @test rbpf_inner_marginal ≈ joint_inner_marginal rtol = 0.02
+    end
 end
 
 ## BF on Hierarchical Models ################################################################

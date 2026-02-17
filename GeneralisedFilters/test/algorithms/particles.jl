@@ -14,16 +14,23 @@
     _, _, ys = sample(rng, model, 4)
 
     resampler = GeneralisedFilters.GFTest.AlternatingResampler()
-    bf = BF(10^6; resampler=resampler)
-    bf_state, llbf = GeneralisedFilters.filter(rng, model, bf, ys)
-    kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
+    threading_strategies = (
+        GeneralisedFilters.SingleThreaded(),
+        GeneralisedFilters.MultiThreaded(min_batch_size=1, nworkers=2),
+    )
 
-    xs = getfield.(bf_state.particles, :state)
-    ws = weights(bf_state)
+    for threading in threading_strategies
+        bf = BF(10^6; resampler=resampler, threading=threading)
+        bf_state, llbf = GeneralisedFilters.filter(StableRNG(1234), model, bf, ys)
+        kf_state, llkf = GeneralisedFilters.filter(StableRNG(1234), model, KF(), ys)
 
-    # Compare log-likelihood and states
-    @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-3
-    @test llkf ≈ llbf atol = 1e-3
+        xs = getfield.(bf_state.particles, :state)
+        ws = weights(bf_state)
+
+        # Compare log-likelihood and states
+        @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-3
+        @test llkf ≈ llbf atol = 1e-3
+    end
 end
 
 ## Guided Filter ############################################################################
@@ -41,15 +48,22 @@ end
 
     prop = GeneralisedFilters.GFTest.OptimalProposal(model.dyn, model.obs)
     resampler = GeneralisedFilters.GFTest.AlternatingResampler()
-    gf = ParticleFilter(10^6, prop; resampler=resampler)
-    gf_state, llgf = GeneralisedFilters.filter(rng, model, gf, ys)
-    kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
+    threading_strategies = (
+        GeneralisedFilters.SingleThreaded(),
+        GeneralisedFilters.MultiThreaded(min_batch_size=1, nworkers=2),
+    )
 
-    xs = getfield.(gf_state.particles, :state)
-    ws = weights(gf_state)
+    for threading in threading_strategies
+        gf = ParticleFilter(10^6, prop; resampler=resampler, threading=threading)
+        gf_state, llgf = GeneralisedFilters.filter(StableRNG(1234), model, gf, ys)
+        kf_state, llkf = GeneralisedFilters.filter(StableRNG(1234), model, KF(), ys)
 
-    @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-3
-    @test llkf ≈ llgf atol = 1e-3
+        xs = getfield.(gf_state.particles, :state)
+        ws = weights(gf_state)
+
+        @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-3
+        @test llkf ≈ llgf atol = 1e-3
+    end
 end
 
 ## Auxiliary Bootstrap Filter ###############################################################
@@ -69,14 +83,21 @@ end
     _, _, ys = sample(rng, model, 4)
 
     resampler = ESSResampler(0.8)
-    bf = BF(10^6; resampler=resampler)
-    abf = AuxiliaryParticleFilter(bf, MeanPredictive())
-    abf_state, llabf = GeneralisedFilters.filter(rng, model, abf, ys)
-    kf_state, llkf = GeneralisedFilters.filter(rng, model, KF(), ys)
+    threading_strategies = (
+        GeneralisedFilters.SingleThreaded(),
+        GeneralisedFilters.MultiThreaded(min_batch_size=1, nworkers=2),
+    )
 
-    xs = getfield.(abf_state.particles, :state)
-    ws = weights(abf_state)
+    for threading in threading_strategies
+        bf = BF(10^6; resampler=resampler, threading=threading)
+        abf = AuxiliaryParticleFilter(bf, MeanPredictive())
+        abf_state, llabf = GeneralisedFilters.filter(StableRNG(1234), model, abf, ys)
+        kf_state, llkf = GeneralisedFilters.filter(StableRNG(1234), model, KF(), ys)
 
-    @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
-    @test llkf ≈ llabf atol = 1e-3
+        xs = getfield.(abf_state.particles, :state)
+        ws = weights(abf_state)
+
+        @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
+        @test llkf ≈ llabf atol = 1e-3
+    end
 end

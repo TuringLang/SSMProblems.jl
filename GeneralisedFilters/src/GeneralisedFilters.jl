@@ -6,6 +6,7 @@ import Random: AbstractRNG, default_rng, rand
 import SSMProblems: prior, dyn, obs
 using OffsetArrays
 using SSMProblems
+using StableRNGs
 using StatsBase
 
 # TODO: heavy modules—move to extension
