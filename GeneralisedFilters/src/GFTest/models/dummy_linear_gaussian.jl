@@ -14,7 +14,7 @@
     dynamics, this model can be used in Rao-Blackwellised settings.
 """
 
-export InnerDynamics, create_dummy_linear_gaussian_model
+export InnerDynamics, create_dummy_linear_gaussian_model, with_inner_drift
 
 """
     Inner dynamics of the dummy linear Gaussian model.
@@ -151,4 +151,31 @@ function create_dummy_linear_gaussian_model(
     hier_model = HierarchicalSSM(outer_prior, outer_dyn, inner_prior, inner_dyn, obs)
 
     return full_model, hier_model
+end
+
+"""
+    with_inner_drift(model::HierarchicalSSM, b)
+
+Return a copy of a dummy linear Gaussian `HierarchicalSSM` with inner drift replaced by `b`.
+The helper preserves the existing inner drift container type (e.g. `Vector`/`SVector`).
+"""
+function with_inner_drift(model::HierarchicalSSM, b::AbstractVector)
+    inner_dyn = model.inner_model.dyn
+    b_typed = _convert_like(b, inner_dyn.b)
+    new_inner_dyn = InnerDynamics(inner_dyn.A, b_typed, inner_dyn.C, inner_dyn.Q)
+    return HierarchicalSSM(
+        model.outer_prior,
+        model.outer_dyn,
+        model.inner_model.prior,
+        new_inner_dyn,
+        model.inner_model.obs,
+    )
+end
+
+function _convert_like(x::AbstractVector, template::StaticArrays.StaticVector{N,T}) where {N,T}
+    return SVector{N,T}(x)
+end
+
+function _convert_like(x::AbstractVector, template::AbstractVector{T}) where {T}
+    return Vector{T}(x)
 end

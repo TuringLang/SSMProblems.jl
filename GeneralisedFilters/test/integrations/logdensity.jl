@@ -660,24 +660,8 @@ end
     outer_traj = OffsetVector(vcat([x0], xs), -1)
 
     # Parameterise the model by b (inner dynamics offset)
-    true_b = hier_model.inner_model.dyn.b
     fixed_model = hier_model
-
-    function build_hier(θ)
-        inner_dyn = GeneralisedFilters.GFTest.InnerDynamics(
-            fixed_model.inner_model.dyn.A,
-            θ,
-            fixed_model.inner_model.dyn.C,
-            fixed_model.inner_model.dyn.Q,
-        )
-        return HierarchicalSSM(
-            fixed_model.outer_prior,
-            fixed_model.outer_dyn,
-            fixed_model.inner_model.prior,
-            inner_dyn,
-            fixed_model.inner_model.obs,
-        )
-    end
+    build_hier(θ) = GeneralisedFilters.GFTest.with_inner_drift(fixed_model, θ)
 
     prior = MvNormal(zeros(D_inner), 4.0 * I)
     pssm = ParameterisedSSM(build_hier, ys)
