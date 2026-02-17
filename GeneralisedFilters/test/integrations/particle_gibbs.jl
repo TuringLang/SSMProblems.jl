@@ -1,0 +1,291 @@
+"""Tests for the ParticleGibbs sampler."""
+
+## Smoke test: types and chain output ##########################################################
+
+@testitem "ParticleGibbs: types and chain output" begin
+    using GeneralisedFilters
+    using AbstractMCMC: AbstractMCMC
+    using AdvancedHMC: NUTS
+    using MCMCChains: MCMCChains
+    using StableRNGs
+    using Distributions
+    using PDMats
+    using LinearAlgebra
+    using SSMProblems
+    using ForwardDiff
+
+    rng = StableRNG(1234)
+
+    # Simple 1D model: x_t = a*x_{t-1} + b + noise, y_t = x_t + noise
+    a = 0.8
+    q² = 0.1
+    r² = 0.5
+    σ₀² = 1.0
+
+    function build_ssm(θ)
+        return create_homogeneous_linear_gaussian_model(
+            [0.0],
+            PDMat([σ₀²;;]),
+            [a;;],
+            [θ[1]],
+            PDMat([q²;;]),
+            [1.0;;],
+            [0.0],
+            PDMat([r²;;]),
+        )
+    end
+
+    true_ssm = build_ssm([1.0])
+    _, _, ys = SSMProblems.sample(rng, true_ssm, 5)
+
+    prior = MvNormal([0.0], [4.0;;])
+    pssm = ParameterisedSSM(build_ssm, ys)
+    model = ParticleGibbsModel(prior, pssm)
+    pg = ParticleGibbs(CSMC(BF(10)), NUTS(0.8))
+
+    # Initial step
+    transition, state = AbstractMCMC.step(rng, model, pg; n_adapts=5)
+    @test transition isa GeneralisedFilters.ParticleGibbsTransition
+    @test state isa GeneralisedFilters.ParticleGibbsState
+    @test length(transition.θ) == 1
+    @test haskey(transition.stat, :acceptance_rate)
+    @test haskey(transition.stat, :step_size)
+    @test haskey(transition.stat, :tree_depth)
+
+    # Subsequent step
+    transition2, state2 = AbstractMCMC.step(rng, model, pg, state; n_adapts=5)
+    @test transition2 isa GeneralisedFilters.ParticleGibbsTransition
+    @test state2 isa GeneralisedFilters.ParticleGibbsState
+
+    # Chain output via sample
+    chain = AbstractMCMC.sample(
+        rng, model, pg, 20; n_adapts=10, progress=false, chain_type=MCMCChains.Chains
+    )
+    @test chain isa MCMCChains.Chains
+    @test size(chain, 1) == 20
+    @test length(names(chain, :parameters)) == 1
+
+    # Custom parameter names
+    chain_named = AbstractMCMC.sample(
+        rng,
+        model,
+        pg,
+        20;
+        n_adapts=10,
+        progress=false,
+        chain_type=MCMCChains.Chains,
+        param_names=["b"],
+    )
+    @test :b in names(chain_named, :parameters)
+end
+
+## NUTS: HierarchicalSSM against augmented KF ###################################################
+
+@testitem "ParticleGibbs NUTS: HierarchicalSSM" begin
+    using GeneralisedFilters
+    using AbstractMCMC: AbstractMCMC
+    using AdvancedHMC: NUTS
+    using MCMCChains: MCMCChains
+    using StableRNGs
+    using Distributions
+    using PDMats
+    using LinearAlgebra
+    using Statistics
+    using SSMProblems
+    using Zygote
+
+    rng = StableRNG(42)
+
+    # Dimensions
+    Dx, Dz, Dy = 1, 1, 1
+    T_len = 10
+    N_particles = 50
+    N_iter = 5000
+    N_adapts = 500
+    σ²_b = 4.0
+
+    # Generate a random hierarchical model and fix everything except the inner drift b
+    _, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
+        rng, Dx, Dz, Dy; static_arrays=true
+    )
+    true_b = hier_model.inner_model.dyn.b
+    x0, _, xs, _, ys = SSMProblems.sample(rng, hier_model, T_len)
+
+    # Parameterise: θ controls inner dynamics drift b
+    fixed = hier_model
+    function build_hier(θ)
+        inner_dyn = GeneralisedFilters.GFTest.InnerDynamics(
+            fixed.inner_model.dyn.A, θ, fixed.inner_model.dyn.C, fixed.inner_model.dyn.Q
+        )
+        return HierarchicalSSM(
+            fixed.outer_prior,
+            fixed.outer_dyn,
+            fixed.inner_model.prior,
+            inner_dyn,
+            fixed.inner_model.obs,
+        )
+    end
+
+    # Augmented KF ground truth: state = [x; z; b] with b as random walk (tiny noise)
+    A_x = GeneralisedFilters.calc_A(hier_model.outer_dyn, 1)
+    b_x = GeneralisedFilters.calc_b(hier_model.outer_dyn, 1)
+    Q_x = Matrix(GeneralisedFilters.calc_Q(hier_model.outer_dyn, 1))
+    A_z = hier_model.inner_model.dyn.A
+    C_z = hier_model.inner_model.dyn.C
+    Q_z = Matrix(hier_model.inner_model.dyn.Q)
+    H_obs = GeneralisedFilters.calc_H(hier_model.inner_model.obs, 1)
+    c_obs = GeneralisedFilters.calc_c(hier_model.inner_model.obs, 1)
+    R_obs = Matrix(GeneralisedFilters.calc_R(hier_model.inner_model.obs, 1))
+
+    μ0_x = GeneralisedFilters.calc_μ0(hier_model.outer_prior)
+    Σ0_x = Matrix(GeneralisedFilters.calc_Σ0(hier_model.outer_prior))
+    μ0_z = GeneralisedFilters.calc_μ0(hier_model.inner_model.prior)
+    Σ0_z = Matrix(GeneralisedFilters.calc_Σ0(hier_model.inner_model.prior))
+
+    D_aug = Dx + Dz + Dz  # [x; z; b]
+    ε = 1e-12
+
+    # A_aug: x' = A_x x + b_x, z' = A_z z + C_z x + b, b' = b
+    A_aug = zeros(D_aug, D_aug)
+    A_aug[1:Dx, 1:Dx] = A_x
+    A_aug[(Dx + 1):(Dx + Dz), 1:Dx] = C_z
+    A_aug[(Dx + 1):(Dx + Dz), (Dx + 1):(Dx + Dz)] = A_z
+    A_aug[(Dx + 1):(Dx + Dz), (Dx + Dz + 1):end] = I(Dz)  # z gets b as offset
+    A_aug[(Dx + Dz + 1):end, (Dx + Dz + 1):end] = I(Dz)   # b is constant
+
+    b_aug = zeros(D_aug)
+    b_aug[1:Dx] = b_x
+
+    Q_aug = zeros(D_aug, D_aug)
+    Q_aug[1:Dx, 1:Dx] = Q_x
+    Q_aug[(Dx + 1):(Dx + Dz), (Dx + 1):(Dx + Dz)] = Q_z
+    Q_aug[(Dx + Dz + 1):end, (Dx + Dz + 1):end] = ε * I(Dz)
+    Q_aug = PDMat(Symmetric(Q_aug))
+
+    H_aug = zeros(Dy, D_aug)
+    H_aug[:, (Dx + 1):(Dx + Dz)] = H_obs
+    R_aug = PDMat(R_obs)
+
+    μ0_aug = vcat(μ0_x, μ0_z, zeros(Dz))
+    Σ0_aug = zeros(D_aug, D_aug)
+    Σ0_aug[1:Dx, 1:Dx] = Σ0_x
+    Σ0_aug[(Dx + 1):(Dx + Dz), (Dx + 1):(Dx + Dz)] = Σ0_z
+    Σ0_aug[(Dx + Dz + 1):end, (Dx + Dz + 1):end] = σ²_b * I(Dz)
+    Σ0_aug = PDMat(Symmetric(Σ0_aug))
+
+    aug_model = create_homogeneous_linear_gaussian_model(
+        μ0_aug, Σ0_aug, A_aug, b_aug, Q_aug, H_aug, c_obs, R_aug
+    )
+    kf_state, _ = GeneralisedFilters.filter(aug_model, KF(), ys)
+    kf_mean = kf_state.μ[(Dx + Dz + 1):end]
+    kf_std = sqrt.(diag(kf_state.Σ)[(Dx + Dz + 1):end])
+
+    # Particle Gibbs with RBPF
+    prior = MvNormal(zeros(Dz), σ²_b * I)
+    pssm = ParameterisedSSM(build_hier, ys)
+    model = ParticleGibbsModel(prior, pssm)
+    pg = ParticleGibbs(CSMC(RBPF(BF(N_particles), KF())), NUTS(0.8); adtype=:Zygote)
+
+    chain = AbstractMCMC.sample(
+        rng,
+        model,
+        pg,
+        N_iter;
+        n_adapts=N_adapts,
+        progress=false,
+        chain_type=MCMCChains.Chains,
+        param_names=["b_z"],
+    )
+
+    post_samples = Array(chain[:b_z])[(N_adapts + 1):end]
+
+    @test mean(post_samples) ≈ kf_mean[1] rtol = 1e-1
+    @test std(post_samples) ≈ kf_std[1] rtol = 1e-1
+end
+
+## NUTS: regular SSM against augmented KF ######################################################
+
+@testitem "ParticleGibbs NUTS: regular SSM" begin
+    using GeneralisedFilters
+    using AbstractMCMC: AbstractMCMC
+    using AdvancedHMC: NUTS
+    using MCMCChains: MCMCChains
+    using StableRNGs
+    using Distributions
+    using PDMats
+    using LinearAlgebra
+    using Statistics
+    using SSMProblems
+    using ForwardDiff
+
+    rng = StableRNG(42)
+
+    # Model parameters
+    a = 0.8
+    q² = 0.1
+    r² = 0.5
+    σ₀² = 1.0
+    σ_b² = 4.0
+    T_len = 10
+    N_particles = 50
+    N_iter = 5000
+    N_adapts = 500
+
+    function build_ssm(θ)
+        return create_homogeneous_linear_gaussian_model(
+            [0.0],
+            PDMat([σ₀²;;]),
+            [a;;],
+            [θ[1]],
+            PDMat([q²;;]),
+            [1.0;;],
+            [0.0],
+            PDMat([r²;;]),
+        )
+    end
+
+    # Generate data
+    true_b = 1.5
+    true_ssm = build_ssm([true_b])
+    _, _, ys = SSMProblems.sample(rng, true_ssm, T_len)
+
+    # Augmented KF ground truth
+    A_aug = [a 1.0; 0.0 1.0]
+    b_aug = [0.0, 0.0]
+    Q_aug = PDMat(Symmetric([q² 0.0; 0.0 1e-12]))
+    H_aug = [1.0 0.0]
+    c_aug = [0.0]
+    R_aug = PDMat([r²;;])
+    μ0_aug = [0.0, 0.0]
+    Σ0_aug = PDMat(Symmetric([σ₀² 0.0; 0.0 σ_b²]))
+
+    aug_model = create_homogeneous_linear_gaussian_model(
+        μ0_aug, Σ0_aug, A_aug, b_aug, Q_aug, H_aug, c_aug, R_aug
+    )
+    kf_state, _ = GeneralisedFilters.filter(aug_model, KF(), ys)
+    kf_mean = kf_state.μ[2]
+    kf_std = sqrt(kf_state.Σ[2, 2])
+
+    # Particle Gibbs
+    prior = MvNormal([0.0], [σ_b²;;])
+    pssm = ParameterisedSSM(build_ssm, ys)
+    model = ParticleGibbsModel(prior, pssm)
+    pg = ParticleGibbs(CSMC(BF(N_particles)), NUTS(0.8))
+
+    chain = AbstractMCMC.sample(
+        rng,
+        model,
+        pg,
+        N_iter;
+        n_adapts=N_adapts,
+        progress=false,
+        chain_type=MCMCChains.Chains,
+        param_names=["b"],
+    )
+
+    # Compare posterior statistics (discard warmup)
+    post_samples = Array(chain[Symbol("b")])[(N_adapts + 1):end]
+
+    @test mean(post_samples) ≈ kf_mean rtol = 0.1
+    @test std(post_samples) ≈ kf_std rtol = 0.2
+end
