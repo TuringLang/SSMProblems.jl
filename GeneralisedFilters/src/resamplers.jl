@@ -165,7 +165,7 @@ struct ESSResampler{RS<:AbstractResampler} <: AbstractConditionalResampler
     threshold::Float64
     resampler::RS
     function ESSResampler(threshold, resampler::AbstractResampler=Systematic())
-        return new(threshold, resampler)
+        return new{typeof(resampler)}(threshold, resampler)
     end
 end
 
