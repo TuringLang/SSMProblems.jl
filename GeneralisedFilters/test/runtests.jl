@@ -17,6 +17,7 @@ include("components/kalman_gradient.jl")
 
 # Integration tests
 include("integrations/logdensity.jl")
+include("integrations/particle_gibbs.jl")
 
 # Quality tests
 include("support/type_stability.jl")
