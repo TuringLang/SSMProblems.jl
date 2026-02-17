@@ -522,14 +522,7 @@ function augment_drift_model(
     R_out = _maybe_static_matrix((R + R') / 2, use_static)
 
     aug_model = create_homogeneous_linear_gaussian_model(
-        μ0_out,
-        PDMat(Σ0_out),
-        A_out,
-        b_out,
-        PDMat(Q_out),
-        H_out,
-        c_out,
-        PDMat(R_out),
+        μ0_out, PDMat(Σ0_out), A_out, b_out, PDMat(Q_out), H_out, c_out, PDMat(R_out)
     )
 
     return (model=aug_model, drift_slice=(Dx + 1):(Dx + K), drift_indices=idx)

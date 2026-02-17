@@ -86,6 +86,7 @@ end
     using AbstractMCMC: AbstractMCMC
     using AdvancedHMC: NUTS
     using MCMCChains: MCMCChains
+    using ADTypes: ADTypes
     using StableRNGs
     using Distributions
     using PDMats
@@ -126,7 +127,9 @@ end
     prior = MvNormal(zeros(Dz), σ²_b * I)
     pssm = ParameterisedSSM(build_hier, ys)
     model = ParticleGibbsModel(prior, pssm)
-    pg = ParticleGibbs(CSMC(RBPF(BF(N_particles), KF())), NUTS(0.8); adtype=:Zygote)
+    pg = ParticleGibbs(
+        CSMC(RBPF(BF(N_particles), KF())), NUTS(0.8); adtype=ADTypes.AutoZygote()
+    )
 
     chain = AbstractMCMC.sample(
         rng,
