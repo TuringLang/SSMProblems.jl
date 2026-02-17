@@ -156,6 +156,10 @@ include("ancestor_sampling.jl")
 # Conditional SMC (particle Gibbs trajectory sampling)
 include("algorithms/csmc.jl")
 
+# Integrations (log-density interface for particle Gibbs)
+include("integrations/logdensity.jl")
+include("integrations/kalman_rrule.jl")
+
 # Unit-testing helper module
 include("GFTest/GFTest.jl")
 
