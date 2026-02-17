@@ -255,6 +255,8 @@ function setup_gradient_test(rng::AbstractRNG; D::Int=2, T::Int=3)
     ∂R_total = @SMatrix zeros(D, D)
     ∂A_total = @SMatrix zeros(D, D)
     ∂b_total = @SVector zeros(D)
+    ∂H_total = @SMatrix zeros(D, D)
+    ∂c_total = @SVector zeros(D)
 
     for t in T:-1:1
         ∂μ_pred, ∂Σ_pred = GeneralisedFilters.backward_gradient_update(
@@ -266,6 +268,8 @@ function setup_gradient_test(rng::AbstractRNG; D::Int=2, T::Int=3)
             ∂μ_pred, ∂Σ_pred, μ_prevs[t], Σ_prevs[t], A
         )
         ∂b_total += GeneralisedFilters.gradient_b(∂μ_pred)
+        ∂H_total += GeneralisedFilters.gradient_H(∂μ, ∂Σ, caches[t], caches[t].Σ_pred, H)
+        ∂c_total += GeneralisedFilters.gradient_c(∂μ, caches[t])
         ∂μ, ∂Σ = GeneralisedFilters.backward_gradient_predict(∂μ_pred, ∂Σ_pred, A)
     end
 
@@ -292,6 +296,8 @@ function setup_gradient_test(rng::AbstractRNG; D::Int=2, T::Int=3)
         ∂R_total,
         ∂A_total,
         ∂b_total,
+        ∂H_total,
+        ∂c_total,
         ∂μ0,
         ∂Σ0,
     )
@@ -358,6 +364,23 @@ function make_nll_func(model, ys, param::Symbol)
         return function (x)
             m = GeneralisedFilters.create_homogeneous_linear_gaussian_model(
                 μ0, Σ0, A, x, Q, H, c, R
+            )
+            _, ll = GeneralisedFilters.filter(m, GeneralisedFilters.KF(), ys)
+            return -ll
+        end
+    elseif param == :H
+        return function (x)
+            H_new = reshape(x, Dy, Dx)
+            m = GeneralisedFilters.create_homogeneous_linear_gaussian_model(
+                μ0, Σ0, A, b, Q, H_new, c, R
+            )
+            _, ll = GeneralisedFilters.filter(m, GeneralisedFilters.KF(), ys)
+            return -ll
+        end
+    elseif param == :c
+        return function (x)
+            m = GeneralisedFilters.create_homogeneous_linear_gaussian_model(
+                μ0, Σ0, A, b, Q, H, x, R
             )
             _, ll = GeneralisedFilters.filter(m, GeneralisedFilters.KF(), ys)
             return -ll
