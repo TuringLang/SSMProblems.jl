@@ -15,20 +15,22 @@ trajectory update (conditional SMC).
 # Fields
 - `csmc::CS`: Conditional SMC sampler for trajectory updates (e.g., `CSMCAS(RBPF(BF(200), KF()))`)
 - `param::PS`: Parameter sampler (e.g., `AdvancedHMC.NUTS(0.8)`)
-- `adtype::ADT`: AD backend for gradient computation. `nothing` uses AdvancedHMC's default
+- `adtype::ADT`: AD backend (`ADTypes.AbstractADType`). `nothing` uses AdvancedHMC's default
   (ForwardDiff). For HierarchicalSSM models, specify a reverse-mode backend that uses
-  ChainRules (e.g., `:Zygote`). Requires the corresponding package to be loaded.
+  ChainRules (e.g., `AutoZygote()`). Requires the corresponding package to be loaded.
 
 # Examples
 ```julia
+
 # Regular SSM
 ParticleGibbs(CSMC(BF(100)), NUTS(0.8))
 
 # Hierarchical SSM (needs reverse-mode AD for KF rrule)
-ParticleGibbs(CSMCAS(RBPF(BF(200), KF())), NUTS(0.8); adtype=:Zygote)
+ParticleGibbs(CSMCAS(RBPF(BF(200), KF())), NUTS(0.8); adtype=AutoZygote())
 ```
 """
-struct ParticleGibbs{CS<:ConditionalSMC,PS,ADT} <: AbstractMCMC.AbstractSampler
+struct ParticleGibbs{CS<:ConditionalSMC,PS,ADT<:Union{Nothing,ADTypes.AbstractADType}} <:
+       AbstractMCMC.AbstractSampler
     csmc::CS
     param::PS
     adtype::ADT
@@ -118,7 +120,7 @@ function _create_log_density_model(
             ArgumentError(
                 "HierarchicalSSM models require a reverse-mode AD backend for gradient " *
                 "computation (the ChainRules rrule on kf_loglikelihood is not picked up " *
-                "by ForwardDiff). Specify `adtype=Val(:Zygote)` (or another reverse-mode " *
+                "by ForwardDiff). Specify `adtype=AutoZygote()` (or another reverse-mode " *
                 "backend) when constructing ParticleGibbs, and load the corresponding " *
                 "package (e.g., `using Zygote`).",
             ),
@@ -128,7 +130,9 @@ function _create_log_density_model(
     return AbstractMCMC.LogDensityModel(ld)
 end
 
-function _create_log_density_model(model::ParticleGibbsModel, af, trajectory, adtype)
+function _create_log_density_model(
+    model::ParticleGibbsModel, af, trajectory, adtype::ADTypes.AbstractADType
+)
     ld = if isnothing(af)
         SSMParameterLogDensity(model.prior, model.param_model, Ref(trajectory))
     else

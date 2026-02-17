@@ -172,7 +172,9 @@ function with_inner_drift(model::HierarchicalSSM, b::AbstractVector)
     )
 end
 
-function _convert_like(x::AbstractVector, template::StaticArrays.StaticVector{N,T}) where {N,T}
+function _convert_like(
+    x::AbstractVector, template::StaticArrays.StaticVector{N,T}
+) where {N,T}
     return SVector{N,T}(x)
 end
 
