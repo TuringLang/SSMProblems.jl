@@ -151,6 +151,7 @@ include("algorithms/kalman.jl")
 include("algorithms/srkf.jl")
 include("algorithms/kalman_gradient.jl")
 include("algorithms/forward.jl")
+include("algorithms/discrete_gradient.jl")
 include("algorithms/rbpf.jl")
 
 include("ancestor_sampling.jl")

@@ -14,6 +14,7 @@ include("algorithms/csmc.jl")
 # Component tests
 include("components/resamplers.jl")
 include("components/kalman_gradient.jl")
+include("components/discrete_gradient.jl")
 
 # Integration tests
 include("integrations/logdensity.jl")

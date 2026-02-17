@@ -37,16 +37,10 @@ function update(
     observation;
     kwargs...,
 )
-    # Compute emission probability vector
-    # TODO: should we define density as part of the interface or run the whole algorithm in
-    # log space?
-    b = map(
-        x -> exp(SSMProblems.logdensity(obs, step, x, observation; kwargs...)),
-        eachindex(states),
+    filtered_states, ll, _ = update_with_cache(
+        obs, filter, step, states, observation; kwargs...
     )
-    filtered_states = b .* states
-    likelihood = sum(filtered_states)
-    return (filtered_states / likelihood), log(likelihood)
+    return filtered_states, ll
 end
 
 ## BACKWARD DISCRETE PREDICTOR #############################################################
