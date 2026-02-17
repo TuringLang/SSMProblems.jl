@@ -208,29 +208,35 @@ function gradient_b(∂μ_pred::AbstractVector)
 end
 
 """
-    gradient_H(∂μ_filt, ∂Σ_filt, cache, Σ_pred)
+    gradient_H(∂μ_filt, ∂Σ_filt, cache, Σ_pred, H)
 
 Compute gradient of NLL w.r.t. observation matrix H.
 
-Derived via chain rule through z = y - H*μ_pred - c, S = H*Σ_pred*H' + R, and the update.
+Derived via chain rule using the information form P_filt⁻¹ = P_pred⁻¹ + H'R⁻¹H to decouple
+P_filt from K, then tracing H's effect through:
+- NLL local term (via z and S)
+- Filtered mean (via z = y - Hμ_pred - c, and K = P_filt H' R⁻¹)
+- Filtered covariance (via the information form)
 """
 function gradient_H(
-    ∂μ_filt::AbstractVector, ∂Σ_filt::AbstractMatrix, cache::KalmanGradientCache, Σ_pred
+    ∂μ_filt::AbstractVector, ∂Σ_filt::AbstractMatrix, cache::KalmanGradientCache, Σ_pred, H
 )
-    μ_pred, z, S, K, I_KH = cache.μ_pred, cache.z, cache.S, cache.K, cache.I_KH
+    μ_pred, μ_filt, z, S, K, I_KH = cache.μ_pred,
+    cache.μ_filt, cache.z, cache.S, cache.K,
+    cache.I_KH
     S_inv_z = S \ z
-    S_inv = S \ I
+    S_inv = inv(S)
+    P_filt = I_KH * Σ_pred
 
     # Local NLL derivative: l = 0.5*(log|S| + z'S⁻¹z)
-    # ∂l/∂H = S⁻¹*H*Σ_pred - S⁻¹*z*μ_pred' - S⁻¹*z*z'*S⁻¹*H*Σ_pred
-    ∂l_∂H = S_inv * Σ_pred - S_inv_z * μ_pred' - (S_inv_z * S_inv_z') * Σ_pred
+    ∂l_∂H = S_inv * H * Σ_pred - S_inv_z * μ_pred' - (S_inv_z * S_inv_z') * H * Σ_pred
 
-    # Contribution through filtered mean: μ_filt = μ_pred + K*z
-    # ∂z/∂H = -μ_pred' (outer product form for each element)
-    ∂via_μ = -K' * ∂μ_filt * μ_pred'
+    # Contribution through filtered mean:
+    # δμ_filt = P_filt*δH'*S⁻¹*z - K*δH*μ_filt
+    ∂via_μ = S_inv_z * ∂μ_filt' * P_filt - K' * ∂μ_filt * μ_filt'
 
-    # Contribution through filtered covariance via I_KH
-    ∂via_Σ = -K' * ∂Σ_filt * I_KH * μ_pred' - I_KH' * ∂Σ_filt * K * μ_pred'
+    # Contribution through filtered covariance (information form)
+    ∂via_Σ = -2 * K' * ∂Σ_filt * P_filt
 
     return ∂l_∂H + ∂via_μ + ∂via_Σ
 end

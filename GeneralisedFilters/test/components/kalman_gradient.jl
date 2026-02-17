@@ -79,6 +79,45 @@ end
     @test s.b isa SVector{2,Float64}
 end
 
+@testitem "Kalman gradient: ∂H" begin
+    using GeneralisedFilters
+    using FiniteDifferences
+    using LinearAlgebra
+    using PDMats
+    using StableRNGs
+    using StaticArrays
+    using SSMProblems
+
+    rng = StableRNG(1234)
+    s = GeneralisedFilters.GFTest.setup_gradient_test(rng)
+    fdm = central_fdm(5, 1)
+
+    nll_H = GeneralisedFilters.GFTest.make_nll_func(s.model, s.ys, :H)
+    H_vec = vec(Matrix(s.H))
+    ∂H_fd = reshape(FiniteDifferences.grad(fdm, nll_H, H_vec)[1], s.D, s.D)
+    @test Matrix(s.∂H_total) ≈ ∂H_fd rtol = 1e-4
+    @test s.H isa SMatrix{2,2,Float64,4}
+end
+
+@testitem "Kalman gradient: ∂c" begin
+    using GeneralisedFilters
+    using FiniteDifferences
+    using LinearAlgebra
+    using PDMats
+    using StableRNGs
+    using StaticArrays
+    using SSMProblems
+
+    rng = StableRNG(1234)
+    s = GeneralisedFilters.GFTest.setup_gradient_test(rng)
+    fdm = central_fdm(5, 1)
+
+    nll_c = GeneralisedFilters.GFTest.make_nll_func(s.model, s.ys, :c)
+    ∂c_fd = FiniteDifferences.grad(fdm, nll_c, Vector(s.c))[1]
+    @test Vector(s.∂c_total) ≈ ∂c_fd rtol = 1e-4
+    @test s.c isa SVector{2,Float64}
+end
+
 @testitem "Kalman gradient: ∂μ0" begin
     using GeneralisedFilters
     using FiniteDifferences
