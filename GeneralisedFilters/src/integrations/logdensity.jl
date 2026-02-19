@@ -74,15 +74,18 @@ Dispatches on the filter type to select the appropriate algorithm.
 function inner_loglikelihood end
 
 """
-    inner_loglikelihood(af::KalmanFilter, inner_model, outer_trajectory, observations)
+    inner_loglikelihood(af::KalmanFilter, inner_model, states, observations)
 
 KalmanFilter specialization: extracts linear-Gaussian parameters at each timestep and
 delegates to `kf_loglikelihood`.
+
+`states` is a 1-indexed vector with `states[1] = u₀` and `states[t+1] = uₜ`.
+For OffsetVector trajectories (0-indexed), a converting wrapper is provided.
 """
 function inner_loglikelihood(
     ::KalmanFilter,
     inner_model::StateSpaceModel,
-    outer_trajectory,
+    states::AbstractVector,
     observations::AbstractVector,
 )
     T = length(observations)
@@ -90,29 +93,30 @@ function inner_loglikelihood(
     inner_obs = inner_model.obs
     inner_pr = inner_model.prior
 
-    μ0 = calc_μ0(inner_pr; new_outer=outer_trajectory[0])
-    Σ0 = calc_Σ0(inner_pr; new_outer=outer_trajectory[0])
+    μ0 = calc_μ0(inner_pr; new_outer=states[1])
+    Σ0 = calc_Σ0(inner_pr; new_outer=states[1])
 
-    As = map(1:T) do t
-        calc_A(inner_dyn, t; prev_outer=outer_trajectory[t - 1], new_outer=outer_trajectory[t])
-    end
-    bs = map(1:T) do t
-        calc_b(inner_dyn, t; prev_outer=outer_trajectory[t - 1], new_outer=outer_trajectory[t])
-    end
-    Qs = map(1:T) do t
-        calc_Q(inner_dyn, t; prev_outer=outer_trajectory[t - 1], new_outer=outer_trajectory[t])
-    end
-    Hs = map(1:T) do t
-        calc_H(inner_obs, t; new_outer=outer_trajectory[t])
-    end
-    cs = map(1:T) do t
-        calc_c(inner_obs, t; new_outer=outer_trajectory[t])
-    end
-    Rs = map(1:T) do t
-        calc_R(inner_obs, t; new_outer=outer_trajectory[t])
-    end
+    As = map(t -> calc_A(inner_dyn, t; prev_outer=states[t], new_outer=states[t + 1]), 1:T)
+    bs = map(t -> calc_b(inner_dyn, t; prev_outer=states[t], new_outer=states[t + 1]), 1:T)
+    Qs = map(t -> calc_Q(inner_dyn, t; prev_outer=states[t], new_outer=states[t + 1]), 1:T)
+    Hs = map(t -> calc_H(inner_obs, t; new_outer=states[t + 1]), 1:T)
+    cs = map(t -> calc_c(inner_obs, t; new_outer=states[t + 1]), 1:T)
+    Rs = map(t -> calc_R(inner_obs, t; new_outer=states[t + 1]), 1:T)
 
     return kf_loglikelihood(μ0, Σ0, As, bs, Qs, Hs, cs, Rs, observations)
+end
+
+# Wrapper for OffsetVector trajectories (0-indexed), used by trajectory_logdensity.
+function inner_loglikelihood(
+    af::KalmanFilter,
+    inner_model::StateSpaceModel,
+    outer_trajectory::OffsetVector,
+    observations::AbstractVector,
+)
+    T = length(observations)
+    return inner_loglikelihood(
+        af, inner_model, [outer_trajectory[t] for t in 0:T], observations
+    )
 end
 
 ## KF LOG-LIKELIHOOD ###########################################################################
@@ -147,14 +151,8 @@ function kf_loglikelihood(μ0, Σ0, As, bs, Qs, Hs, cs, Rs, ys)
     ll = zero(eltype(μ0))
 
     for t in 1:T
-        # Predict
-        μ, Σ = params(state)
-        μ̂ = As[t] * μ + bs[t]
-        Σ̂ = X_A_Xt(Σ, As[t]) + Qs[t]
-        state = MvNormal(μ̂, Σ̂)
-
-        # Update
-        state, ll_inc = kalman_update(state, (Hs[t], cs[t], Rs[t]), ys[t], nothing)
+        state = kalman_predict(state, (As[t], bs[t], Qs[t]))
+        state, ll_inc, _ = _kalman_update_cached(state, Hs[t], cs[t], Rs[t], ys[t], nothing)
         ll += ll_inc
     end
 
