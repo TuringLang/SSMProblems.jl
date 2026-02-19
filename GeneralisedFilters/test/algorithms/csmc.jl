@@ -49,6 +49,55 @@
     @test log_recip_likelihood_estimate ≈ -ks_ll rtol = 1e-3
 end
 
+## Ancestor Sampling CSMC ##################################################################
+
+@testitem "CSMC-AS" begin
+    using GeneralisedFilters
+    using StableRNGs
+    using LogExpFunctions: logsumexp
+    using StatsBase: sample
+
+    SEED = 1234
+    Dx = 1
+    Dy = 1
+    K = 10
+    t_smooth = 2
+    N_particles = 10
+    N_burnin = 1000
+    N_sample = 100000
+
+    rng = StableRNG(SEED)
+    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
+    _, _, ys = sample(rng, model, K)
+
+    # Kalman smoother ground truth
+    state, ks_ll = GeneralisedFilters.smooth(
+        rng, model, KalmanSmoother(), ys; t_smooth=t_smooth
+    )
+
+    csmc = CSMCAS(BF(N_particles; threshold=0.6))
+    trajectory_samples = []
+    lls = Float64[]
+
+    let ref_traj = nothing
+        for i in 1:(N_burnin + N_sample)
+            traj, ll = GeneralisedFilters._csmc_sample(rng, model, csmc, ys, ref_traj)
+            ref_traj = traj
+            if i > N_burnin
+                push!(trajectory_samples, traj)
+                push!(lls, ll)
+            end
+        end
+    end
+
+    # 1/Ẑ is an unbiased estimate of 1/Z (Elements of SMC, Section 5.2)
+    log_recip_likelihood_estimate = logsumexp(-lls) - log(length(lls))
+
+    csmc_mean = sum(getindex.(trajectory_samples, t_smooth)) / N_sample
+    @test csmc_mean ≈ state.μ rtol = 1e-3
+    @test log_recip_likelihood_estimate ≈ -ks_ll rtol = 1e-3
+end
+
 ## Rao-Blackwellised CSMC ###################################################################
 
 @testitem "RBCSMC" begin
@@ -333,6 +382,7 @@ end
     using StableRNGs
     using StatsBase: sample
     using Statistics
+    using LogExpFunctions: logsumexp
 
     SEED = 1234
     Dx = 1
@@ -340,30 +390,39 @@ end
     K = 5
     t_smooth = 3
     N_particles = 50
-    N_trajectories = 1000
+    N_burnin = 200
+    N_sample = 800
 
     rng = StableRNG(SEED)
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
     _, _, ys = sample(rng, model, K)
 
     # Kalman smoother ground truth
-    ks_state, _ = GeneralisedFilters.smooth(
+    ks_state, ks_ll = GeneralisedFilters.smooth(
         rng, model, KalmanSmoother(), ys; t_smooth=t_smooth
     )
 
     csmc = CSMCBS(BF(N_particles))
     trajectory_samples = []
+    lls = Float64[]
 
     let ref_traj = nothing
-        for i in 1:N_trajectories
-            traj, _ = GeneralisedFilters._csmc_sample(rng, model, csmc, ys, ref_traj)
+        for i in 1:(N_burnin + N_sample)
+            traj, ll = GeneralisedFilters._csmc_sample(rng, model, csmc, ys, ref_traj)
             ref_traj = traj
-            push!(trajectory_samples, traj)
+            if i > N_burnin
+                push!(trajectory_samples, traj)
+                push!(lls, ll)
+            end
         end
     end
 
+    # 1/Ẑ is an unbiased estimate of 1/Z (Elements of SMC, Section 5.2)
+    log_recip_likelihood_estimate = logsumexp(-lls) - log(length(lls))
+
     bs_mean = mean(first.(getindex.(trajectory_samples, t_smooth)))
     @test bs_mean ≈ only(ks_state.μ) rtol = 5e-2
+    @test log_recip_likelihood_estimate ≈ -ks_ll rtol = 1e-2
 end
 
 @testitem "RBCSMC-BS" begin

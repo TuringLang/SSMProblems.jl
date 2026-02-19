@@ -254,6 +254,7 @@ function _csmc_sample(
     state = initialise(rng, prior(model), pf; ref_state)
     tree = _init_tree(state)
 
+    ll = zero(eltype(log_weights(state)))
     for t in 1:K
         # Ancestor sampling for the reference particle
         if !isnothing(ref_state)
@@ -272,13 +273,14 @@ function _csmc_sample(
             )
         end
 
-        state, _ = move(rng, model, pf, t, state, observations[t]; ref_state)
+        state, ll_inc = move(rng, model, pf, t, state, observations[t]; ref_state)
+        ll += ll_inc
 
         _update_tree!(tree, state)
     end
 
     trajectory = _sample_trajectory(rng, tree, state)
-    return trajectory, zero(eltype(log_weights(state)))
+    return trajectory, ll
 end
 
 ## BACKWARD SIMULATION HELPERS #############################################################
