@@ -142,12 +142,10 @@ function AbstractMCMC.step(
 
     # 6. Initial parameter step
     θ = cond_vi_linked[:]
-    nuts_transition, nuts_state = AbstractMCMC.step(
-        rng, ld_model, pg.param; initial_params=θ, kwargs...
-    )
+    _, param_state = AbstractMCMC.step(rng, ld_model, pg.param; initial_params=θ, kwargs...)
 
     # 7. Update VarInfo with new parameters, discover new SSM
-    θ_new = nuts_transition.z.θ
+    θ_new = AbstractMCMC.getparams(param_state)
     param_vals = _recover_params(cond_vi_linked, cond_model, θ_new)
     for (k, v) in pairs(param_vals)
         vn = DynamicPPL.VarName{k}()
@@ -167,10 +165,9 @@ function AbstractMCMC.step(
     vi = DynamicPPL.setindex!!(vi, traj_flat_new, traj_vn)
     vi = last(DynamicPPL.evaluate!!(model, vi))
 
-    stat = _extract_stat(nuts_transition)
-    transition = ParticleGibbsTransition(θ_new, stat)
+    transition = ParticleGibbsTransition(θ_new, AbstractMCMC.getstats(param_state))
     state = ParticleGibbsTuringState(
-        vi, trajectory_new, traj_vn, nuts_state, cond_vi_linked
+        vi, trajectory_new, traj_vn, param_state, cond_vi_linked
     )
 
     return transition, state
@@ -201,13 +198,13 @@ function AbstractMCMC.step(
     ldf, cond_vi_linked = _make_conditioned_ldf(cond_model, vi, traj_vn, pg.adtype)
     ld_model = AbstractMCMC.LogDensityModel(ldf)
 
-    # 4. Parameter step (preserves NUTS adaptation via state.param_state)
-    nuts_transition, nuts_state = AbstractMCMC.step(
+    # 4. Parameter step (preserves adaptation via state.param_state)
+    _, param_state = AbstractMCMC.step(
         rng, ld_model, pg.param, state.param_state; kwargs...
     )
 
     # 5. Extract new θ and update VarInfo
-    θ_new = nuts_transition.z.θ
+    θ_new = AbstractMCMC.getparams(param_state)
     param_vals = _recover_params(cond_vi_linked, cond_model, θ_new)
     for (k, v) in pairs(param_vals)
         vn = DynamicPPL.VarName{k}()
@@ -227,10 +224,9 @@ function AbstractMCMC.step(
     vi = DynamicPPL.setindex!!(vi, traj_flat_new, traj_vn)
     vi = last(DynamicPPL.evaluate!!(model, vi))
 
-    stat = _extract_stat(nuts_transition)
-    transition = ParticleGibbsTransition(θ_new, stat)
+    transition = ParticleGibbsTransition(θ_new, AbstractMCMC.getstats(param_state))
     new_state = ParticleGibbsTuringState(
-        vi, trajectory_new, traj_vn, nuts_state, cond_vi_linked
+        vi, trajectory_new, traj_vn, param_state, cond_vi_linked
     )
 
     return transition, new_state

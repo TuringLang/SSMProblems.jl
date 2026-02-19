@@ -1,4 +1,3 @@
-using AdvancedHMC: AdvancedHMC
 using LogDensityProblemsAD: LogDensityProblemsAD
 using MCMCChains: MCMCChains
 
@@ -167,13 +166,11 @@ function AbstractMCMC.step(
     outer_traj = _outer_trajectory(trajectory, af)
     ld_model = _create_log_density_model(model, af, outer_traj, pg.adtype)
 
-    # Run initial NUTS step
-    nuts_transition, nuts_state = AbstractMCMC.step(
-        rng, ld_model, pg.param; initial_params=θ, kwargs...
-    )
+    # Run initial parameter step
+    _, param_state = AbstractMCMC.step(rng, ld_model, pg.param; initial_params=θ, kwargs...)
 
     # Extract new θ and run CSMC
-    θ_new = nuts_transition.z.θ
+    θ_new = AbstractMCMC.getparams(param_state)
     ssm_new = model.param_model.build(θ_new)
     trajectory_new, _ = _csmc_sample(
         rng, ssm_new, pg.csmc, model.param_model.observations, trajectory
@@ -183,9 +180,8 @@ function AbstractMCMC.step(
     traj_ref = _get_traj_ref(ld_model)
     traj_ref[] = _outer_trajectory(trajectory_new, af)
 
-    stat = _extract_stat(nuts_transition)
-    transition = ParticleGibbsTransition(θ_new, stat)
-    state = ParticleGibbsState(θ_new, trajectory_new, nuts_state, ld_model)
+    transition = ParticleGibbsTransition(θ_new, AbstractMCMC.getstats(param_state))
+    state = ParticleGibbsState(θ_new, trajectory_new, param_state, ld_model)
 
     return transition, state
 end
@@ -202,35 +198,22 @@ function AbstractMCMC.step(
     traj_ref = _get_traj_ref(state.log_density)
     traj_ref[] = _outer_trajectory(state.trajectory, af)
 
-    # Run NUTS step (Hamiltonian is reconstructed from model, picks up updated Ref)
-    nuts_transition, nuts_state = AbstractMCMC.step(
+    # Run parameter step (picks up updated trajectory Ref)
+    _, param_state = AbstractMCMC.step(
         rng, state.log_density, pg.param, state.param_state; kwargs...
     )
 
     # Extract new θ and run CSMC (pass full trajectory for conditioning)
-    θ_new = nuts_transition.z.θ
+    θ_new = AbstractMCMC.getparams(param_state)
     ssm_new = model.param_model.build(θ_new)
     trajectory_new, _ = _csmc_sample(
         rng, ssm_new, pg.csmc, model.param_model.observations, state.trajectory
     )
 
-    stat = _extract_stat(nuts_transition)
-    transition = ParticleGibbsTransition(θ_new, stat)
-    new_state = ParticleGibbsState(θ_new, trajectory_new, nuts_state, state.log_density)
+    transition = ParticleGibbsTransition(θ_new, AbstractMCMC.getstats(param_state))
+    new_state = ParticleGibbsState(θ_new, trajectory_new, param_state, state.log_density)
 
     return transition, new_state
-end
-
-## DIAGNOSTICS EXTRACTION #####################################################################
-
-function _extract_stat(nuts_transition::AdvancedHMC.Transition)
-    tstat = nuts_transition.stat
-    return (;
-        acceptance_rate=tstat.acceptance_rate,
-        step_size=tstat.step_size,
-        tree_depth=tstat.tree_depth,
-        numerical_error=tstat.numerical_error,
-    )
 end
 
 ## CHAIN OUTPUT ###############################################################################
