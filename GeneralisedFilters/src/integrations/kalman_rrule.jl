@@ -20,29 +20,12 @@ function ChainRulesCore.rrule(
     ll = zero(eltype(μ0))
 
     for t in 1:T
-        μ, Σ = params(state)
-        μ_prevs[t] = μ
-        Σ_prevs[t] = Σ
-
-        # Predict (wrap in PDMat since X_A_Xt + PDMat can drop to Matrix)
-        μ_pred = As[t] * μ + bs[t]
-        Σ_pred = PDMat(Symmetric(X_A_Xt(Σ, As[t]) + Qs[t]))
-
-        # Update with cache (inline from kalman_gradient.jl)
-        H, c, R = Hs[t], cs[t], Rs[t]
-        z = _compute_innovation(μ_pred, H, c, ys[t])
-        S = _compute_innovation_cov(Σ_pred, H, R)
-        K = _compute_kalman_gain(Σ_pred, H, S)
-        I_KH, Σ_filt_raw = _compute_joseph_update(Σ_pred, K, H, R)
-
-        μ_filt = μ_pred + K * z
-        Σ_filt = _apply_jitter_and_wrap(Σ_filt_raw, nothing)
-
-        ll_inc = logpdf(MvNormal(H * μ_pred + c, S), ys[t])
+        μ_prevs[t], Σ_prevs[t] = params(state)
+        state = kalman_predict(state, (As[t], bs[t], Qs[t]))
+        state, ll_inc, caches[t] = _kalman_update_cached(
+            state, Hs[t], cs[t], Rs[t], ys[t], nothing
+        )
         ll += ll_inc
-
-        caches[t] = KalmanGradientCache(μ_pred, Σ_pred, μ_filt, Σ_filt, S, K, z, I_KH)
-        state = MvNormal(μ_filt, Σ_filt)
     end
 
     function kf_loglikelihood_pullback(Δll)

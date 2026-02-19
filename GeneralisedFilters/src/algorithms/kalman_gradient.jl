@@ -5,6 +5,29 @@ export update_with_cache
 export backward_gradient_update, backward_gradient_predict
 export gradient_Q, gradient_R, gradient_A, gradient_b, gradient_H, gradient_c, gradient_y
 
+## CORE UPDATE WITH CACHE ######################################################################
+
+# Raw-parameter update step that all higher-level update functions delegate to.
+# Returns the filtered state, log-likelihood increment, and gradient cache.
+function _kalman_update_cached(state::MvNormal, H, c, R, y, jitter)
+    μ_pred, Σ_pred = params(state)
+    z = _compute_innovation(μ_pred, H, c, y)
+    S = _compute_innovation_cov(Σ_pred, H, R)
+    K = _compute_kalman_gain(Σ_pred, H, S)
+    I_KH, Σ_filt_raw = _compute_joseph_update(Σ_pred, K, H, R)
+    μ_filt = μ_pred + K * z
+    Σ_filt = _apply_jitter_and_wrap(Σ_filt_raw, jitter)
+    ll = logpdf(MvNormal(z, S), zero(z))
+    cache = KalmanGradientCache(μ_pred, Σ_pred, μ_filt, Σ_filt, S, K, z, I_KH)
+    return MvNormal(μ_filt, Σ_filt), ll, cache
+end
+
+function kalman_update(state, obs_params, observation, jitter)
+    H, c, R = obs_params
+    state, ll, _ = _kalman_update_cached(state, H, c, R, observation, jitter)
+    return state, ll
+end
+
 """
     KalmanGradientCache
 
@@ -53,23 +76,8 @@ function update_with_cache(
     observation::AbstractVector;
     kwargs...,
 )
-    μ_pred, Σ_pred = params(state)
     H, c, R = calc_params(obs, iter; kwargs...)
-
-    z = _compute_innovation(μ_pred, H, c, observation)
-    S = _compute_innovation_cov(Σ_pred, H, R)
-    K = _compute_kalman_gain(Σ_pred, H, S)
-    I_KH, Σ_filt_raw = _compute_joseph_update(Σ_pred, K, H, R)
-
-    μ_filt = μ_pred + K * z
-    Σ_filt = _apply_jitter_and_wrap(Σ_filt_raw, algo.jitter)
-
-    filtered_state = MvNormal(μ_filt, Σ_filt)
-    ll = logpdf(MvNormal(H * μ_pred + c, S), observation)
-
-    cache = KalmanGradientCache(μ_pred, Σ_pred, μ_filt, Σ_filt, S, K, z, I_KH)
-
-    return filtered_state, ll, cache
+    return _kalman_update_cached(state, H, c, R, observation, algo.jitter)
 end
 
 ## BACKWARD GRADIENT PROPAGATION ##############################################################

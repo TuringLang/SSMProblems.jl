@@ -10,30 +10,36 @@ export SSMTrajectory
 # (HMMs), this would need to be generalized.
 
 """
-    SSMTrajectory{MT, YT} <: ContinuousMultivariateDistribution
+    SSMTrajectory{MT, AFT, YT} <: ContinuousMultivariateDistribution
 
 A distribution over state-space model trajectories. Used in Turing `@model` blocks to mark
 the trajectory variable for `ParticleGibbs`:
 
 ```julia
-@model function my_model(ys, fixed)
-    b ~ Normal(0, 1)
-    ssm = build_ssm(b, fixed)
-    x ~ SSMTrajectory(ssm, ys)
-end
+# Regular SSM (no inner filter needed)
+x ~ SSMTrajectory(ssm, ys)
+
+# HierarchicalSSM (inner analytical filter required for logpdf)
+x ~ SSMTrajectory(ssm, KF(), ys)
 ```
 
 The `logpdf` computes the joint log-density of the trajectory and observations:
 - Regular SSM: `log p(x₀) + Σ_t [log p(xₜ|xₜ₋₁) + log p(yₜ|xₜ)]`
-- HierarchicalSSM: outer transitions + inner KF marginal likelihood
+- HierarchicalSSM: outer transitions + inner marginal likelihood via `af`
 
-The inner analytical filter (e.g., `KF()`) is NOT stored here — it's a property of the
-sampler (`ParticleGibbs`), not the trajectory. For `logpdf` computation during the parameter
-step, `KF()` is auto-detected for `HierarchicalSSM` models.
+The inner analytical filter `af` must match the filter used in the `RBPF` within the
+`ParticleGibbs` sampler (e.g., both `KF()` or both `KF(jitter=1e-8)`).
 """
-struct SSMTrajectory{MT<:AbstractStateSpaceModel,YT} <: ContinuousMultivariateDistribution
+struct SSMTrajectory{MT<:AbstractStateSpaceModel,AFT,YT} <:
+       ContinuousMultivariateDistribution
     model::MT
+    af::AFT
     observations::YT
+end
+
+# Convenience constructor for regular SSMs (no inner analytical filter needed).
+function SSMTrajectory(model::AbstractStateSpaceModel, observations)
+    SSMTrajectory(model, nothing, observations)
 end
 
 bijector(::SSMTrajectory) = Bijectors.Identity{1}()
@@ -97,21 +103,7 @@ function _logpdf(d::SSMTrajectory{<:HierarchicalSSM}, x_flat::AbstractVector{<:R
         ll += SSMProblems.logdensity(m.outer_dyn, t, states[t], states[t + 1])
     end
 
-    # Inner marginal log-likelihood via KF (inlined to avoid OffsetVector)
-    inner_dyn = m.inner_model.dyn
-    inner_obs = m.inner_model.obs
-    inner_pr = m.inner_model.prior
-
-    μ0 = calc_μ0(inner_pr; new_outer=states[1])
-    Σ0 = calc_Σ0(inner_pr; new_outer=states[1])
-    As = map(t -> calc_A(inner_dyn, t; prev_outer=states[t], new_outer=states[t + 1]), 1:T)
-    bs = map(t -> calc_b(inner_dyn, t; prev_outer=states[t], new_outer=states[t + 1]), 1:T)
-    Qs = map(t -> calc_Q(inner_dyn, t; prev_outer=states[t], new_outer=states[t + 1]), 1:T)
-    Hs = map(t -> calc_H(inner_obs, t; new_outer=states[t + 1]), 1:T)
-    cs = map(t -> calc_c(inner_obs, t; new_outer=states[t + 1]), 1:T)
-    Rs = map(t -> calc_R(inner_obs, t; new_outer=states[t + 1]), 1:T)
-
-    ll += kf_loglikelihood(μ0, Σ0, As, bs, Qs, Hs, cs, Rs, d.observations)
+    ll += inner_loglikelihood(d.af, m.inner_model, states, d.observations)
     return ll
 end
 

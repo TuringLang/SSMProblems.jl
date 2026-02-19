@@ -234,7 +234,7 @@ end
     @model function drift_model_hier(ys)
         b ~ MvNormal(zeros(Dz), σ²_b * I)
         ssm = GeneralisedFilters.GFTest.with_inner_drift(fixed, b)
-        x ~ SSMTrajectory(ssm, ys)
+        x ~ SSMTrajectory(ssm, KF(), ys)
     end
 
     m = drift_model_hier(ys)
