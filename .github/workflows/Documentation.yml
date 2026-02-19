@@ -37,6 +37,11 @@ jobs:
         with:
           version: '1'
       - uses: julia-actions/cache@v1
+      - name: Install notebook tooling
+        if: matrix.pkg.name == 'GeneralisedFilters'
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install jupyter nbconvert
       - name: Install dependencies
         run: |
           julia --project=${{ matrix.pkg.dir }}/docs/ --color=yes -e '

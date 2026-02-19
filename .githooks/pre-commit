@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+mapfile -d '' notebooks < <(git diff --cached --name-only -z --diff-filter=ACMR -- '*.ipynb')
+if [[ ${#notebooks[@]} -eq 0 ]]; then
+  exit 0
+fi
+
+python3 scripts/sync_notebook_badges.py "${notebooks[@]}"
+python3 scripts/strip_notebook_outputs.py "${notebooks[@]}"
+
+# Re-stage files in case the stripper changed them.
+git add -- "${notebooks[@]}"
