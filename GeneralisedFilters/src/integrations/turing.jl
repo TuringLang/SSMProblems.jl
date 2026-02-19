@@ -243,31 +243,12 @@ function AbstractMCMC.bundle_samples(
     param_names=nothing,
     kwargs...,
 )
-    n_samples = length(ts)
-    d = length(first(ts).θ)
-
     names = if isnothing(param_names)
         _turing_param_names(state)
     else
         Symbol.(param_names)
     end
-
-    vals = Matrix{Float64}(undef, n_samples, d)
-    for (i, t) in enumerate(ts)
-        vals[i, :] = t.θ
-    end
-
-    int_names = collect(Symbol, keys(first(ts).stat))
-    internals = Matrix{Float64}(undef, n_samples, length(int_names))
-    for (i, t) in enumerate(ts)
-        for (j, v) in enumerate(values(t.stat))
-            internals[i, j] = Float64(v)
-        end
-    end
-
-    all_vals = hcat(vals, internals)
-    all_names = vcat(names, int_names)
-    return MCMCChains.Chains(all_vals, all_names, (parameters=names, internals=int_names))
+    return _build_chains(ts, names)
 end
 
 function _turing_param_names(state::ParticleGibbsTuringState)
