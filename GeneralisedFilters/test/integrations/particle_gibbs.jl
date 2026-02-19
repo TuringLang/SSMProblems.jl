@@ -1,8 +1,8 @@
 """Tests for the ParticleGibbs sampler."""
 
-## Smoke test: types and chain output ##########################################################
+## NUTS: smoke test ############################################################################
 
-@testitem "ParticleGibbs: types and chain output" begin
+@testitem "ParticleGibbs NUTS: smoke test" begin
     using GeneralisedFilters
     using AbstractMCMC: AbstractMCMC
     using AdvancedHMC: NUTS
@@ -77,6 +77,67 @@
         param_names=["b"],
     )
     @test :b in names(chain_named, :parameters)
+end
+
+## MH: smoke test #############################################################################
+
+@testitem "ParticleGibbs MH: smoke test" begin
+    using GeneralisedFilters
+    using AbstractMCMC: AbstractMCMC
+    using AdvancedMH: RWMH
+    using MCMCChains: MCMCChains
+    using StableRNGs
+    using Distributions
+    using PDMats
+    using LinearAlgebra
+    using SSMProblems
+
+    rng = StableRNG(1234)
+
+    a = 0.8
+    q² = 0.1
+    r² = 0.5
+    σ₀² = 1.0
+
+    function build_ssm_mh(θ)
+        return create_homogeneous_linear_gaussian_model(
+            [0.0],
+            PDMat([σ₀²;;]),
+            [a;;],
+            [θ[1]],
+            PDMat([q²;;]),
+            [1.0;;],
+            [0.0],
+            PDMat([r²;;]),
+        )
+    end
+
+    true_ssm = build_ssm_mh([1.0])
+    _, _, ys = SSMProblems.sample(rng, true_ssm, 5)
+
+    prior = MvNormal([0.0], [4.0;;])
+    pssm = ParameterisedSSM(build_ssm_mh, ys)
+    model = ParticleGibbsModel(prior, pssm)
+    pg = ParticleGibbs(CSMC(BF(10)), RWMH(MvNormal(zeros(1), 0.5 * I)))
+
+    # Initial step
+    transition, state = AbstractMCMC.step(rng, model, pg)
+    @test transition isa GeneralisedFilters.ParticleGibbsTransition
+    @test state isa GeneralisedFilters.ParticleGibbsState
+    @test length(transition.θ) == 1
+    @test haskey(transition.stat, :accepted)
+
+    # Subsequent step
+    transition2, state2 = AbstractMCMC.step(rng, model, pg, state)
+    @test transition2 isa GeneralisedFilters.ParticleGibbsTransition
+
+    # Chain output
+    chain = AbstractMCMC.sample(
+        rng, model, pg, 20; progress=false, chain_type=MCMCChains.Chains
+    )
+    @test chain isa MCMCChains.Chains
+    @test size(chain, 1) == 20
+    @test :accepted in names(chain, :internals)
 end
 
 ## NUTS: HierarchicalSSM against augmented KF ###################################################

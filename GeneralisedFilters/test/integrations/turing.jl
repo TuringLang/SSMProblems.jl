@@ -1,8 +1,8 @@
 """Tests for the Turing @model integration with ParticleGibbs."""
 
-## Smoke test: types and chain output ##########################################################
+## NUTS: smoke test ############################################################################
 
-@testitem "ParticleGibbs Turing: smoke test" begin
+@testitem "ParticleGibbs Turing NUTS: smoke test" begin
     using GeneralisedFilters
     using AbstractMCMC: AbstractMCMC
     using AdvancedHMC: NUTS
@@ -57,6 +57,64 @@
 
     @test chain isa MCMCChains.Chains
     @test size(chain, 1) == N_iter
+end
+
+## MH: smoke test #############################################################################
+
+@testitem "ParticleGibbs Turing MH: smoke test" begin
+    using GeneralisedFilters
+    using AbstractMCMC: AbstractMCMC
+    using AdvancedMH: RWMH
+    using MCMCChains: MCMCChains
+    using Turing: @model
+    using StableRNGs
+    using Distributions
+    using PDMats
+    using LinearAlgebra
+    using SSMProblems
+
+    rng = StableRNG(1234)
+
+    a = 0.8
+    q² = 0.1
+    r² = 0.5
+    σ₀² = 1.0
+    T_len = 5
+    N_particles = 10
+    N_iter = 10
+
+    function build_ssm_mh(drift)
+        return create_homogeneous_linear_gaussian_model(
+            [0.0],
+            PDMat([σ₀²;;]),
+            [a;;],
+            [drift[1]],
+            PDMat([q²;;]),
+            [1.0;;],
+            [0.0],
+            PDMat([r²;;]),
+        )
+    end
+
+    true_ssm = build_ssm_mh([1.5])
+    _, _, ys = SSMProblems.sample(rng, true_ssm, T_len)
+
+    @model function drift_model_mh(ys)
+        b ~ MvNormal([0.0], 4.0 * I)
+        ssm = build_ssm_mh(b)
+        x ~ SSMTrajectory(ssm, ys)
+    end
+
+    m = drift_model_mh(ys)
+    pg = ParticleGibbs(CSMC(BF(N_particles)), RWMH(MvNormal(zeros(1), 0.5 * I)))
+
+    chain = AbstractMCMC.sample(
+        rng, m, pg, N_iter; progress=false, chain_type=MCMCChains.Chains
+    )
+
+    @test chain isa MCMCChains.Chains
+    @test size(chain, 1) == N_iter
+    @test :accepted in names(chain, :internals)
 end
 
 ## NUTS: regular SSM against augmented KF ######################################################
