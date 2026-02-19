@@ -4,8 +4,7 @@ using Dates
 using Downloads
 using LogExpFunctions
 
-const FRED_DATA_URL =
-    "https://raw.githubusercontent.com/TuringLang/SSMProblems.jl/main/GeneralisedFilters/examples/trend-inflation/data.csv"
+const FRED_DATA_URL = "https://raw.githubusercontent.com/TuringLang/SSMProblems.jl/main/GeneralisedFilters/examples/trend-inflation/data.csv"
 
 function load_fred_data()
     for path in (joinpath(pwd(), "data.csv"), joinpath(@__DIR__, "data.csv"))

@@ -77,8 +77,8 @@ function example_summary(markdown_path::AbstractString)
         end
 
         if occursin("Open in Colab", stripped) ||
-           occursin("Source notebook", stripped) ||
-           startswith(stripped, "*This page was generated")
+            occursin("Source notebook", stripped) ||
+            startswith(stripped, "*This page was generated")
             continue
         end
 
@@ -144,8 +144,8 @@ end
 
 const EXAMPLE_MARKDOWNS = sort(
     filter(
-        filename ->
-            endswith(filename, ".md") && filename != "index.md", readdir(EXAMPLES_OUT),
+        filename -> endswith(filename, ".md") && filename != "index.md",
+        readdir(EXAMPLES_OUT),
     ),
 )
 write_examples_index(EXAMPLE_MARKDOWNS)

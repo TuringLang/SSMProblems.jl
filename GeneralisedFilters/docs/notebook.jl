@@ -30,7 +30,10 @@ const KERNEL_NAME = "gf-docs-julia-$(VERSION.major).$(VERSION.minor)"
 IJulia.installkernel(KERNEL_NAME, "--project=$(DOCS_ENV)")
 
 function run_nbconvert(
-    examplepath::AbstractString, outdir::AbstractString, name::AbstractString, kernel::AbstractString
+    examplepath::AbstractString,
+    outdir::AbstractString,
+    name::AbstractString,
+    kernel::AbstractString,
 )
     jupyter = Sys.which("jupyter")
     isnothing(jupyter) && error(
@@ -38,14 +41,7 @@ function run_nbconvert(
     )
 
     cmd = `$(jupyter) nbconvert --to markdown --execute --ExecutePreprocessor.timeout=3600 --ExecutePreprocessor.kernel_name=$(kernel) --output=$(name) --output-dir=$(outdir) $(NOTEBOOK_FILENAME)`
-    run(
-        pipeline(
-            Cmd(cmd; dir=examplepath);
-            stdin=devnull,
-            stdout=devnull,
-            stderr=stderr,
-        ),
-    )
+    run(pipeline(Cmd(cmd; dir=examplepath); stdin=devnull, stdout=devnull, stderr=stderr))
     return nothing
 end
 
@@ -104,14 +100,8 @@ function inject_docs_badges(markdown_path::AbstractString, example::AbstractStri
     )
 
     # Remove existing notebook badge lines, then inject docs-specific badges.
-    content = replace(
-        content,
-        r"(?m)^\[\!\[Open in Colab\].*\n?" => "";
-    )
-    content = replace(
-        content,
-        r"\n{3,}" => "\n\n";
-    )
+    content = replace(content, r"(?m)^\[\!\[Open in Colab\].*\n?" => "";)
+    content = replace(content, r"\n{3,}" => "\n\n";)
 
     heading_match = match(r"(?m)^# .+$", content)
     if isnothing(heading_match)
@@ -120,7 +110,7 @@ function inject_docs_badges(markdown_path::AbstractString, example::AbstractStri
         head_start = heading_match.offset
         head_end = head_start + ncodeunits(heading_match.match) - 1
         head = content[1:head_end]
-        tail = content[head_end+1:end]
+        tail = content[(head_end + 1):end]
         tail = replace(tail, r"^\n+" => "")
         content = string(head, "\n\n", badge_line, "\n\n", tail)
     end
