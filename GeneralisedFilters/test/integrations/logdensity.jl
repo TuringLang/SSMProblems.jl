@@ -135,7 +135,6 @@ end
 
 @testitem "kf_loglikelihood rrule: ∂b" begin
     using GeneralisedFilters
-    using SSMProblems
     using ChainRulesCore
     using FiniteDifferences
     using StableRNGs
@@ -143,22 +142,9 @@ end
 
     rng = StableRNG(1234)
     Dx, Dy, T = 2, 2, 3
-    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
-    _, _, ys = SSMProblems.sample(rng, model, T)
-
-    pr = SSMProblems.prior(model)
-    dy = SSMProblems.dyn(model)
-    ob = SSMProblems.obs(model)
-
-    μ0 = Vector(GeneralisedFilters.calc_μ0(pr))
-    Σ0 = PDMat(Matrix(GeneralisedFilters.calc_Σ0(pr)))
-    A = Matrix(GeneralisedFilters.calc_A(dy, 1))
-    b = Vector(GeneralisedFilters.calc_b(dy, 1))
-    Q = PDMat(Matrix(GeneralisedFilters.calc_Q(dy, 1)))
-    H = Matrix(GeneralisedFilters.calc_H(ob, 1))
-    c = Vector(GeneralisedFilters.calc_c(ob, 1))
-    R = PDMat(Matrix(GeneralisedFilters.calc_R(ob, 1)))
-    ys_vec = [Vector(y) for y in ys]
+    μ0, Σ0, A, b, Q, H, c, R, ys_vec = GeneralisedFilters.GFTest.setup_kf_rrule_params(
+        rng, Dx, Dy, T
+    )
 
     As = fill(A, T)
     Qs = fill(Q, T)
@@ -187,7 +173,6 @@ end
 
 @testitem "kf_loglikelihood rrule: ∂c" begin
     using GeneralisedFilters
-    using SSMProblems
     using ChainRulesCore
     using FiniteDifferences
     using StableRNGs
@@ -195,22 +180,9 @@ end
 
     rng = StableRNG(1234)
     Dx, Dy, T = 2, 2, 3
-    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
-    _, _, ys = SSMProblems.sample(rng, model, T)
-
-    pr = SSMProblems.prior(model)
-    dy = SSMProblems.dyn(model)
-    ob = SSMProblems.obs(model)
-
-    μ0 = Vector(GeneralisedFilters.calc_μ0(pr))
-    Σ0 = PDMat(Matrix(GeneralisedFilters.calc_Σ0(pr)))
-    A = Matrix(GeneralisedFilters.calc_A(dy, 1))
-    b = Vector(GeneralisedFilters.calc_b(dy, 1))
-    Q = PDMat(Matrix(GeneralisedFilters.calc_Q(dy, 1)))
-    H = Matrix(GeneralisedFilters.calc_H(ob, 1))
-    c = Vector(GeneralisedFilters.calc_c(ob, 1))
-    R = PDMat(Matrix(GeneralisedFilters.calc_R(ob, 1)))
-    ys_vec = [Vector(y) for y in ys]
+    μ0, Σ0, A, b, Q, H, c, R, ys_vec = GeneralisedFilters.GFTest.setup_kf_rrule_params(
+        rng, Dx, Dy, T
+    )
 
     As = fill(A, T)
     bs = fill(b, T)
@@ -236,7 +208,6 @@ end
 
 @testitem "kf_loglikelihood rrule: ∂A" begin
     using GeneralisedFilters
-    using SSMProblems
     using ChainRulesCore
     using FiniteDifferences
     using StableRNGs
@@ -244,22 +215,9 @@ end
 
     rng = StableRNG(1234)
     Dx, Dy, T = 2, 2, 3
-    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
-    _, _, ys = SSMProblems.sample(rng, model, T)
-
-    pr = SSMProblems.prior(model)
-    dy = SSMProblems.dyn(model)
-    ob = SSMProblems.obs(model)
-
-    μ0 = Vector(GeneralisedFilters.calc_μ0(pr))
-    Σ0 = PDMat(Matrix(GeneralisedFilters.calc_Σ0(pr)))
-    A = Matrix(GeneralisedFilters.calc_A(dy, 1))
-    b = Vector(GeneralisedFilters.calc_b(dy, 1))
-    Q = PDMat(Matrix(GeneralisedFilters.calc_Q(dy, 1)))
-    H = Matrix(GeneralisedFilters.calc_H(ob, 1))
-    c = Vector(GeneralisedFilters.calc_c(ob, 1))
-    R = PDMat(Matrix(GeneralisedFilters.calc_R(ob, 1)))
-    ys_vec = [Vector(y) for y in ys]
+    μ0, Σ0, A, b, Q, H, c, R, ys_vec = GeneralisedFilters.GFTest.setup_kf_rrule_params(
+        rng, Dx, Dy, T
+    )
 
     bs = fill(b, T)
     Qs = fill(Q, T)
@@ -286,7 +244,6 @@ end
 
 @testitem "kf_loglikelihood rrule: ∂μ0" begin
     using GeneralisedFilters
-    using SSMProblems
     using ChainRulesCore
     using FiniteDifferences
     using StableRNGs
@@ -294,22 +251,9 @@ end
 
     rng = StableRNG(1234)
     Dx, Dy, T = 2, 2, 3
-    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
-    _, _, ys = SSMProblems.sample(rng, model, T)
-
-    pr = SSMProblems.prior(model)
-    dy = SSMProblems.dyn(model)
-    ob = SSMProblems.obs(model)
-
-    μ0 = Vector(GeneralisedFilters.calc_μ0(pr))
-    Σ0 = PDMat(Matrix(GeneralisedFilters.calc_Σ0(pr)))
-    A = Matrix(GeneralisedFilters.calc_A(dy, 1))
-    b = Vector(GeneralisedFilters.calc_b(dy, 1))
-    Q = PDMat(Matrix(GeneralisedFilters.calc_Q(dy, 1)))
-    H = Matrix(GeneralisedFilters.calc_H(ob, 1))
-    c = Vector(GeneralisedFilters.calc_c(ob, 1))
-    R = PDMat(Matrix(GeneralisedFilters.calc_R(ob, 1)))
-    ys_vec = [Vector(y) for y in ys]
+    μ0, Σ0, A, b, Q, H, c, R, ys_vec = GeneralisedFilters.GFTest.setup_kf_rrule_params(
+        rng, Dx, Dy, T
+    )
 
     As = fill(A, T)
     bs = fill(b, T)
@@ -335,31 +279,16 @@ end
 
 @testitem "kf_loglikelihood rrule: ∂Q" begin
     using GeneralisedFilters
-    using SSMProblems
     using ChainRulesCore
     using FiniteDifferences
     using StableRNGs
     using PDMats
-    using LinearAlgebra
 
     rng = StableRNG(1234)
     Dx, Dy, T = 2, 2, 3
-    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
-    _, _, ys = SSMProblems.sample(rng, model, T)
-
-    pr = SSMProblems.prior(model)
-    dy = SSMProblems.dyn(model)
-    ob = SSMProblems.obs(model)
-
-    μ0 = Vector(GeneralisedFilters.calc_μ0(pr))
-    Σ0 = PDMat(Matrix(GeneralisedFilters.calc_Σ0(pr)))
-    A = Matrix(GeneralisedFilters.calc_A(dy, 1))
-    b = Vector(GeneralisedFilters.calc_b(dy, 1))
-    Q = PDMat(Matrix(GeneralisedFilters.calc_Q(dy, 1)))
-    H = Matrix(GeneralisedFilters.calc_H(ob, 1))
-    c = Vector(GeneralisedFilters.calc_c(ob, 1))
-    R = PDMat(Matrix(GeneralisedFilters.calc_R(ob, 1)))
-    ys_vec = [Vector(y) for y in ys]
+    μ0, Σ0, A, b, Q, H, c, R, ys_vec = GeneralisedFilters.GFTest.setup_kf_rrule_params(
+        rng, Dx, Dy, T
+    )
 
     As = fill(A, T)
     bs = fill(b, T)
@@ -373,16 +302,9 @@ end
     cotangents = pullback(1.0)
     ∂Qs_rrule = cotangents[6]
 
-    function make_pd(M, D)
-        M_sym = (M + M') / 2
-        λ, V = eigen(M_sym)
-        λ_clipped = max.(λ, 1e-8)
-        return PDMat(Symmetric(V * Diagonal(λ_clipped) * V'))
-    end
-
     fdm = central_fdm(5, 1)
     function ll_Q(Q_vec)
-        Q_new = make_pd(reshape(Q_vec, Dx, Dx), Dx)
+        Q_new = GeneralisedFilters.GFTest.make_pd(reshape(Q_vec, Dx, Dx))
         return kf_loglikelihood(μ0, Σ0, As, bs, fill(Q_new, T), Hs, cs, Rs, ys_vec)
     end
     ∂Q_fd = reshape(FiniteDifferences.grad(fdm, ll_Q, vec(Matrix(Q)))[1], Dx, Dx)
@@ -393,31 +315,16 @@ end
 
 @testitem "kf_loglikelihood rrule: ∂R" begin
     using GeneralisedFilters
-    using SSMProblems
     using ChainRulesCore
     using FiniteDifferences
     using StableRNGs
     using PDMats
-    using LinearAlgebra
 
     rng = StableRNG(1234)
     Dx, Dy, T = 2, 2, 3
-    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
-    _, _, ys = SSMProblems.sample(rng, model, T)
-
-    pr = SSMProblems.prior(model)
-    dy = SSMProblems.dyn(model)
-    ob = SSMProblems.obs(model)
-
-    μ0 = Vector(GeneralisedFilters.calc_μ0(pr))
-    Σ0 = PDMat(Matrix(GeneralisedFilters.calc_Σ0(pr)))
-    A = Matrix(GeneralisedFilters.calc_A(dy, 1))
-    b = Vector(GeneralisedFilters.calc_b(dy, 1))
-    Q = PDMat(Matrix(GeneralisedFilters.calc_Q(dy, 1)))
-    H = Matrix(GeneralisedFilters.calc_H(ob, 1))
-    c = Vector(GeneralisedFilters.calc_c(ob, 1))
-    R = PDMat(Matrix(GeneralisedFilters.calc_R(ob, 1)))
-    ys_vec = [Vector(y) for y in ys]
+    μ0, Σ0, A, b, Q, H, c, R, ys_vec = GeneralisedFilters.GFTest.setup_kf_rrule_params(
+        rng, Dx, Dy, T
+    )
 
     As = fill(A, T)
     bs = fill(b, T)
@@ -431,16 +338,9 @@ end
     cotangents = pullback(1.0)
     ∂Rs_rrule = cotangents[9]
 
-    function make_pd(M, D)
-        M_sym = (M + M') / 2
-        λ, V = eigen(M_sym)
-        λ_clipped = max.(λ, 1e-8)
-        return PDMat(Symmetric(V * Diagonal(λ_clipped) * V'))
-    end
-
     fdm = central_fdm(5, 1)
     function ll_R(R_vec)
-        R_new = make_pd(reshape(R_vec, Dy, Dy), Dy)
+        R_new = GeneralisedFilters.GFTest.make_pd(reshape(R_vec, Dy, Dy))
         return kf_loglikelihood(μ0, Σ0, As, bs, Qs, Hs, cs, fill(R_new, T), ys_vec)
     end
     ∂R_fd = reshape(FiniteDifferences.grad(fdm, ll_R, vec(Matrix(R)))[1], Dy, Dy)
@@ -451,7 +351,6 @@ end
 
 @testitem "kf_loglikelihood rrule: ∂H" begin
     using GeneralisedFilters
-    using SSMProblems
     using ChainRulesCore
     using FiniteDifferences
     using StableRNGs
@@ -459,22 +358,9 @@ end
 
     rng = StableRNG(1234)
     Dx, Dy, T = 2, 2, 3
-    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
-    _, _, ys = SSMProblems.sample(rng, model, T)
-
-    pr = SSMProblems.prior(model)
-    dy = SSMProblems.dyn(model)
-    ob = SSMProblems.obs(model)
-
-    μ0 = Vector(GeneralisedFilters.calc_μ0(pr))
-    Σ0 = PDMat(Matrix(GeneralisedFilters.calc_Σ0(pr)))
-    A = Matrix(GeneralisedFilters.calc_A(dy, 1))
-    b = Vector(GeneralisedFilters.calc_b(dy, 1))
-    Q = PDMat(Matrix(GeneralisedFilters.calc_Q(dy, 1)))
-    H = Matrix(GeneralisedFilters.calc_H(ob, 1))
-    c = Vector(GeneralisedFilters.calc_c(ob, 1))
-    R = PDMat(Matrix(GeneralisedFilters.calc_R(ob, 1)))
-    ys_vec = [Vector(y) for y in ys]
+    μ0, Σ0, A, b, Q, H, c, R, ys_vec = GeneralisedFilters.GFTest.setup_kf_rrule_params(
+        rng, Dx, Dy, T
+    )
 
     As = fill(A, T)
     bs = fill(b, T)

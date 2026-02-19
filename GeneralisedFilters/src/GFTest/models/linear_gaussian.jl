@@ -217,6 +217,33 @@ end
 ## GRADIENT TEST HELPERS ##
 
 """
+    setup_kf_rrule_params(rng, Dx, Dy, T)
+
+Extract all parameters needed for testing `kf_loglikelihood` and its rrule.
+Returns `(μ0, Σ0, A, b, Q, H, c, R, ys_vec)` as dense (non-static) arrays.
+"""
+function setup_kf_rrule_params(rng::AbstractRNG, Dx::Integer, Dy::Integer, T::Integer)
+    model = create_linear_gaussian_model(rng, Dx, Dy)
+    _, _, ys = SSMProblems.sample(rng, model, T)
+
+    pr = SSMProblems.prior(model)
+    dy = SSMProblems.dyn(model)
+    ob = SSMProblems.obs(model)
+
+    μ0 = Vector(GeneralisedFilters.calc_μ0(pr))
+    Σ0 = PDMat(Matrix(GeneralisedFilters.calc_Σ0(pr)))
+    A = Matrix(GeneralisedFilters.calc_A(dy, 1))
+    b = Vector(GeneralisedFilters.calc_b(dy, 1))
+    Q = PDMat(Matrix(GeneralisedFilters.calc_Q(dy, 1)))
+    H = Matrix(GeneralisedFilters.calc_H(ob, 1))
+    c = Vector(GeneralisedFilters.calc_c(ob, 1))
+    R = PDMat(Matrix(GeneralisedFilters.calc_R(ob, 1)))
+    ys_vec = [Vector(y) for y in ys]
+
+    return μ0, Σ0, A, b, Q, H, c, R, ys_vec
+end
+
+"""
     setup_gradient_test(rng; D=2, T=3)
 
 Set up a gradient test scenario with a linear Gaussian model.

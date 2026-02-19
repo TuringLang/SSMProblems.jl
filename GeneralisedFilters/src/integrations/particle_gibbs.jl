@@ -218,32 +218,15 @@ end
 
 ## CHAIN OUTPUT ###############################################################################
 
-function AbstractMCMC.bundle_samples(
-    ts::Vector{<:ParticleGibbsTransition},
-    ::ParticleGibbsModel,
-    ::ParticleGibbs,
-    state,
-    ::Type{MCMCChains.Chains};
-    param_names=nothing,
-    kwargs...,
-)
+function _build_chains(ts::Vector{<:ParticleGibbsTransition}, names::Vector{Symbol})
     n_samples = length(ts)
     d = length(first(ts).θ)
 
-    # Parameter names
-    names = if isnothing(param_names)
-        [Symbol("θ[$i]") for i in 1:d]
-    else
-        Symbol.(param_names)
-    end
-
-    # Build parameter matrix
     vals = Matrix{Float64}(undef, n_samples, d)
     for (i, t) in enumerate(ts)
         vals[i, :] = t.θ
     end
 
-    # Internal stats (derived from the NamedTuple keys in each transition)
     int_names = collect(Symbol, keys(first(ts).stat))
     internals = Matrix{Float64}(undef, n_samples, length(int_names))
     for (i, t) in enumerate(ts)
@@ -255,4 +238,22 @@ function AbstractMCMC.bundle_samples(
     all_vals = hcat(vals, internals)
     all_names = vcat(names, int_names)
     return MCMCChains.Chains(all_vals, all_names, (parameters=names, internals=int_names))
+end
+
+function AbstractMCMC.bundle_samples(
+    ts::Vector{<:ParticleGibbsTransition},
+    ::ParticleGibbsModel,
+    ::ParticleGibbs,
+    state,
+    ::Type{MCMCChains.Chains};
+    param_names=nothing,
+    kwargs...,
+)
+    d = length(first(ts).θ)
+    names = if isnothing(param_names)
+        [Symbol("θ[$i]") for i in 1:d]
+    else
+        Symbol.(param_names)
+    end
+    return _build_chains(ts, names)
 end
