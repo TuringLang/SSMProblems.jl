@@ -5,6 +5,29 @@ export update_with_cache
 export backward_gradient_update, backward_gradient_predict
 export gradient_Q, gradient_R, gradient_A, gradient_b, gradient_H, gradient_c, gradient_y
 
+## CORE UPDATE WITH CACHE ######################################################################
+
+# Raw-parameter update step that all higher-level update functions delegate to.
+# Returns the filtered state, log-likelihood increment, and gradient cache.
+function _kalman_update_cached(state::MvNormal, H, c, R, y, jitter)
+    μ_pred, Σ_pred = params(state)
+    z = _compute_innovation(μ_pred, H, c, y)
+    S = _compute_innovation_cov(Σ_pred, H, R)
+    K = _compute_kalman_gain(Σ_pred, H, S)
+    I_KH, Σ_filt_raw = _compute_joseph_update(Σ_pred, K, H, R)
+    μ_filt = μ_pred + K * z
+    Σ_filt = _apply_jitter_and_wrap(Σ_filt_raw, jitter)
+    ll = logpdf(MvNormal(z, S), zero(z))
+    cache = KalmanGradientCache(μ_pred, Σ_pred, μ_filt, Σ_filt, S, K, z, I_KH)
+    return MvNormal(μ_filt, Σ_filt), ll, cache
+end
+
+function kalman_update(state, obs_params, observation, jitter)
+    H, c, R = obs_params
+    state, ll, _ = _kalman_update_cached(state, H, c, R, observation, jitter)
+    return state, ll
+end
+
 """
     KalmanGradientCache
 
@@ -53,23 +76,8 @@ function update_with_cache(
     observation::AbstractVector;
     kwargs...,
 )
-    μ_pred, Σ_pred = params(state)
     H, c, R = calc_params(obs, iter; kwargs...)
-
-    z = _compute_innovation(μ_pred, H, c, observation)
-    S = _compute_innovation_cov(Σ_pred, H, R)
-    K = _compute_kalman_gain(Σ_pred, H, S)
-    I_KH, Σ_filt_raw = _compute_joseph_update(Σ_pred, K, H, R)
-
-    μ_filt = μ_pred + K * z
-    Σ_filt = _apply_jitter_and_wrap(Σ_filt_raw, algo.jitter)
-
-    filtered_state = MvNormal(μ_filt, Σ_filt)
-    ll = logpdf(MvNormal(H * μ_pred + c, S), observation)
-
-    cache = KalmanGradientCache(μ_pred, Σ_pred, μ_filt, Σ_filt, S, K, z, I_KH)
-
-    return filtered_state, ll, cache
+    return _kalman_update_cached(state, H, c, R, observation, algo.jitter)
 end
 
 ## BACKWARD GRADIENT PROPAGATION ##############################################################
@@ -208,29 +216,35 @@ function gradient_b(∂μ_pred::AbstractVector)
 end
 
 """
-    gradient_H(∂μ_filt, ∂Σ_filt, cache, Σ_pred)
+    gradient_H(∂μ_filt, ∂Σ_filt, cache, Σ_pred, H)
 
 Compute gradient of NLL w.r.t. observation matrix H.
 
-Derived via chain rule through z = y - H*μ_pred - c, S = H*Σ_pred*H' + R, and the update.
+Derived via chain rule using the information form P_filt⁻¹ = P_pred⁻¹ + H'R⁻¹H to decouple
+P_filt from K, then tracing H's effect through:
+- NLL local term (via z and S)
+- Filtered mean (via z = y - Hμ_pred - c, and K = P_filt H' R⁻¹)
+- Filtered covariance (via the information form)
 """
 function gradient_H(
-    ∂μ_filt::AbstractVector, ∂Σ_filt::AbstractMatrix, cache::KalmanGradientCache, Σ_pred
+    ∂μ_filt::AbstractVector, ∂Σ_filt::AbstractMatrix, cache::KalmanGradientCache, Σ_pred, H
 )
-    μ_pred, z, S, K, I_KH = cache.μ_pred, cache.z, cache.S, cache.K, cache.I_KH
+    μ_pred, μ_filt, z, S, K, I_KH = cache.μ_pred,
+    cache.μ_filt, cache.z, cache.S, cache.K,
+    cache.I_KH
     S_inv_z = S \ z
-    S_inv = S \ I
+    S_inv = inv(S)
+    P_filt = I_KH * Σ_pred
 
     # Local NLL derivative: l = 0.5*(log|S| + z'S⁻¹z)
-    # ∂l/∂H = S⁻¹*H*Σ_pred - S⁻¹*z*μ_pred' - S⁻¹*z*z'*S⁻¹*H*Σ_pred
-    ∂l_∂H = S_inv * Σ_pred - S_inv_z * μ_pred' - (S_inv_z * S_inv_z') * Σ_pred
+    ∂l_∂H = S_inv * H * Σ_pred - S_inv_z * μ_pred' - (S_inv_z * S_inv_z') * H * Σ_pred
 
-    # Contribution through filtered mean: μ_filt = μ_pred + K*z
-    # ∂z/∂H = -μ_pred' (outer product form for each element)
-    ∂via_μ = -K' * ∂μ_filt * μ_pred'
+    # Contribution through filtered mean:
+    # δμ_filt = P_filt*δH'*S⁻¹*z - K*δH*μ_filt
+    ∂via_μ = S_inv_z * ∂μ_filt' * P_filt - K' * ∂μ_filt * μ_filt'
 
-    # Contribution through filtered covariance via I_KH
-    ∂via_Σ = -K' * ∂Σ_filt * I_KH * μ_pred' - I_KH' * ∂Σ_filt * K * μ_pred'
+    # Contribution through filtered covariance (information form)
+    ∂via_Σ = -2 * K' * ∂Σ_filt * P_filt
 
     return ∂l_∂H + ∂via_μ + ∂via_Σ
 end

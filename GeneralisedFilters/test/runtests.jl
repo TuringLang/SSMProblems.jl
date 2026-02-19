@@ -15,6 +15,11 @@ include("algorithms/csmc.jl")
 include("components/resamplers.jl")
 include("components/kalman_gradient.jl")
 
+# Integration tests
+include("integrations/logdensity.jl")
+include("integrations/particle_gibbs.jl")
+include("integrations/turing.jl")
+
 # Quality tests
 include("support/type_stability.jl")
 include("support/aqua.jl")
