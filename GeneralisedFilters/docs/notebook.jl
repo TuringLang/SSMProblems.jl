@@ -7,7 +7,7 @@ const EXAMPLE = ARGS[1]
 const OUTDIR = ARGS[2]
 const REPO = "TuringLang/SSMProblems.jl"
 const PKG_SUBDIR = "GeneralisedFilters"
-const DOCS_ENV = dirname(Base.active_project())
+const DOCS_ENV = abspath(@__DIR__)
 
 using Pkg: Pkg
 

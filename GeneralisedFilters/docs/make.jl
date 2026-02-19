@@ -31,11 +31,13 @@ let script = "using Pkg; Pkg.activate(ARGS[1]); Pkg.develop(path=\"$(above)\"); 
     end
 end
 # Run examples asynchronously
-processes = let notebookjl = joinpath(@__DIR__, "notebook.jl")
+processes = let
+    notebookjl = joinpath(@__DIR__, "notebook.jl")
+    docs_project = abspath(@__DIR__)
     map(examples) do example
         return run(
             pipeline(
-                `$(Base.julia_cmd()) $notebookjl $(basename(example)) $EXAMPLES_OUT`;
+                `$(Base.julia_cmd()) --project=$(docs_project) $notebookjl $(basename(example)) $EXAMPLES_OUT`;
                 stdin=devnull,
                 stdout=devnull,
                 stderr=stderr,
