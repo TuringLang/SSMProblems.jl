@@ -6,10 +6,8 @@ const PKG_SUBDIR = "GeneralisedFilters"
 # With minor changes from https://github.com/JuliaGaussianProcesses/AbstractGPs.jl/docs
 #
 ### Process examples
-# Always rerun examples
 const EXAMPLES_ROOT = joinpath(@__DIR__, "..", "examples")
 const EXAMPLES_OUT = joinpath(@__DIR__, "src", "examples")
-ispath(EXAMPLES_OUT) && rm(EXAMPLES_OUT; recursive=true)
 mkpath(EXAMPLES_OUT)
 const EXAMPLE_ASSETS_OUT = joinpath(@__DIR__, "src", "assets", "examples")
 mkpath(EXAMPLE_ASSETS_OUT)

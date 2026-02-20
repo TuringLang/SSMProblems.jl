@@ -18,6 +18,11 @@ const MARKDOWN = joinpath(OUTDIR, string(EXAMPLE, ".md"))
 
 isfile(NOTEBOOK) || error("example $(EXAMPLE) must include $(NOTEBOOK_FILENAME)")
 
+if isfile(MARKDOWN)
+    @info "Skipping $(EXAMPLE): cached output found at $(MARKDOWN)"
+    exit(0)
+end
+
 # Keep notebook execution in the example's own environment.
 Pkg.activate(EXAMPLEPATH)
 Pkg.instantiate()
