@@ -9,6 +9,7 @@ const REPO = "TuringLang/SSMProblems.jl"
 const PKG_SUBDIR = "GeneralisedFilters"
 const DOCS_ENV = abspath(@__DIR__)
 
+using Base64: base64decode
 using Pkg: Pkg
 
 const EXAMPLEPATH = joinpath(@__DIR__, "..", "examples", EXAMPLE)
@@ -124,6 +125,34 @@ function inject_docs_badges(markdown_path::AbstractString, example::AbstractStri
     return nothing
 end
 
+# CairoMakie/IJulia stores figures as text/html containing <img src="data:image/png;base64,...">
+# which nbconvert passes through verbatim. Documenter doesn't render raw HTML, so we extract
+# the base64 data to real files and replace with standard markdown image syntax.
+function extract_inline_images(
+    markdown_path::AbstractString, outdir::AbstractString, example::AbstractString
+)
+    content = read(markdown_path, String)
+    img_dir = joinpath(outdir, string(example, "_files"))
+    counter = 0
+    content = replace(
+        content,
+        r"<img[^>]*\bsrc=\"data:image/([^;]+);base64,([^\"]+)\"[^>]*>" => function (m)
+            inner = match(r"src=\"data:image/([^;]+);base64,([^\"]+)\"", m)
+            isnothing(inner) && return m
+            fmt = replace(inner.captures[1], "svg+xml" => "svg")
+            data = replace(inner.captures[2], r"\s" => "")
+            counter += 1
+            mkpath(img_dir)
+            filename = "$(example)_$(counter).$(fmt)"
+            write(joinpath(img_dir, filename), base64decode(data))
+            return "![]($(example)_files/$(filename))"
+        end,
+    )
+    write(markdown_path, content)
+    return nothing
+end
+
 run_nbconvert(EXAMPLEPATH, OUTDIR, EXAMPLE, KERNEL_NAME)
+extract_inline_images(MARKDOWN, OUTDIR, EXAMPLE)
 inject_docs_badges(MARKDOWN, EXAMPLE)
 inject_edit_url(MARKDOWN, EXAMPLE)
