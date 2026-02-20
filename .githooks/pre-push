@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+mapfile -d '' notebooks < <(git ls-files -z '*.ipynb')
+if [[ ${#notebooks[@]} -eq 0 ]]; then
+  exit 0
+fi
+
+python3 scripts/sync_notebook_badges.py "${notebooks[@]}"
+python3 scripts/strip_notebook_outputs.py "${notebooks[@]}"
+
+if ! git diff --quiet -- "${notebooks[@]}"; then
+  git add -- "${notebooks[@]}"
+  echo "Notebook badges/outputs were normalized during pre-push. Commit the updated notebooks and push again." >&2
+  exit 1
+fi
