@@ -27,7 +27,7 @@ Pkg.instantiate()
 using IJulia
 
 const KERNEL_NAME = "gf-docs-julia-$(VERSION.major).$(VERSION.minor)"
-IJulia.installkernel(KERNEL_NAME, "--project=$(DOCS_ENV)")
+IJulia.installkernel(KERNEL_NAME, "--project=$(DOCS_ENV)"; specname=KERNEL_NAME)
 
 function run_nbconvert(
     examplepath::AbstractString,
