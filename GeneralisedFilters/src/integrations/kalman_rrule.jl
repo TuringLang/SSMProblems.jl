@@ -14,12 +14,21 @@ function ChainRulesCore.rrule(
 
     # Forward pass with caching
     state = MvNormal(μ0, Σ0)
-    caches = Vector{KalmanGradientCache}(undef, T)
     μ_prevs = Vector{typeof(μ0)}(undef, T)
     Σ_prevs = Vector{typeof(Σ0)}(undef, T)
     ll = zero(eltype(μ0))
 
-    for t in 1:T
+    # Compute first cache to get concrete type, then allocate typed vector
+    μ_prevs[1], Σ_prevs[1] = params(state)
+    state = kalman_predict(state, (As[1], bs[1], Qs[1]))
+    state, ll_inc, first_cache = _kalman_update_cached(
+        state, Hs[1], cs[1], Rs[1], ys[1], nothing
+    )
+    ll += ll_inc
+    caches = Vector{typeof(first_cache)}(undef, T)
+    caches[1] = first_cache
+
+    for t in 2:T
         μ_prevs[t], Σ_prevs[t] = params(state)
         state = kalman_predict(state, (As[t], bs[t], Qs[t]))
         state, ll_inc, caches[t] = _kalman_update_cached(
