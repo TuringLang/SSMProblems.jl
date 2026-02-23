@@ -220,7 +220,7 @@ function SSMParameterLogDensity(prior, param_model::ParameterisedSSM, trajectory
 end
 
 function LogDensityProblems.capabilities(::Type{<:SSMParameterLogDensity})
-    LogDensityProblems.LogDensityOrder{0}()
+    return LogDensityProblems.LogDensityOrder{0}()
 end
 
 function LogDensityProblems.dimension(ld::SSMParameterLogDensity)

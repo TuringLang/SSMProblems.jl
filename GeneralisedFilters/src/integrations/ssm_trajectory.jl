@@ -39,7 +39,7 @@ end
 
 # Convenience constructor for regular SSMs (no inner analytical filter needed).
 function SSMTrajectory(model::AbstractStateSpaceModel, observations)
-    SSMTrajectory(model, nothing, observations)
+    return SSMTrajectory(model, nothing, observations)
 end
 
 bijector(::SSMTrajectory) = Bijectors.Identity{1}()
@@ -47,7 +47,7 @@ bijector(::SSMTrajectory) = Bijectors.Identity{1}()
 ## DIMENSIONS ####################################################################################
 
 function _state_dim(d::SSMTrajectory{<:StateSpaceModel})
-    length(SSMProblems.distribution(prior(d.model)))
+    return length(SSMProblems.distribution(prior(d.model)))
 end
 function _state_dim(d::SSMTrajectory{<:HierarchicalSSM})
     return length(SSMProblems.distribution(d.model.outer_prior))
