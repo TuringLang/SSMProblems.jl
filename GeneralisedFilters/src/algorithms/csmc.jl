@@ -311,7 +311,7 @@ _build_bs_ref(state::RBState, back_lik) = RBState(state.x, back_lik)
 function _bs_step_back_lik(
     rng, model, pf, t, ::Nothing, observations, prev_state, next_state
 )
-    nothing
+    return nothing
 end
 
 function _bs_step_back_lik(
