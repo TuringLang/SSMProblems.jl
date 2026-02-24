@@ -113,7 +113,7 @@ A sparse container for particle ancestry, which tracks the lineage of the filter
 Jacob, P., Murray L., & Rubenthaler S. (2015). Path storage in the particle 
 filter [doi:10.1007/s11222-013-9445-x](https://dx.doi.org/10.1007/s11222-013-9445-x)
 """
-mutable struct ParticleTree{T}
+struct ParticleTree{T}
     states::Vector{T}
     parents::Vector{Int64}
     leaves::Vector{Int64}
@@ -180,8 +180,10 @@ function expand!(tree::ParticleTree)
     resize!(tree.states, 2 * M)
 
     # new allocations must be zero valued, this is not a perfect solution
-    tree.parents = [tree.parents; zero(tree.parents)]
-    tree.offspring = [tree.offspring; zero(tree.offspring)]
+    # tree.parents = [tree.parents; zero(tree.parents)]
+    # tree.offspring = [tree.offspring; zero(tree.offspring)]
+    append!(tree.parents, zeros(Int64, M))
+    append!(tree.offspring, zeros(Int64, M))
     append_to_stack!(tree.free_indices, (2 * M):-1:(M + 1))
     return tree
 end
