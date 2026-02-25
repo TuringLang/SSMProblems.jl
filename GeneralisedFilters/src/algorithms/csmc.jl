@@ -130,15 +130,15 @@ end
 ## PARTICLE TREE HELPERS ###################################################################
 
 function _init_tree(state::ParticleDistribution)
-    states = Vector(getfield.(state.particles, :state))
+    states = map(p -> p.state, state.particles)
     N = length(states)
     return ParticleTree(states, floor(Int64, N * log(N)))
 end
 
 function _update_tree!(tree::ParticleTree, state::ParticleDistribution)
     particles = state.particles
-    ancestors = Vector{Int64}(getfield.(particles, :ancestor))
-    states = Vector(getfield.(particles, :state))
+    ancestors = map(p -> p.ancestor, particles)
+    states = map(p -> p.state, particles)
     prune!(tree, get_offspring(ancestors))
     insert!(tree, states, ancestors)
     return tree
