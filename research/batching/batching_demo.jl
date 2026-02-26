@@ -4,7 +4,6 @@ using Distributions
 using LinearAlgebra
 using Base.Broadcast: broadcasted
 using PDMats
-using StructArrays
 using BenchmarkTools
 
 using CUDA
@@ -34,19 +33,20 @@ function kalman_predict(state, dyn_params)
 end
 
 I_mat = CuArray{Float32}(I, D_state, D_state)
-Is = SharedCuMatrix(I_mat)
+Is = Shared(I_mat, N)
 
 μs = BatchedCuVector(CUDA.randn(Float32, D_state, N))
 Σs_root = BatchedCuMatrix(CUDA.randn(Float32, D_state, D_state, N))
 Σs = Σs_root .* adjoint.(Σs_root) .+ Is
 
-As = SharedCuMatrix(CUDA.randn(Float32, D_state, D_state))
+As = Shared(CUDA.randn(Float32, D_state, D_state), N)
 bs = BatchedCuVector(CUDA.randn(Float32, D_state, N))
 Q_root = CUDA.randn(Float32, D_state, D_state)
 Q = Q_root * Q_root' + I
-Qs = SharedCuMatrix(Q)
+Qs = Shared(Q, N)
 
 Σ_PDs = broadcasted(PDMat, Σs);
+PDMat.(Σs)
 Gs = MvNormal.(μs, Σ_PDs);
 
 function kalman_predict(state, dyn_params)
@@ -111,10 +111,10 @@ function kalman_step(state, dyn_params, obs_params, observation)
 end
 
 # Observation parameters (H and c shared, R batched)
-Hs = SharedCuMatrix(CUDA.randn(Float32, D_obs, D_state))
-cs = SharedCuVector(CUDA.randn(Float32, D_obs))
+Hs = Shared(CUDA.randn(Float32, D_obs, D_state), N)
+cs = Shared(CUDA.randn(Float32, D_obs), N)
 I_obs = CuArray{Float32}(I, D_obs, D_obs)
-I_obs_shared = SharedCuMatrix(I_obs)
+I_obs_shared = Shared(I_obs, N)
 Rs_root = BatchedCuMatrix(CUDA.randn(Float32, D_obs, D_obs, N))
 Rs = Rs_root .* adjoint.(Rs_root) .+ I_obs_shared
 Rs = PDMat.(Rs);
@@ -183,23 +183,23 @@ println(
     " MB",
 )
 
-Is_bench = SharedCuMatrix(CuArray{Float32}(I, D_bench, D_bench))
+Is_bench = Shared(CuArray{Float32}(I, D_bench, D_bench), N_bench)
 μs_bench = BatchedCuVector(CUDA.randn(Float32, D_bench, N_bench))
 Σs_root_bench = BatchedCuMatrix(CUDA.randn(Float32, D_bench, D_bench, N_bench))
 Σs_bench = Σs_root_bench .* adjoint.(Σs_root_bench) .+ Is_bench
 Σ_PDs_bench = broadcasted(PDMat, Σs_bench);
 Gs_bench = MvNormal.(μs_bench, Σ_PDs_bench);
 
-As_bench = SharedCuMatrix(CUDA.randn(Float32, D_bench, D_bench))
+As_bench = Shared(CUDA.randn(Float32, D_bench, D_bench), N_bench)
 bs_bench = BatchedCuVector(CUDA.randn(Float32, D_bench, N_bench))
 Qs_root_bench = CUDA.randn(Float32, D_bench, D_bench)
 Qs_bench_mat = Qs_root_bench * adjoint(Qs_root_bench)
 Qs_bench_mat += I
-Qs_bench = SharedCuMatrix(Qs_bench_mat)
+Qs_bench = Shared(Qs_bench_mat, N_bench)
 dyn_params_bench = (As_bench, bs_bench, Qs_bench)
 
-Hs_bench = SharedCuMatrix(CUDA.randn(Float32, D_bench, D_bench))
-cs_bench = SharedCuVector(CUDA.randn(Float32, D_bench))
+Hs_bench = Shared(CUDA.randn(Float32, D_bench, D_bench), N_bench)
+cs_bench = Shared(CUDA.randn(Float32, D_bench), N_bench)
 Rs_root_bench = BatchedCuMatrix(CUDA.randn(Float32, D_bench, D_bench, N_bench))
 Rs_bench = Rs_root_bench .* adjoint.(Rs_root_bench) .+ Is_bench
 Rs_bench = PDMat.(Rs_bench)

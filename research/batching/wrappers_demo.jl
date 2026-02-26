@@ -1,7 +1,6 @@
 using GeneralisedFilters
 using CUDA
 using LinearAlgebra
-using StructArrays
 using Base.Broadcast: broadcasted
 using Distributions
 using PDMats
@@ -90,7 +89,7 @@ println("\nValues match (A vs parent of A_adj): ", A_cpu ≈ A_adj_cpu)
 
 println("\n=== Test 5: SharedCuMatrix wrappers ===\n")
 
-S = SharedCuMatrix(CUDA.randn(Float32, D, D));
+S = Shared(CUDA.randn(Float32, D, D), N);
 S_adj = broadcasted(Adjoint, S);
 println("SharedCuMatrix adjoint type: ", typeof(S_adj))
 println("SharedCuMatrix adjoint eltype: ", eltype(S_adj))

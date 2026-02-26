@@ -1,7 +1,6 @@
 using Magma
 using Magma.LibMagma
 using LinearAlgebra: cholesky, Cholesky, LowerTriangular
-using StructArrays: StructArray
 
 export get_magma_queue, reset_magma_queue!
 
@@ -56,7 +55,7 @@ function broadcasted(
     B::Union{BatchedCuMatrix{T},SharedCuMatrix{T}},
 ) where {T}
     if is_shared(A) && is_shared(B)
-        return SharedCuMatrix(A.data .+ B.data)
+        return SharedCuMatrix(A.data .+ B.data, batch_size(A))
     else
         return BatchedCuMatrix(A.data .+ B.data)
     end
@@ -68,7 +67,7 @@ function broadcasted(
     b::Union{BatchedCuVector{T},SharedCuVector{T}},
 ) where {T}
     if is_shared(a) && is_shared(b)
-        return SharedCuVector(a.data .+ b.data)
+        return SharedCuVector(a.data .+ b.data, batch_size(a))
     else
         return BatchedCuVector(a.data .+ b.data)
     end
@@ -80,7 +79,7 @@ function broadcasted(
     B::Union{BatchedCuMatrix{T},SharedCuMatrix{T}},
 ) where {T}
     if is_shared(A) && is_shared(B)
-        return SharedCuMatrix(A.data .- B.data)
+        return SharedCuMatrix(A.data .- B.data, batch_size(A))
     else
         return BatchedCuMatrix(A.data .- B.data)
     end
@@ -92,7 +91,7 @@ function broadcasted(
     b::Union{BatchedCuVector{T},SharedCuVector{T}},
 ) where {T}
     if is_shared(a) && is_shared(b)
-        return SharedCuVector(a.data .- b.data)
+        return SharedCuVector(a.data .- b.data, batch_size(a))
     else
         return BatchedCuVector(a.data .- b.data)
     end
@@ -161,8 +160,8 @@ function gemm_batched!(
     m, n = size(C.data, 1), size(C.data, 2)
     k = transA == 'N' ? size(unwrap_data(A), 2) : size(unwrap_data(A), 1)
 
-    dA = A isa BatchedCuMatrix ? create_pointer_array(A) : create_pointer_array(A, N)
-    dB = B isa BatchedCuMatrix ? create_pointer_array(B) : create_pointer_array(B, N)
+    dA = create_pointer_array(A)
+    dB = create_pointer_array(B)
     dC = create_pointer_array(C)
 
     ldda = size(unwrap_data(A), 1)
@@ -214,8 +213,8 @@ function gemm_batched_smallsq!(
     m, n = size(C.data, 1), size(C.data, 2)
     k = transA == 'N' ? size(unwrap_data(A), 2) : size(unwrap_data(A), 1)
 
-    dA = A isa BatchedCuMatrix ? create_pointer_array(A) : create_pointer_array(A, N)
-    dB = B isa BatchedCuMatrix ? create_pointer_array(B) : create_pointer_array(B, N)
+    dA = create_pointer_array(A)
+    dB = create_pointer_array(B)
     dC = create_pointer_array(C)
 
     ldda = size(unwrap_data(A), 1)
@@ -269,8 +268,8 @@ function gemm_batched_smallsq!(
     m, n = size(C.data, 1), size(C.data, 2)
     k = transA == 'N' ? size(unwrap_data(A), 2) : size(unwrap_data(A), 1)
 
-    dA = A isa BatchedCuMatrix ? create_pointer_array(A) : create_pointer_array(A, N)
-    dB = B isa BatchedCuMatrix ? create_pointer_array(B) : create_pointer_array(B, N)
+    dA = create_pointer_array(A)
+    dB = create_pointer_array(B)
     dC = create_pointer_array(C)
 
     ldda = size(unwrap_data(A), 1)
@@ -322,13 +321,9 @@ function gemv_batched!(
     N = batch_size(y)
     m, n = size(unwrap_data(A), 1), size(unwrap_data(A), 2)
 
-    dA = A isa BatchedCuMatrix ? create_pointer_array(A) : create_pointer_array(A, N)
-    dx = if x isa BatchedCuVector
-        create_pointer_array_vector(x)
-    else
-        create_pointer_array_vector(x, N)
-    end
-    dy = create_pointer_array_vector(y)
+    dA = create_pointer_array(A)
+    dx = create_pointer_array(x)
+    dy = create_pointer_array(y)
 
     ldda = m
     incx = 1
@@ -359,13 +354,9 @@ function gemv_batched!(
     N = batch_size(y)
     m, n = size(unwrap_data(A), 1), size(unwrap_data(A), 2)
 
-    dA = A isa BatchedCuMatrix ? create_pointer_array(A) : create_pointer_array(A, N)
-    dx = if x isa BatchedCuVector
-        create_pointer_array_vector(x)
-    else
-        create_pointer_array_vector(x, N)
-    end
-    dy = create_pointer_array_vector(y)
+    dA = create_pointer_array(A)
+    dx = create_pointer_array(x)
+    dy = create_pointer_array(y)
 
     ldda = m
     incx = 1
@@ -396,13 +387,9 @@ function gemv_batched_smallsq!(
     N = batch_size(y)
     n = size(unwrap_data(A), 1)
 
-    dA = A isa BatchedCuMatrix ? create_pointer_array(A) : create_pointer_array(A, N)
-    dx = if x isa BatchedCuVector
-        create_pointer_array_vector(x)
-    else
-        create_pointer_array_vector(x, N)
-    end
-    dy = create_pointer_array_vector(y)
+    dA = create_pointer_array(A)
+    dx = create_pointer_array(x)
+    dy = create_pointer_array(y)
 
     ldda = n
     incx = 1
@@ -519,11 +506,11 @@ function broadcasted(::typeof(cholesky), A::BatchedCuMatrix{T,M}) where {T,M}
 
     factors_wrapped = broadcasted(LowerTriangular, A_copy)
 
-    # TODO: Use a lazy constant vector for uplo instead of dense fill
-    uplo = fill('L', N)
+    # Store as SharedScalar since it's the same for all batch elements
+    uplo = SharedScalar('L')
 
     ElType = Cholesky{T,eltype(A)}
-    return StructArray{ElType}((; factors=factors_wrapped, uplo=uplo, info=info))
+    return BatchedStruct{ElType}((; factors=factors_wrapped, uplo=uplo, info=info))
 end
 
 # function pdmat_solve(S::BatchedPDMat{T}, B::BatchedCuMatrix{T}) where {T}

@@ -5,7 +5,6 @@ using Distributions
 using LinearAlgebra
 using Base.Broadcast: broadcasted
 using PDMats
-using StructArrays
 using BenchmarkTools
 import Distributions: params
 
@@ -34,8 +33,8 @@ Qs = PDMat.(Qs);
 Gs = MvNormal.(μs, Σ_PDs);
 
 # Observation parameters (H and c shared, R batched)
-Hs = BatchedCuMatrix(CUDA.randn(Float32, D_obs, D_state, N))
-cs = BatchedCuVector(CUDA.randn(Float32, D_obs, N))
+Hs = Shared(CUDA.randn(Float32, D_obs, D_state), N)
+cs = Shared(CUDA.randn(Float32, D_obs), N)
 Rs_root = BatchedCuMatrix(CUDA.randn(Float32, D_obs, D_obs, N))
 Rs = Rs_root .* adjoint.(Rs_root) .+ Ref(I)
 Rs = PDMat.(Rs);
@@ -77,4 +76,5 @@ res = kalman_step.(Gs, dyn_params, obs_params, observations, Ref(jitter))
 println("\nFull type: ", typeof(res))
 println("\nElement type: ", eltype(res))
 
-lls = StructArrays.component(res, 2)
+# Access second component of batched tuple (the log-likelihoods)
+lls = res.components[2]

@@ -5,18 +5,18 @@ import LinearAlgebra: norm
 # GEMM-Compatible Types
 # =============================================================================
 
-# Type aliases for StructArray-wrapped matrices
-const BatchedAdjoint{T,M} = StructArray{
-    Adjoint{T,CuArray{T,2,M}},1,@NamedTuple{parent::BatchedCuMatrix{T,M}}
+# Type aliases for BatchedStruct-wrapped matrices
+const BatchedAdjoint{T,M} = BatchedStruct{
+    Adjoint{T,CuArray{T,2,M}},@NamedTuple{parent::BatchedCuMatrix{T,M}}
 }
-const BatchedTranspose{T,M} = StructArray{
-    Transpose{T,CuArray{T,2,M}},1,@NamedTuple{parent::BatchedCuMatrix{T,M}}
+const BatchedTranspose{T,M} = BatchedStruct{
+    Transpose{T,CuArray{T,2,M}},@NamedTuple{parent::BatchedCuMatrix{T,M}}
 }
-const SharedAdjoint{T,M} = StructArray{
-    Adjoint{T,CuArray{T,2,M}},1,@NamedTuple{parent::SharedCuMatrix{T,M}}
+const SharedAdjoint{T,M} = BatchedStruct{
+    Adjoint{T,CuArray{T,2,M}},@NamedTuple{parent::SharedCuMatrix{T,M}}
 }
-const SharedTranspose{T,M} = StructArray{
-    Transpose{T,CuArray{T,2,M}},1,@NamedTuple{parent::SharedCuMatrix{T,M}}
+const SharedTranspose{T,M} = BatchedStruct{
+    Transpose{T,CuArray{T,2,M}},@NamedTuple{parent::SharedCuMatrix{T,M}}
 }
 
 # Union of all GEMM-compatible matrix types
@@ -224,7 +224,7 @@ end
 # =============================================================================
 
 # HACK: PDMat is a constructor so will use
-# `broadcasted(::Type{W}, args::Union{BatchedCuMatrix, BatchedCuVector, SharedCuMatrix, SharedCuVector, StructArray}...) where W`
+# `broadcasted(::Type{W}, args::BatchedOrShared...) where W`
 # rather than the desired recursive broadcast to
 # `PDMat(mat::AbstractMatrix) = PDMat(mat, cholesky(mat))`
 # This method hardcodes a manual override for BatchedCuMatrix inputs. This should be replaced
@@ -237,13 +237,13 @@ end
 # HACK: Addition with PDMat extracts .mat field. Should be replaced by automatic
 # materialization of PDMat to BatchedCuMatrix in the future.
 function broadcasted(
-    ::typeof(+), A::BatchedCuMatrix{T}, P::StructArray{<:PDMat{T}}
+    ::typeof(+), A::BatchedCuMatrix{T}, P::BatchedStruct{<:PDMat{T}}
 ) where {T}
     return broadcasted(+, A, P.mat)
 end
 
 function broadcasted(
-    ::typeof(+), P::StructArray{<:PDMat{T}}, A::BatchedCuMatrix{T}
+    ::typeof(+), P::BatchedStruct{<:PDMat{T}}, A::BatchedCuMatrix{T}
 ) where {T}
     return broadcasted(+, P.mat, A)
 end
@@ -251,7 +251,7 @@ end
 # A / S where S is PDMat: computes A * inv(S)
 # potrs solves S * X = B, so we solve S * X = A' and transpose back
 function broadcasted(
-    ::typeof(/), A::BatchedCuMatrix{T}, S::StructArray{<:PDMat{T}}
+    ::typeof(/), A::BatchedCuMatrix{T}, S::BatchedStruct{<:PDMat{T}}
 ) where {T}
     L = S.chol.factors.data
 
@@ -280,16 +280,16 @@ function broadcasted(
     return broadcasted(*, temp, Xt)
 end
 
-# X_A_Xt for StructArray{PDMat}: X * P * X' where P = L * L'
+# X_A_Xt for BatchedStruct{PDMat}: X * P * X' where P = L * L'
 # Computed as (X * L) * (X * L)' using TRMM and SYRK
 # HACK: this function should dispatch to specialised `*` for triangular types but this is
 # not yet implemented
 function broadcasted(
     ::typeof(X_A_Xt),
-    P::StructArray{<:PDMat{T}},
+    P::BatchedStruct{<:PDMat{T}},
     X::Union{BatchedCuMatrix{T},SharedCuMatrix{T}},
 ) where {T}
-    # P.chol.factors is StructArray{LowerTriangular}, .data is the BatchedCuMatrix
+    # P.chol.factors is BatchedStruct{LowerTriangular}, .parent is the BatchedCuMatrix
     L = P.chol.factors.data
     N = get_batch_size(L, X)
     out_dim = inner_size_for_blas(X)[1]
@@ -374,14 +374,14 @@ function broadcasted(::typeof(length), v::BatchedCuVector)
     return size(v.data, 1)
 end
 
-# logdetcov for StructArray{MvNormal}: delegates to the covariance matrix
-function broadcasted(::typeof(logdetcov), d::StructArray{<:MvNormal{T}}) where {T}
+# logdetcov for BatchedStruct{MvNormal}: delegates to the covariance matrix
+function broadcasted(::typeof(logdetcov), d::BatchedStruct{<:MvNormal{T}}) where {T}
     return broadcasted(logdetcov, d.Σ)
 end
 
-# logdetcov for StructArray{PDMat}: 2 * sum(log.(diag(L))) for each batch element
-function broadcasted(::typeof(logdetcov), P::StructArray{<:PDMat{T}}) where {T}
-    # P.chol.factors is StructArray{LowerTriangular}, .data is BatchedCuMatrix
+# logdetcov for BatchedStruct{PDMat}: 2 * sum(log.(diag(L))) for each batch element
+function broadcasted(::typeof(logdetcov), P::BatchedStruct{<:PDMat{T}}) where {T}
+    # P.chol.factors is BatchedStruct{LowerTriangular}, .parent is BatchedCuMatrix
     L_data = P.chol.factors.data.data  # D×D×N CuArray
     D, _, N = size(L_data)
 
@@ -394,10 +394,10 @@ function broadcasted(::typeof(logdetcov), P::StructArray{<:PDMat{T}}) where {T}
     return vec(T(2) .* sum(log.(diag_matrix); dims=1))
 end
 
-# invquad for StructArray{PDMat} and BatchedCuVector: x' * inv(P) * x
+# invquad for BatchedStruct{PDMat} and BatchedCuVector: x' * inv(P) * x
 # Computed as: solve P*y = x (via potrs), then dot(x, y)
 function broadcasted(
-    ::typeof(invquad), P::StructArray{<:PDMat{T}}, x::BatchedCuVector{T}
+    ::typeof(invquad), P::BatchedStruct{<:PDMat{T}}, x::BatchedCuVector{T}
 ) where {T}
     L = P.chol.factors.data  # BatchedCuMatrix (D×D×N)
     D, N = size(x.data)
@@ -413,9 +413,9 @@ function broadcasted(
     return vec(sum(x.data .* y_vec; dims=1))
 end
 
-# sqmahal for StructArray{MvNormal} and BatchedCuVector: (x - μ)' * inv(Σ) * (x - μ)
+# sqmahal for BatchedStruct{MvNormal} and BatchedCuVector: (x - μ)' * inv(Σ) * (x - μ)
 function broadcasted(
-    ::typeof(sqmahal), d::StructArray{<:MvNormal{T}}, x::BatchedCuVector{T}
+    ::typeof(sqmahal), d::BatchedStruct{<:MvNormal{T}}, x::BatchedCuVector{T}
 ) where {T}
     diff = broadcasted(-, x, d.μ)
     return broadcasted(invquad, d.Σ, diff)
