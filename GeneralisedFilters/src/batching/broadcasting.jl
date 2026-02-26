@@ -324,6 +324,10 @@ function Broadcast.materialize(bc::Broadcasted{BatchedStyle})
     f = bc.f
     N = _find_batch_size(bc.args)
     args = map(a -> maybe_convert_ref(a, N), bc.args)
+    # Julia's broadcast fusion leaves inner dot-calls as lazy Broadcasted objects.
+    # Materialize them before dispatch so specialized broadcasted methods see concrete types.
+    # TODO: is this desirable?
+    args = map(a -> a isa Broadcasted ? Broadcast.materialize(a) : a, args)
 
     result = broadcasted(f, args...)
     if !(result isa Broadcasted)
