@@ -716,7 +716,7 @@ function symmetrize_lower_kernel!(A, n)
     j = (blockIdx().y - Int32(1)) * blockDim().y + threadIdx().y
 
     if i <= n && j <= n && j > i
-        @inbounds A[j, i, batch_idx] = A[i, j, batch_idx]
+        @inbounds A[i, j, batch_idx] = A[j, i, batch_idx]
     end
     return nothing
 end
