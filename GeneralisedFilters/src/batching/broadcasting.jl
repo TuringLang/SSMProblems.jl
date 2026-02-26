@@ -94,10 +94,6 @@ function broadcasted(::Type{W}, args::Vararg{BatchedOrShared}) where {W}
     return BatchedStruct{ElType}(nt)
 end
 
-# Redirect function forms to type constructors
-broadcasted(::typeof(adjoint), A::BatchedOrShared) = broadcasted(Adjoint, A)
-broadcasted(::typeof(transpose), A::BatchedOrShared) = broadcasted(Transpose, A)
-
 # copy for Adjoint/Transpose wrappers - materialize the transposition
 function broadcasted(::typeof(copy), x::BatchedStruct{<:Adjoint})
     parent_data = x.parent  # BatchedCuMatrix or SharedCuMatrix
