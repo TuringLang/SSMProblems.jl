@@ -46,6 +46,7 @@
         b ~ MvNormal([0.0], 4.0 * I)
         ssm = build_ssm_smoke(b)
         x ~ SSMTrajectory(ssm, ys)
+        return nothing
     end
 
     m = drift_model_smoke(ys)
@@ -103,6 +104,7 @@ end
         b ~ MvNormal([0.0], 4.0 * I)
         ssm = build_ssm_mh(b)
         x ~ SSMTrajectory(ssm, ys)
+        return nothing
     end
 
     m = drift_model_mh(ys)
@@ -174,6 +176,7 @@ end
         b ~ MvNormal([0.0], σ_b² * I)
         ssm = build_ssm_reg(b)
         x ~ SSMTrajectory(ssm, ys)
+        return nothing
     end
 
     m = drift_model_reg(ys)
@@ -235,6 +238,7 @@ end
         b ~ MvNormal(zeros(Dz), σ²_b * I)
         ssm = GeneralisedFilters.GFTest.with_inner_drift(fixed, b)
         x ~ SSMTrajectory(ssm, KF(), ys)
+        return nothing
     end
 
     m = drift_model_hier(ys)
