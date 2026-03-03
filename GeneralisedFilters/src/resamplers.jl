@@ -241,7 +241,9 @@ function sample_ancestors(
     rng::AbstractRNG, ::Systematic, weights::AbstractVector{WT}, n::Int64=length(weights)
 ) where {WT<:Real}
     # pre-calculations
-    vs = n * cumsum(weights)
+    vs = cumsum(weights)
+    vs *= n
+
     u0 = rand(rng, WT)
 
     # initialize sampling algorithm
