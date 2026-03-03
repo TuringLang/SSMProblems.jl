@@ -24,10 +24,14 @@ using Statistics
 
 using AbstractMCMC: AbstractMCMC
 using AdvancedHMC: NUTS, HMC
+using AdvancedMH: AdvancedMH
 using ADTypes: ADTypes
 using MCMCChains: MCMCChains
+using Printf
 using Turing: @model
 using Zygote
+using ReverseDiff
+using Mooncake
 import ChainRulesCore: ChainRulesCore, NoTangent
 
 const GF = GeneralisedFilters
@@ -303,39 +307,77 @@ end
 
 rng = MersenneTwister(42)
 
-N_particles = 1000
-N_iter = 50
-N_adapts = 10
+N_particles = 100
+N_iter = 1000
+N_adapts = 1000
 
 model = dfsv(ys)
 
 sampler = HMC(0.01, 10)
 # sampler = NUTS(0.85)
 pg = ParticleGibbs(
-    CSMCAS(RBPF(BF(N_particles), KF())), sampler; adtype=ADTypes.AutoZygote()
+    CSMCAS(RBPF(BF(N_particles), KF())), sampler; adtype=ADTypes.AutoMooncake()
 )
 
-chain = AbstractMCMC.sample(
+hmc_elapsed = @elapsed chain_hmc = AbstractMCMC.sample(
     rng, model, pg, N_iter; n_adapts=N_adapts, progress=true, chain_type=MCMCChains.Chains
 )
+
+# ### ESS-per-second summary
+
+function report_ess_per_sec(chain, elapsed, label)
+    er = MCMCChains.ess_rhat(chain)
+    param_nms = er.nt.parameters
+    ess_vals = er.nt.ess
+    println("\n=== $label ($(round(elapsed; digits=1))s) ===")
+    @printf "%-22s  %7s  %8s\n" "Parameter" "ESS" "ESS/s"
+    for (nm, e) in zip(param_nms, ess_vals)
+        @printf "%-22s  %7.1f  %8.3f\n" nm e (e / elapsed)
+    end
+    ess_per_s = ess_vals ./ elapsed
+    @printf "\nMin / Median / Mean ESS/s:  %.3f / %.3f / %.3f\n" minimum(ess_per_s) median(
+        ess_per_s
+    ) mean(ess_per_s)
+    return ess_per_s
+end
+
+report_ess_per_sec(chain_hmc, hmc_elapsed, "HMC (PGAS)");
+
+# ### MH comparison with HMC-estimated proposal
+#
+# Estimate the unconstrained-space covariance from the HMC chain and use it as
+# the proposal covariance for a random-walk Metropolis-Hastings step. The AM
+# scaling (2.38²/d) gives near-optimal acceptance rate for a Gaussian target.
+
+d_param = length(names(chain_hmc, :parameters))
+Σ_mh = (2.38^2 / d_param) * cov(Array(chain_hmc)[:, 1:d_param, 1])
+
+rng_mh = MersenneTwister(43)
+pg_mh = ParticleGibbs(
+    CSMCAS(RBPF(BF(N_particles), KF())), AdvancedMH.RWMH(MvNormal(zeros(d_param), Σ_mh))
+)
+
+mh_elapsed = @elapsed chain_mh = AbstractMCMC.sample(
+    rng_mh, model, pg_mh, N_iter; progress=true, chain_type=MCMCChains.Chains
+)
+
+report_ess_per_sec(chain_mh, mh_elapsed, "MH with HMC-estimated proposal (PGAS)");
 
 # ## Results
 
 # ### Posterior parameter traces
 #
-# The traces (post-adaptation) illustrate NUTS mixing across the 20-dimensional
-# parameter block. Slow mixing or high autocorrelation in random-walk MH on this
-# block would be expected; NUTS largely avoids this by exploiting gradient
-# information.
+# The traces (post-adaptation) illustrate HMC mixing across the 20-dimensional
+# parameter block.
 
-plot_chains(chain; burnin=N_adapts)
+display(plot_chains(chain_hmc; burnin=N_adapts))
 
 # ### Posterior volatility paths
 #
 # To recover the smoothed volatility paths we re-run a forward filter using the
 # posterior mean parameters and collect the particle states via a callback.
 
-post = MCMCChains.summarize(chain[(N_adapts + 1):end])
+post = MCMCChains.summarize(chain_hmc[(N_adapts + 1):end])
 
 function posterior_mean_params(chain, burnin)
     get_mean(k) = mean(Array(chain[(burnin + 1):end, k, 1]))
@@ -350,7 +392,7 @@ function posterior_mean_params(chain, burnin)
     return λ_free, ρ_raw, log_q, atanh_φ_g, log_σ_g, atanh_φ_u, log_σ_u, a
 end
 
-params = posterior_mean_params(chain, N_adapts)
+params = posterior_mean_params(chain_hmc, N_adapts)
 ssm_post = build_dfsv(params...)
 
 cb = GF.AncestorCallback(nothing)
