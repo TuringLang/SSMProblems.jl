@@ -4,41 +4,60 @@ Mooncake.jl integration for the Kalman filter log-likelihood gradient.
 This file implements a native Mooncake rrule!! for `kf_loglikelihood` using the
 analytical gradient formulas from `kalman_gradient.jl`.
 
-Note: We cannot use `@from_rrule` to wrap our ChainRulesCore.rrule because of a
-tangent type mismatch. ChainRules returns plain `Matrix` gradients for `PDMat`
-arguments, but Mooncake expects structured tangents (`Tangent{@NamedTuple{mat, chol}}`).
-The native rrule handles this by manually placing gradients into the correct fields.
-
-Limitation: This rrule currently only supports mutable array types (Vector, Matrix).
-StaticArrays (SVector, SMatrix) are not yet supported due to Mooncake's NoFData
-handling for immutable types.
+The implementation properly handles both mutable (Vector, Matrix) and immutable
+(SVector, SMatrix) array types by respecting Mooncake's fdata/rdata separation:
+- Mutable inputs: gradients accumulated in fdata, pullback returns NoRData
+- Immutable inputs: pullback returns RData containing the gradient
 """
 
-using Mooncake: Mooncake, @is_primitive, CoDual, primal, tangent, NoFData, NoRData, FData
+using Mooncake: Mooncake, @is_primitive, CoDual, primal, tangent
+using Mooncake: NoFData, NoRData, RData, Tangent
+using Mooncake: zero_tangent, rdata, primal_to_tangent!!, increment!!
 
-# Helpers to increment tangents. Returns the updated tangent (may be mutated or new object).
-# Mutable arrays: in-place addition
-function _inc_tangent(t::AbstractArray, val)
-    t .+= val
-    return t
-end
+"""
+    _update_vector_tangent!(fdata, idx, grad_value, primal_value)
 
-# FData for PDMat: the mat field is a mutable Matrix, mutate it directly
-function _inc_tangent(t::FData, val)
-    t.data.mat .+= val
-    return t
-end
-
-# Tangent for PDMat: has mat and chol fields
-function _inc_tangent(t::Mooncake.Tangent{<:NamedTuple{(:mat, :chol)}}, val)
-    new_mat = _inc_tangent(t.fields.mat, val)
-    return Mooncake.Tangent((mat=new_mat, chol=t.fields.chol))
-end
-
-# Helper for vector of tangents - handles reassignment for immutable tangents
-function _inc_tangent_at!(tv::AbstractVector, idx::Integer, val)
-    tv[idx] = _inc_tangent(tv[idx], val)
+Accumulate the gradient into the tangent at index `idx` in the fdata vector.
+Uses `increment!!` to properly accumulate gradients, which is essential for
+handling aliased elements (e.g., from `fill(x, n)`).
+"""
+function _update_vector_tangent!(
+    fdata::AbstractVector, idx::Integer, grad_value, primal_value
+)
+    # Convert gradient to tangent type, then accumulate
+    grad_tangent = primal_to_tangent!!(zero_tangent(primal_value), grad_value)
+    fdata[idx] = increment!!(fdata[idx], grad_tangent)
     return nothing
+end
+
+# Special handling for PDMat: the gradient is w.r.t. the underlying matrix, not the PDMat itself.
+# The tangent for PDMat has structure Tangent{@NamedTuple{mat::..., chol::...}}.
+# We accumulate only into the mat field.
+function _update_vector_tangent!(
+    fdata::AbstractVector{<:Tangent{<:NamedTuple{(:mat, :chol)}}},
+    idx::Integer,
+    grad_value,
+    primal_value::PDMat,
+)
+    old_tangent = fdata[idx]
+    # Convert gradient to mat field tangent type, then accumulate
+    grad_mat_tangent = primal_to_tangent!!(zero_tangent(primal_value.mat), grad_value)
+    new_mat_tangent = increment!!(old_tangent.fields.mat, grad_mat_tangent)
+    # Reconstruct the PDMat tangent with accumulated mat field
+    fdata[idx] = Tangent((mat=new_mat_tangent, chol=old_tangent.fields.chol))
+    return nothing
+end
+
+"""
+    _compute_rdata(grad_value, primal_value)
+
+Compute the RData for an immutable input given its gradient value.
+Creates a zero tangent matching the primal, fills it with the gradient,
+and extracts the rdata portion.
+"""
+function _compute_rdata(grad_value, primal_value)
+    t = primal_to_tangent!!(zero_tangent(primal_value), grad_value)
+    return rdata(t)
 end
 
 """
@@ -47,6 +66,9 @@ end
 Native Mooncake reverse-mode AD rule for the Kalman filter log-likelihood.
 The forward pass runs the KF with gradient caching; the pullback computes
 analytical gradients using the backward recursion from `kalman_gradient.jl`.
+
+Supports both mutable (Vector, Matrix, PDMat{Matrix}) and immutable
+(SVector, SMatrix, PDMat{SMatrix}) array types.
 """
 function Mooncake.rrule!!(
     ::CoDual{typeof(kf_loglikelihood)},
@@ -66,10 +88,10 @@ function Mooncake.rrule!!(
     Hs_p, cs_p, Rs_p = primal(Hs), primal(cs), primal(Rs)
     ys_p = primal(ys)
 
-    # Extract tangent storage
-    dμ0, dΣ0 = tangent(μ0), tangent(Σ0)
-    dAs, dbs, dQs = tangent(As), tangent(bs), tangent(Qs)
-    dHs, dcs, dRs = tangent(Hs), tangent(cs), tangent(Rs)
+    # Extract tangent storage (fdata for mutable, NoFData for immutable)
+    t_μ0, t_Σ0 = tangent(μ0), tangent(Σ0)
+    t_As, t_bs, t_Qs = tangent(As), tangent(bs), tangent(Qs)
+    t_Hs, t_cs, t_Rs = tangent(Hs), tangent(cs), tangent(Rs)
 
     n = length(ys_p)
 
@@ -107,30 +129,70 @@ function Mooncake.rrule!!(
             s = -Δll  # Convert from LL gradient to NLL gradient convention
 
             # Observation parameter gradients
-            _inc_tangent_at!(dcs, t, s * gradient_c(∂μ, cache))
-            _inc_tangent_at!(dHs, t, s * gradient_H(∂μ, ∂Σ, cache, cache.Σ_pred, Hs_p[t]))
-            _inc_tangent_at!(dRs, t, s * gradient_R(∂μ, ∂Σ, cache))
+            grad_c = s * gradient_c(∂μ, cache)
+            grad_H = s * gradient_H(∂μ, ∂Σ, cache, cache.Σ_pred, Hs_p[t])
+            grad_R = s * gradient_R(∂μ, ∂Σ, cache)
+
+            _update_vector_tangent!(t_cs, t, grad_c, cs_p[t])
+            _update_vector_tangent!(t_Hs, t, grad_H, Hs_p[t])
+            _update_vector_tangent!(t_Rs, t, grad_R, Rs_p[t])
 
             # Propagate through update step
             ∂μ_pred, ∂Σ_pred = backward_gradient_update(∂μ, ∂Σ, cache, Hs_p[t], Rs_p[t])
 
             # Dynamics parameter gradients
-            _inc_tangent_at!(dbs, t, s * gradient_b(∂μ_pred))
-            _inc_tangent_at!(
-                dAs, t, s * gradient_A(∂μ_pred, ∂Σ_pred, μ_prevs[t], Σ_prevs[t], As_p[t])
-            )
-            _inc_tangent_at!(dQs, t, s * gradient_Q(∂Σ_pred))
+            grad_b = s * gradient_b(∂μ_pred)
+            grad_A = s * gradient_A(∂μ_pred, ∂Σ_pred, μ_prevs[t], Σ_prevs[t], As_p[t])
+            grad_Q = s * gradient_Q(∂Σ_pred)
+
+            _update_vector_tangent!(t_bs, t, grad_b, bs_p[t])
+            _update_vector_tangent!(t_As, t, grad_A, As_p[t])
+            _update_vector_tangent!(t_Qs, t, grad_Q, Qs_p[t])
 
             # Propagate through predict step
             ∂μ, ∂Σ = backward_gradient_predict(∂μ_pred, ∂Σ_pred, As_p[t])
         end
 
-        # Initial state gradients
-        _inc_tangent(dμ0, -Δll * ∂μ)
-        _inc_tangent(dΣ0, -Δll * ∂Σ)
+        # Initial state gradients (scaled by -Δll for LL convention)
+        grad_μ0 = -Δll * ∂μ
+        grad_Σ0 = -Δll * ∂Σ
 
-        # Return NoRData for all arguments (gradients accumulated in fdata)
-        return ntuple(_ -> NoRData(), 10)
+        # Handle μ0: check if mutable or immutable
+        rdata_μ0 = if t_μ0 isa NoFData
+            _compute_rdata(grad_μ0, μ0_p)
+        else
+            primal_to_tangent!!(t_μ0, grad_μ0)
+            NoRData()
+        end
+
+        # Handle Σ0: check if mutable or immutable
+        # Note: For PDMat, the gradient is w.r.t. the mat field
+        rdata_Σ0 = if t_Σ0 isa NoFData
+            # Immutable PDMat (e.g., PDMat{SMatrix})
+            # Create a tangent and set the mat field
+            t_new = zero_tangent(Σ0_p)
+            t_mat = primal_to_tangent!!(t_new.fields.mat, grad_Σ0)
+            rdata(Tangent((mat=t_mat, chol=t_new.fields.chol)))
+        else
+            # Mutable PDMat: update mat field in fdata
+            primal_to_tangent!!(t_Σ0.data.mat, grad_Σ0)
+            NoRData()
+        end
+
+        # Vector arguments: always mutable containers, return NoRData
+        # (the individual element tangents were updated in place above)
+        return (
+            NoRData(),   # function
+            rdata_μ0,    # μ0
+            rdata_Σ0,    # Σ0
+            NoRData(),   # As
+            NoRData(),   # bs
+            NoRData(),   # Qs
+            NoRData(),   # Hs
+            NoRData(),   # cs
+            NoRData(),   # Rs
+            NoRData(),   # ys
+        )
     end
 
     return CoDual(ll, NoFData()), kf_loglikelihood_mooncake_pb
