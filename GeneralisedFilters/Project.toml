@@ -6,6 +6,7 @@ authors = ["THargreaves <tim.hargreaves@icloud.com>", "Charles Knipp <charleskni
 [deps]
 AbstractMCMC = "80f14c24-f653-4e6a-9b94-39d6b0f70001"
 AcceleratedKernels = "6a4ca0a5-0e36-4168-a932-d9be78d558f1"
+Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
@@ -25,6 +26,7 @@ StructArrays = "09ab397b-f2b6-538f-b94a-2f83cf4a842a"
 [compat]
 AbstractMCMC = "5"
 AcceleratedKernels = "0.3, 0.4"
+Adapt = "4.5.0"
 Aqua = "0.8"
 CUDA = "5"
 DataStructures = "0.18.20, 0.19"

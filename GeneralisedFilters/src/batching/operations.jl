@@ -6,17 +6,17 @@ import LinearAlgebra: norm
 # =============================================================================
 
 # Type aliases for BatchedStruct-wrapped matrices
-const BatchedAdjoint{T,M} = BatchedStruct{
-    Adjoint{T,CuArray{T,2,M}},@NamedTuple{parent::BatchedCuMatrix{T,M}}
+const BatchedAdjoint{T,A<:AbstractArray{T,3}} = BatchedStruct{
+    <:Adjoint{T,<:AbstractArray{T,2}},@NamedTuple{parent::BatchedCuMatrix{T,A}}
 }
-const BatchedTranspose{T,M} = BatchedStruct{
-    Transpose{T,CuArray{T,2,M}},@NamedTuple{parent::BatchedCuMatrix{T,M}}
+const BatchedTranspose{T,A<:AbstractArray{T,3}} = BatchedStruct{
+    <:Transpose{T,<:AbstractArray{T,2}},@NamedTuple{parent::BatchedCuMatrix{T,A}}
 }
-const SharedAdjoint{T,M} = BatchedStruct{
-    Adjoint{T,CuArray{T,2,M}},@NamedTuple{parent::SharedCuMatrix{T,M}}
+const SharedAdjoint{T,A<:AbstractArray{T,2}} = BatchedStruct{
+    <:Adjoint{T,<:AbstractArray{T,2}},@NamedTuple{parent::SharedCuMatrix{T,A}}
 }
-const SharedTranspose{T,M} = BatchedStruct{
-    Transpose{T,CuArray{T,2,M}},@NamedTuple{parent::SharedCuMatrix{T,M}}
+const SharedTranspose{T,A<:AbstractArray{T,2}} = BatchedStruct{
+    <:Transpose{T,<:AbstractArray{T,2}},@NamedTuple{parent::SharedCuMatrix{T,A}}
 }
 
 # Union of all GEMM-compatible matrix types
