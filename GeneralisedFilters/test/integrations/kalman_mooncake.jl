@@ -1,6 +1,6 @@
 """Tests for Mooncake.jl integration with kf_loglikelihood."""
 
-@testitem "kf_loglikelihood Mooncake: dense arrays" begin
+@testitem "kf_loglikelihood Mooncake: dense arrays" tags = [:mooncake] begin
     using GeneralisedFilters
     using Mooncake
     using Zygote
@@ -34,7 +34,7 @@
     @test grad_mooncake ≈ grad_zygote rtol = 1e-6
 end
 
-@testitem "kf_loglikelihood Mooncake: StaticArrays" begin
+@testitem "kf_loglikelihood Mooncake: StaticArrays" tags = [:mooncake] begin
     using GeneralisedFilters
     using Mooncake
     using Zygote
@@ -84,7 +84,7 @@ end
     @test grad_mooncake ≈ grad_zygote rtol = 1e-6
 end
 
-@testitem "kf_loglikelihood Mooncake: PDiagMat" begin
+@testitem "kf_loglikelihood Mooncake: PDiagMat" tags = [:mooncake] begin
     using GeneralisedFilters
     using Mooncake
     using FiniteDifferences
@@ -139,7 +139,7 @@ end
     @test grad_mooncake ≈ grad_fd rtol = 1e-4
 end
 
-@testitem "kf_loglikelihood Mooncake: multiple parameters" begin
+@testitem "kf_loglikelihood Mooncake: multiple parameters" tags = [:mooncake] begin
     using GeneralisedFilters
     using Mooncake
     using Zygote

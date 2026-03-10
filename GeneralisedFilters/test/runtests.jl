@@ -2,6 +2,10 @@ using Test
 using TestItems
 using TestItemRunner
 
+# Extension test filtering:
+# - :gpu tests require CUDA hardware
+# - :mooncake tests require Mooncake (loaded as test dep, triggers MooncakeExt)
+# To skip extension tests: filter = ti -> !(:gpu in ti.tags) && !(:mooncake in ti.tags)
 @run_package_tests filter = ti -> !(:gpu in ti.tags)
 
 # Algorithm tests (by family)

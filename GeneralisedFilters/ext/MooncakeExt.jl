@@ -1,7 +1,7 @@
 """
-Mooncake.jl integration for the Kalman filter log-likelihood gradient.
+Mooncake.jl extension for GeneralisedFilters.
 
-This file implements a native Mooncake rrule!! for `kf_loglikelihood` using the
+This extension provides a native Mooncake rrule!! for `kf_loglikelihood` using the
 analytical gradient formulas from `kalman_gradient.jl`.
 
 The implementation properly handles both mutable (Vector, Matrix) and immutable
@@ -9,11 +9,29 @@ The implementation properly handles both mutable (Vector, Matrix) and immutable
 - Mutable inputs: gradients accumulated in fdata, pullback returns NoRData
 - Immutable inputs: pullback returns RData containing the gradient
 """
+module MooncakeExt
+
+using GeneralisedFilters:
+    GeneralisedFilters,
+    kf_loglikelihood,
+    kalman_predict,
+    _kalman_update_cached,
+    gradient_c,
+    gradient_H,
+    gradient_R,
+    gradient_b,
+    gradient_A,
+    gradient_Q,
+    backward_gradient_update,
+    backward_gradient_predict
+
+using Distributions: MvNormal, params
+using PDMats: AbstractPDMat, PDMat, PDiagMat
+using LinearAlgebra: diag
 
 using Mooncake: Mooncake, @is_primitive, CoDual, primal, tangent
 using Mooncake: NoFData, NoRData, RData, Tangent, FData
 using Mooncake: zero_tangent, rdata, primal_to_tangent!!, increment!!
-using PDMats: PDiagMat
 
 ## GRADIENT PROJECTION LAYER ###################################################################
 #
@@ -297,3 +315,5 @@ end
     AbstractVector,
     Union{Nothing,Real},
 }
+
+end # module MooncakeExt
