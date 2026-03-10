@@ -14,9 +14,9 @@ mkpath(EXAMPLES_OUT)
 examples = filter!(isdir, readdir(joinpath(@__DIR__, "..", "examples"); join=true))
 above = joinpath(@__DIR__, "..")
 ssmproblems_path = joinpath(above, "..", "SSMProblems")
-let script = "using Pkg; Pkg.activate(ARGS[1]); Pkg.develop(path=ARGS[2]); Pkg.develop(path=ARGS[3]); Pkg.instantiate()"
+let script = "using Pkg; Pkg.activate(ARGS[1]); Pkg.develop(path=\"$(above)\"); Pkg.develop(path=\"$(ssmproblems_path)\"); Pkg.instantiate()"
     for example in examples
-        if !success(`$(Base.julia_cmd()) -e $script $example $above $ssmproblems_path`)
+        if !success(`$(Base.julia_cmd()) -e $script $example`)
             error(
                 "project environment of example ",
                 basename(example),

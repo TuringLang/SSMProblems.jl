@@ -121,9 +121,6 @@ function insert_colab_preamble(content)
             !startswith(file, "script")
             url = "https://raw.githubusercontent.com/TuringLang/SSMProblems.jl/$(GIT_REV)/$(PKG_NAME)/examples/$(EXAMPLE)/$(file)"
             push!(lines, "#nb download(\"$(url)\", \"$(file)\")")
-            if endswith(file, ".jl")
-                push!(lines, "#nb include(\"$(file)\")")
-            end
         end
     end
 
