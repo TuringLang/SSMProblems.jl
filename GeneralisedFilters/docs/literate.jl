@@ -15,9 +15,11 @@ Pkg.instantiate()
 using Literate: Literate
 
 # Determine the package name (GeneralisedFilters or SSMProblems)
-const PKG_NAME =
-    occursin("GeneralisedFilters", abspath(EXAMPLEPATH)) ? "GeneralisedFilters" :
+const PKG_NAME = if occursin("GeneralisedFilters", abspath(EXAMPLEPATH))
+    "GeneralisedFilters"
+else
     "SSMProblems"
+end
 
 # Compute a version/PR-aware Colab root URL, mirroring Literate.jl's deploy folder logic.
 # On CI this produces URLs like:
@@ -32,7 +34,7 @@ function colab_root_url()
             m = match(r"^refs\/tags\/(.*)$", ref)
             m !== nothing ? String(m.captures[1]) : "dev"
         elseif (m = match(r"refs\/pull\/(\d+)\/merge", get(ENV, "GITHUB_REF", ""))) !==
-               nothing
+            nothing
             "previews/PR$(m.captures[1])"
         else
             "dev"
@@ -125,4 +127,3 @@ let scriptjl = joinpath(EXAMPLEPATH, "script.jl")
         scriptjl, OUTDIR; name=EXAMPLE, execute=true, preprocess=insert_colab_preamble
     )
 end
-
