@@ -13,7 +13,43 @@ Pkg.activate(EXAMPLEPATH)
 Pkg.instantiate()
 using Literate: Literate
 
-# Notebook preprocessor: prepend a Colab-friendly setup cell that installs packages
+# Determine the package name (GeneralisedFilters or SSMProblems)
+const PKG_NAME =
+    occursin("GeneralisedFilters", abspath(EXAMPLEPATH)) ? "GeneralisedFilters" :
+    "SSMProblems"
+
+# Compute a version/PR-aware Colab root URL, mirroring Literate.jl's deploy folder logic.
+# On CI this produces URLs like:
+#   .../blob/gh-pages/SSMProblems/dev/...
+#   .../blob/gh-pages/SSMProblems/v1.2.0/...
+#   .../blob/gh-pages/SSMProblems/previews/PR42/...
+function colab_root_url()
+    repo = get(ENV, "GITHUB_REPOSITORY", "TuringLang/SSMProblems.jl")
+    deploy_folder = if haskey(ENV, "GITHUB_ACTIONS")
+        if get(ENV, "GITHUB_EVENT_NAME", nothing) == "push"
+            ref = get(ENV, "GITHUB_REF", "")
+            m = match(r"^refs\/tags\/(.*)$", ref)
+            m !== nothing ? String(m.captures[1]) : "dev"
+        elseif (m = match(r"refs\/pull\/(\d+)\/merge", get(ENV, "GITHUB_REF", ""))) !==
+               nothing
+            "previews/PR$(m.captures[1])"
+        else
+            "dev"
+        end
+    else
+        "dev"
+    end
+    return "https://colab.research.google.com/github/$(repo)/blob/gh-pages/$(PKG_NAME)/$(deploy_folder)"
+end
+
+const COLAB_ROOT_URL = colab_root_url()
+
+# Preprocess for markdown: replace @__COLAB_ROOT_URL__ placeholder
+function replace_colab_url(content)
+    return replace(content, "@__COLAB_ROOT_URL__" => COLAB_ROOT_URL)
+end
+
+# Preprocess for notebooks: prepend a Colab-friendly setup cell that installs packages
 # and downloads auxiliary files. Uses #nb so these lines only appear in notebooks.
 function insert_colab_preamble(content)
     lines = String[]
@@ -29,7 +65,7 @@ function insert_colab_preamble(content)
         "#nb Pkg.add(url=\"https://github.com/TuringLang/SSMProblems.jl\", subdir=\"SSMProblems\")",
     )
 
-    if occursin("GeneralisedFilters", abspath(EXAMPLEPATH))
+    if PKG_NAME == "GeneralisedFilters"
         push!(
             lines,
             "#nb Pkg.add(url=\"https://github.com/TuringLang/SSMProblems.jl\", subdir=\"GeneralisedFilters\")",
@@ -61,13 +97,11 @@ function insert_colab_preamble(content)
     end
 
     # Download auxiliary files (data, utility scripts) for Colab
-    pkg_subdir =
-        occursin("GeneralisedFilters", EXAMPLEPATH) ? "GeneralisedFilters" : "SSMProblems"
     for file in readdir(EXAMPLEPATH)
         if !endswith(file, ".toml") &&
             !isdir(joinpath(EXAMPLEPATH, file)) &&
             !startswith(file, "script")
-            url = "https://raw.githubusercontent.com/TuringLang/SSMProblems.jl/main/$(pkg_subdir)/examples/$(EXAMPLE)/$(file)"
+            url = "https://raw.githubusercontent.com/TuringLang/SSMProblems.jl/main/$(PKG_NAME)/examples/$(EXAMPLE)/$(file)"
             push!(lines, "#nb download(\"$(url)\", \"$(file)\")")
             if endswith(file, ".jl")
                 push!(lines, "#nb include(\"$(file)\")")
@@ -79,19 +113,15 @@ function insert_colab_preamble(content)
     return join(lines, "\n") * "\n" * content
 end
 
-# Process all Literate-formatted scripts in the example directory
-for filename in readdir(EXAMPLEPATH)
-    if endswith(filename, ".jl") &&
-        filename != "utilities.jl" &&
-        startswith(filename, "script")
-        scriptjl = joinpath(EXAMPLEPATH, filename)
-        # Name mapping: script.jl -> example_name, script-alt.jl -> example_name-alt
-        name = replace(splitext(filename)[1], "script" => EXAMPLE)
-        # Generate executed markdown for Documenter
-        Literate.markdown(scriptjl, OUTDIR; name=name, execute=true)
-        # Generate notebook (not executed — user runs it interactively or on Colab)
-        Literate.notebook(
-            scriptjl, OUTDIR; name=name, execute=false, preprocess=insert_colab_preamble
-        )
-    end
+# Process the Literate-formatted script in the example directory
+let scriptjl = joinpath(EXAMPLEPATH, "script.jl")
+    # Generate executed markdown for Documenter (with Colab URL replacement)
+    Literate.markdown(
+        scriptjl, OUTDIR; name=EXAMPLE, execute=true, preprocess=replace_colab_url
+    )
+    # Generate notebook with Colab preamble
+    Literate.notebook(
+        scriptjl, OUTDIR; name=EXAMPLE, execute=true, preprocess=insert_colab_preamble
+    )
 end
+
