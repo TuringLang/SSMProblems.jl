@@ -148,7 +148,11 @@ let scriptjl = joinpath(EXAMPLEPATH, "script.jl")
     )
     # Generate notebook with Colab preamble
     Literate.notebook(
-        scriptjl, OUTDIR; name=EXAMPLE, execute=true,
-        preprocess=insert_colab_preamble, postprocess=fix_kernelspec
+        scriptjl,
+        OUTDIR;
+        name=EXAMPLE,
+        execute=true,
+        preprocess=insert_colab_preamble,
+        postprocess=fix_kernelspec,
     )
 end
