@@ -13,65 +13,85 @@ Pkg.activate(EXAMPLEPATH)
 Pkg.instantiate()
 using Literate: Literate
 
+# Notebook preprocessor: prepend a Colab-friendly setup cell that installs packages
+# and downloads auxiliary files. Uses #nb so these lines only appear in notebooks.
 function insert_colab_preamble(content)
-    # Extract dependencies from Project.toml
-    project_toml_path = joinpath(EXAMPLEPATH, "Project.toml")
-    preamble = """
-    #nb # This cell specifies dependencies for the notebook to run in environments like Google Colab.
-    #nb import Pkg
-    #nb Pkg.add(url="https://github.com/TuringLang/SSMProblems.jl", subdir="SSMProblems")
-    #nb """
-    
+    lines = String[]
+
+    push!(lines, "#nb # ## Environment Setup")
+    push!(lines, "#nb #")
+    push!(
+        lines, "#nb # Install required packages (for Google Colab or fresh environments)."
+    )
+    push!(lines, "#nb import Pkg")
+    push!(
+        lines,
+        "#nb Pkg.add(url=\"https://github.com/TuringLang/SSMProblems.jl\", subdir=\"SSMProblems\")",
+    )
+
     if occursin("GeneralisedFilters", abspath(EXAMPLEPATH))
-        preamble *= "Pkg.add(url=\"https://github.com/TuringLang/SSMProblems.jl\", subdir=\"GeneralisedFilters\")\n    #nb "
+        push!(
+            lines,
+            "#nb Pkg.add(url=\"https://github.com/TuringLang/SSMProblems.jl\", subdir=\"GeneralisedFilters\")",
+        )
     end
 
+    # Parse extra dependencies from Project.toml
+    project_toml_path = joinpath(EXAMPLEPATH, "Project.toml")
     if isfile(project_toml_path)
-        deps_lines = String[]
+        deps = String[]
         in_deps = false
         for line in readlines(project_toml_path)
             if startswith(line, "[deps]")
                 in_deps = true
                 continue
             elseif startswith(line, "[") && in_deps
-                in_deps = false
-                continue
+                break
             end
             if in_deps && occursin("=", line)
                 pkg = strip(split(line, "=")[1])
-                if pkg != "SSMProblems" && pkg != "GeneralisedFilters" && pkg != "Literate"
-                    push!(deps_lines, "\"$pkg\"")
+                if pkg ∉ ("SSMProblems", "GeneralisedFilters", "Literate")
+                    push!(deps, "\"$pkg\"")
                 end
             end
         end
-        if !isempty(deps_lines)
-            preamble *= "Pkg.add([$(join(deps_lines, ", "))])\n"
+        if !isempty(deps)
+            push!(lines, "#nb Pkg.add([$(join(deps, ", "))])")
         end
     end
-    
-    # Also download extra files if they exist (e.g., data.csv, utilities.jl)
+
+    # Download auxiliary files (data, utility scripts) for Colab
+    pkg_subdir =
+        occursin("GeneralisedFilters", EXAMPLEPATH) ? "GeneralisedFilters" : "SSMProblems"
     for file in readdir(EXAMPLEPATH)
-        if file != "script.jl" && file != "script-alt.jl" && !endswith(file, ".toml") && !isdir(joinpath(EXAMPLEPATH, file))
-            # Determine base URL dynamically based on whether we're in GeneralisedFilters or SSMProblems
-            pkg_subdir = occursin("GeneralisedFilters", EXAMPLEPATH) ? "GeneralisedFilters" : "SSMProblems"
-            url = "https://raw.githubusercontent.com/TuringLang/SSMProblems.jl/main/\$(pkg_subdir)/examples/\$(EXAMPLE)/\$file"
-            preamble *= "    #nb download(\"$url\", \"\$file\")\n"
+        if !endswith(file, ".toml") &&
+            !isdir(joinpath(EXAMPLEPATH, file)) &&
+            !startswith(file, "script")
+            url = "https://raw.githubusercontent.com/TuringLang/SSMProblems.jl/main/$(pkg_subdir)/examples/$(EXAMPLE)/$(file)"
+            push!(lines, "#nb download(\"$(url)\", \"$(file)\")")
             if endswith(file, ".jl")
-                preamble *= "    #nb include(\"\$file\")\n"
+                push!(lines, "#nb include(\"$(file)\")")
             end
         end
     end
-    
-    return preamble * "\n" * content
+
+    push!(lines, "")  # blank line before original content
+    return join(lines, "\n") * "\n" * content
 end
 
-# Convert to markdown and notebook
+# Process all Literate-formatted scripts in the example directory
 for filename in readdir(EXAMPLEPATH)
-    if endswith(filename, ".jl") && filename != "utilities.jl"
-        SCRIPTJL = joinpath(EXAMPLEPATH, filename)
-        # Map script -> example_name, script-alt -> example_name-alt
+    if endswith(filename, ".jl") &&
+        filename != "utilities.jl" &&
+        startswith(filename, "script")
+        scriptjl = joinpath(EXAMPLEPATH, filename)
+        # Name mapping: script.jl -> example_name, script-alt.jl -> example_name-alt
         name = replace(splitext(filename)[1], "script" => EXAMPLE)
-        Literate.markdown(SCRIPTJL, OUTDIR; name=name, execute=true)
-        Literate.notebook(SCRIPTJL, OUTDIR; name=name, execute=true, preprocess=insert_colab_preamble)
+        # Generate executed markdown for Documenter
+        Literate.markdown(scriptjl, OUTDIR; name=name, execute=true)
+        # Generate notebook (not executed — user runs it interactively or on Colab)
+        Literate.notebook(
+            scriptjl, OUTDIR; name=name, execute=false, preprocess=insert_colab_preamble
+        )
     end
 end
