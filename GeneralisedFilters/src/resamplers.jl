@@ -48,7 +48,7 @@ Set the first ancestor index to 1 for conditional SMC (preserving the reference 
 This is a separate function so it can be overloaded for GPU arrays (which require
 `CUDA.@allowscalar` for scalar indexing).
 """
-_set_ref_index!(idxs) = (idxs[1] = 1; nothing)
+_set_ref_index!(idxs) = (idxs[1]=1; nothing)
 
 function resample(
     rng::AbstractRNG,
