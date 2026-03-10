@@ -84,9 +84,9 @@ logℓ_no_rule(θ) = NoRuleTest.kf_ll_direct(make_params(θ)...)
 
 ## BENCHMARK SETUP ############################################################################
 
-println("=" ^ 70)
+println("="^70)
 println("Kalman Filter Gradient Benchmark: Zygote vs Mooncake")
-println("=" ^ 70)
+println("="^70)
 println()
 println("Model: $(Dx)D state, $(Dy)D observation, $(T_len) timesteps")
 println()
@@ -94,12 +94,14 @@ println()
 θ_init = [0.5]
 
 println("Verifying gradient correctness...")
-println("-" ^ 70)
+println("-"^70)
 
 grad_zygote = Zygote.gradient(logℓ, θ_init)[1]
 println("Zygote (ChainRules rrule):        ", grad_zygote)
 
-grad_mooncake = DifferentiationInterface.gradient(logℓ, AutoMooncake(; config=nothing), θ_init)
+grad_mooncake = DifferentiationInterface.gradient(
+    logℓ, AutoMooncake(; config=nothing), θ_init
+)
 println("Mooncake (native rrule!!):        ", grad_mooncake)
 
 grad_auto = nothing
@@ -115,8 +117,9 @@ catch e
     println("Mooncake (auto-diff, no rule):    FAILED - ", typeof(e))
 end
 
-all_match = isapprox(grad_zygote, grad_mooncake; rtol=1e-6) &&
-            (!auto_diff_works || isapprox(grad_zygote, grad_auto; rtol=1e-6))
+all_match =
+    isapprox(grad_zygote, grad_mooncake; rtol=1e-6) &&
+    (!auto_diff_works || isapprox(grad_zygote, grad_auto; rtol=1e-6))
 if all_match
     println("✓ All computed gradients match!")
 end
@@ -125,7 +128,7 @@ println()
 ## BENCHMARKS #################################################################################
 
 println("Running benchmarks...")
-println("-" ^ 70)
+println("-"^70)
 println()
 
 println("1. Zygote (ChainRules rrule):")
@@ -158,9 +161,9 @@ end
 
 ## SUMMARY ####################################################################################
 
-println("=" ^ 70)
+println("="^70)
 println("Summary")
-println("=" ^ 70)
+println("="^70)
 println()
 
 zygote_ms = median(zygote_bench.times) / 1e6
@@ -178,5 +181,7 @@ println()
 println("Speedup vs Zygote:")
 println("  Mooncake rrule: $(round(zygote_ms / mooncake_ms; digits=2))x")
 if auto_diff_works && auto_bench !== nothing
-    println("  Mooncake auto:  $(round(zygote_ms / (median(auto_bench.times)/1e6); digits=2))x")
+    println(
+        "  Mooncake auto:  $(round(zygote_ms / (median(auto_bench.times)/1e6); digits=2))x"
+    )
 end

@@ -80,9 +80,7 @@ m = drift_model_rb(ys)
 param_sampler = HMC(0.01, 10)
 adtype = ADTypes.AutoZygote()
 # adtype = ADTypes.AutoMooncake()
-pg = ParticleGibbs(
-    CSMCAS(RBPF(BF(N_particles), KF())), param_sampler; adtype=adtype
-)
+pg = ParticleGibbs(CSMCAS(RBPF(BF(N_particles), KF())), param_sampler; adtype=adtype)
 
 chain = AbstractMCMC.sample(
     rng, m, pg, N_iter; n_adapts=N_adapts, progress=true, chain_type=MCMCChains.Chains
