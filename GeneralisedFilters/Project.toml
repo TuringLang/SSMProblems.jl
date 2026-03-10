@@ -4,11 +4,10 @@ version = "0.4.2"
 authors = ["THargreaves <tim.hargreaves@icloud.com>", "Charles Knipp <charlesknipp98@gmail.com>", "FredericWantiez <frederic.wantiez@gmail.com>", "Hong Ge <hg344@cam.ac.uk>"]
 
 [deps]
+AcceleratedKernels = "6a4ca0a5-0e36-4168-a932-d9be78d558f1"
 ADTypes = "47edcb42-4c32-4615-8424-f2b9edc5f35b"
 AbstractMCMC = "80f14c24-f653-4e6a-9b94-39d6b0f70001"
-AcceleratedKernels = "6a4ca0a5-0e36-4168-a932-d9be78d558f1"
 Bijectors = "76274a88-744f-5084-9051-94815aaf08c4"
-CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
 DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
@@ -29,9 +28,11 @@ StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 Turing = "fce5fe82-541a-59a6-adf8-730c64b5f9a0"
 
 [weakdeps]
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 Mooncake = "da2b9cff-9c12-43a0-ae48-6db2b0edb7d6"
 
 [extensions]
+CUDAExt = "CUDA"
 MooncakeExt = "Mooncake"
 
 [compat]
@@ -68,6 +69,7 @@ julia = "1.10"
 AdvancedHMC = "0bf59076-c3b1-5ca4-86bd-e02cd72cde3d"
 AdvancedMH = "5b7e9947-ddc0-4b3f-9b55-0d8042f74170"
 Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 FiniteDifferences = "26cc04aa-876d-5657-8c51-4c34ba976000"
 JET = "c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"
 Mooncake = "da2b9cff-9c12-43a0-ae48-6db2b0edb7d6"
@@ -79,4 +81,4 @@ TestItems = "1c621080-faea-4a02-84b6-bbd5e436b8fe"
 Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [targets]
-test = ["AdvancedHMC", "AdvancedMH", "Aqua", "FiniteDifferences", "Mooncake", "PDMats", "StableRNGs", "Test", "TestItemRunner", "TestItems", "JET", "Zygote"]
+test = ["AdvancedHMC", "AdvancedMH", "Aqua", "CUDA", "FiniteDifferences", "Mooncake", "PDMats", "StableRNGs", "Test", "TestItemRunner", "TestItems", "JET", "Zygote"]

@@ -1,4 +1,3 @@
-using CUDA: i32
 import PDMats: PDMat, X_A_Xt, Xt_A_X, X_invA_Xt, Xt_invA_X
 import LinearAlgebra: Symmetric
 

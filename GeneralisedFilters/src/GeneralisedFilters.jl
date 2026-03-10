@@ -10,9 +10,6 @@ using OffsetArrays
 using SSMProblems
 using StatsBase
 
-# TODO: heavy modules—move to extension
-using CUDA
-
 # Filtering utilities
 include("callbacks.jl")
 include("containers.jl")
