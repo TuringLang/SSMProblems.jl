@@ -20,6 +20,22 @@ else
     "SSMProblems"
 end
 
+# Git revision for Pkg.add — use the current commit/branch on CI so notebooks match the docs build
+const GIT_REV = if haskey(ENV, "GITHUB_ACTIONS")
+    ref = get(ENV, "GITHUB_REF", "")
+    if startswith(ref, "refs/heads/")
+        String(match(r"refs\/heads\/(.*)", ref).captures[1])
+    elseif startswith(ref, "refs/tags/")
+        String(match(r"refs\/tags\/(.*)", ref).captures[1])
+    else
+        get(ENV, "GITHUB_SHA", "main")
+    end
+else
+    "main"
+end
+
+const REPO_URL = "https://github.com/TuringLang/SSMProblems.jl"
+
 # Compute a version/PR-aware Colab root URL, mirroring Literate.jl's deploy folder logic.
 # On CI this produces URLs like:
 #   .../blob/gh-pages/SSMProblems/dev/...
@@ -64,13 +80,13 @@ function insert_colab_preamble(content)
     push!(lines, "#nb import Pkg")
     push!(
         lines,
-        "#nb Pkg.add(url=\"https://github.com/TuringLang/SSMProblems.jl\", subdir=\"SSMProblems\")",
+        "#nb Pkg.add(url=\"$(REPO_URL)\", subdir=\"SSMProblems\", rev=\"$(GIT_REV)\")",
     )
 
     if PKG_NAME == "GeneralisedFilters"
         push!(
             lines,
-            "#nb Pkg.add(url=\"https://github.com/TuringLang/SSMProblems.jl\", subdir=\"GeneralisedFilters\")",
+            "#nb Pkg.add(url=\"$(REPO_URL)\", subdir=\"GeneralisedFilters\", rev=\"$(GIT_REV)\")",
         )
     end
 
@@ -103,7 +119,7 @@ function insert_colab_preamble(content)
         if !endswith(file, ".toml") &&
             !isdir(joinpath(EXAMPLEPATH, file)) &&
             !startswith(file, "script")
-            url = "https://raw.githubusercontent.com/TuringLang/SSMProblems.jl/main/$(PKG_NAME)/examples/$(EXAMPLE)/$(file)"
+            url = "https://raw.githubusercontent.com/TuringLang/SSMProblems.jl/$(GIT_REV)/$(PKG_NAME)/examples/$(EXAMPLE)/$(file)"
             push!(lines, "#nb download(\"$(url)\", \"$(file)\")")
             if endswith(file, ".jl")
                 push!(lines, "#nb include(\"$(file)\")")
@@ -115,6 +131,14 @@ function insert_colab_preamble(content)
     return join(lines, "\n") * "\n" * content
 end
 
+# Postprocess for notebooks: fix kernelspec to be "julia" instead of "julia-1.x" for Colab support
+function fix_kernelspec(nb)
+    if haskey(nb, "metadata") && haskey(nb["metadata"], "kernelspec")
+        nb["metadata"]["kernelspec"]["name"] = "julia"
+    end
+    return nb
+end
+
 # Process the Literate-formatted script in the example directory
 let scriptjl = joinpath(EXAMPLEPATH, "script.jl")
     # Generate executed markdown for Documenter (with Colab URL replacement)
@@ -123,6 +147,7 @@ let scriptjl = joinpath(EXAMPLEPATH, "script.jl")
     )
     # Generate notebook with Colab preamble
     Literate.notebook(
-        scriptjl, OUTDIR; name=EXAMPLE, execute=true, preprocess=insert_colab_preamble
+        scriptjl, OUTDIR; name=EXAMPLE, execute=true,
+        preprocess=insert_colab_preamble, postprocess=fix_kernelspec
     )
 end
