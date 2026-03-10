@@ -1,14 +1,26 @@
 using ChainRulesCore: ChainRulesCore, NoTangent, @not_implemented
 
 """
-    ChainRulesCore.rrule(::typeof(kf_loglikelihood), μ0, Σ0, As, bs, Qs, Hs, cs, Rs, ys)
+    ChainRulesCore.rrule(::typeof(kf_loglikelihood), μ0, Σ0, As, bs, Qs, Hs, cs, Rs, ys[, jitter])
 
 Reverse-mode AD rule for the Kalman filter log-likelihood. The forward pass runs the KF
 with gradient caching; the pullback computes analytical gradients using the backward recursion
-from `kalman_gradient.jl`.
+from `kalman_gradient.jl`. `jitter` is a non-differentiable constant; a 9-arg wrapper is
+provided for backward compatibility with call sites that omit it.
 """
+# Backward-compatible 9-arg wrapper: delegates to the 10-arg rrule and strips the
+# trailing NoTangent() for jitter from the pullback result.
 function ChainRulesCore.rrule(
     ::typeof(kf_loglikelihood), μ0, Σ0, As, bs, Qs, Hs, cs, Rs, ys
+)
+    ll, pb10 = ChainRulesCore.rrule(
+        kf_loglikelihood, μ0, Σ0, As, bs, Qs, Hs, cs, Rs, ys, nothing
+    )
+    return ll, Δll -> Base.front(pb10(Δll))
+end
+
+function ChainRulesCore.rrule(
+    ::typeof(kf_loglikelihood), μ0, Σ0, As, bs, Qs, Hs, cs, Rs, ys, jitter
 )
     T = length(ys)
 
@@ -22,7 +34,7 @@ function ChainRulesCore.rrule(
     μ_prevs[1], Σ_prevs[1] = params(state)
     state = kalman_predict(state, (As[1], bs[1], Qs[1]))
     state, ll_inc, first_cache = _kalman_update_cached(
-        state, Hs[1], cs[1], Rs[1], ys[1], nothing
+        state, Hs[1], cs[1], Rs[1], ys[1], jitter
     )
     ll += ll_inc
     caches = Vector{typeof(first_cache)}(undef, T)
@@ -32,7 +44,7 @@ function ChainRulesCore.rrule(
         μ_prevs[t], Σ_prevs[t] = params(state)
         state = kalman_predict(state, (As[t], bs[t], Qs[t]))
         state, ll_inc, caches[t] = _kalman_update_cached(
-            state, Hs[t], cs[t], Rs[t], ys[t], nothing
+            state, Hs[t], cs[t], Rs[t], ys[t], jitter
         )
         ll += ll_inc
     end
@@ -87,6 +99,7 @@ function ChainRulesCore.rrule(
             s .* ∂cs,
             s .* ∂Rs,
             @not_implemented("Gradient w.r.t. observations not supported"),
+            NoTangent(),  # jitter is a non-differentiable constant
         )
     end
 

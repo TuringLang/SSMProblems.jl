@@ -169,12 +169,14 @@ function Mooncake.rrule!!(
     cs::CoDual{<:AbstractVector},
     Rs::CoDual{<:AbstractVector},
     ys::CoDual{<:AbstractVector},
+    jitter::CoDual{<:Union{Nothing,Real}},
 ) where {T<:Real}
     # Extract primals
     μ0_p, Σ0_p = primal(μ0), primal(Σ0)
     As_p, bs_p, Qs_p = primal(As), primal(bs), primal(Qs)
     Hs_p, cs_p, Rs_p = primal(Hs), primal(cs), primal(Rs)
     ys_p = primal(ys)
+    jitter_p = primal(jitter)
 
     # Extract tangent storage (fdata for mutable, NoFData for immutable)
     t_μ0, t_Σ0 = tangent(μ0), tangent(Σ0)
@@ -193,7 +195,7 @@ function Mooncake.rrule!!(
     μ_prevs[1], Σ_prevs[1] = params(state)
     state = kalman_predict(state, (As_p[1], bs_p[1], Qs_p[1]))
     state, ll_inc, first_cache = _kalman_update_cached(
-        state, Hs_p[1], cs_p[1], Rs_p[1], ys_p[1], nothing
+        state, Hs_p[1], cs_p[1], Rs_p[1], ys_p[1], jitter_p
     )
     ll += ll_inc
     caches = Vector{typeof(first_cache)}(undef, n)
@@ -203,7 +205,7 @@ function Mooncake.rrule!!(
         μ_prevs[t], Σ_prevs[t] = params(state)
         state = kalman_predict(state, (As_p[t], bs_p[t], Qs_p[t]))
         state, ll_inc, caches[t] = _kalman_update_cached(
-            state, Hs_p[t], cs_p[t], Rs_p[t], ys_p[t], nothing
+            state, Hs_p[t], cs_p[t], Rs_p[t], ys_p[t], jitter_p
         )
         ll += ll_inc
     end
@@ -274,6 +276,7 @@ function Mooncake.rrule!!(
             NoRData(),   # cs
             NoRData(),   # Rs
             NoRData(),   # ys
+            NoRData(),   # jitter (non-differentiable constant)
         )
     end
 
@@ -292,4 +295,5 @@ end
     AbstractVector,
     AbstractVector,
     AbstractVector,
+    Union{Nothing,Real},
 }

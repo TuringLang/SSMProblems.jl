@@ -83,7 +83,7 @@ delegates to `kf_loglikelihood`.
 For OffsetVector trajectories (0-indexed), a converting wrapper is provided.
 """
 function inner_loglikelihood(
-    ::KalmanFilter,
+    af::KalmanFilter,
     inner_model::StateSpaceModel,
     states::AbstractVector,
     observations::AbstractVector,
@@ -103,7 +103,7 @@ function inner_loglikelihood(
     cs = map(t -> calc_c(inner_obs, t; new_outer=states[t + 1]), 1:T)
     Rs = map(t -> calc_R(inner_obs, t; new_outer=states[t + 1]), 1:T)
 
-    return kf_loglikelihood(μ0, Σ0, As, bs, Qs, Hs, cs, Rs, observations)
+    return kf_loglikelihood(μ0, Σ0, As, bs, Qs, Hs, cs, Rs, observations, af.jitter)
 end
 
 # Wrapper for OffsetVector trajectories (0-indexed), used by trajectory_logdensity.
@@ -145,14 +145,14 @@ from `kalman_gradient.jl`.
 # Returns
 Total log-likelihood: log p(y₁:T) = Σ_t log p(yₜ | y₁:ₜ₋₁)
 """
-function kf_loglikelihood(μ0, Σ0, As, bs, Qs, Hs, cs, Rs, ys)
+function kf_loglikelihood(μ0, Σ0, As, bs, Qs, Hs, cs, Rs, ys, jitter=nothing)
     T = length(ys)
     state = MvNormal(μ0, Σ0)
     ll = zero(eltype(μ0))
 
     for t in 1:T
         state = kalman_predict(state, (As[t], bs[t], Qs[t]))
-        state, ll_inc, _ = _kalman_update_cached(state, Hs[t], cs[t], Rs[t], ys[t], nothing)
+        state, ll_inc, _ = _kalman_update_cached(state, Hs[t], cs[t], Rs[t], ys[t], jitter)
         ll += ll_inc
     end
 
