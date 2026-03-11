@@ -41,7 +41,7 @@
     prior = MvNormal([0.0], [4.0;;])
     pssm = ParameterisedSSM(build_ssm, ys)
     model = ParticleGibbsModel(prior, pssm)
-    pg = ParticleGibbs(CSMC(BF(10)), NUTS(0.8))
+    pg = ParticleGibbs(ConditionalSMC(BF(10)), NUTS(0.8))
 
     # Initial step
     transition, state = AbstractMCMC.step(rng, model, pg; n_adapts=5)
@@ -118,7 +118,7 @@ end
     prior = MvNormal([0.0], [4.0;;])
     pssm = ParameterisedSSM(build_ssm_mh, ys)
     model = ParticleGibbsModel(prior, pssm)
-    pg = ParticleGibbs(CSMC(BF(10)), RWMH(MvNormal(zeros(1), 0.5 * I)))
+    pg = ParticleGibbs(ConditionalSMC(BF(10)), RWMH(MvNormal(zeros(1), 0.5 * I)))
 
     # Initial step
     transition, state = AbstractMCMC.step(rng, model, pg)
@@ -189,7 +189,7 @@ end
     pssm = ParameterisedSSM(build_hier, ys)
     model = ParticleGibbsModel(prior, pssm)
     pg = ParticleGibbs(
-        CSMC(RBPF(BF(N_particles), KF())), NUTS(0.8); adtype=ADTypes.AutoZygote()
+        ConditionalSMC(RBPF(BF(N_particles), KF())), NUTS(0.8); adtype=ADTypes.AutoZygote()
     )
 
     chain = AbstractMCMC.sample(
@@ -267,7 +267,7 @@ end
     prior = MvNormal([0.0], [σ_b²;;])
     pssm = ParameterisedSSM(build_ssm, ys)
     model = ParticleGibbsModel(prior, pssm)
-    pg = ParticleGibbs(CSMC(BF(N_particles)), NUTS(0.8))
+    pg = ParticleGibbs(ConditionalSMC(BF(N_particles)), NUTS(0.8))
 
     chain = AbstractMCMC.sample(
         rng,

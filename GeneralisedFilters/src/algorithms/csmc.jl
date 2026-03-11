@@ -1,8 +1,9 @@
 import LogExpFunctions: softmax
 import SSMProblems: prior, dyn
 
-export ConditionalSMC, CSMC, CSMCBS, CSMCAS
+export ConditionalSMC
 export CSMCModel, CSMCState
+export NoRefreshment, AncestorSampling, BackwardSimulation
 
 ## TRAJECTORY REFRESHMENT STRATEGIES #######################################################
 
@@ -51,12 +52,9 @@ Conditional Sequential Monte Carlo sampler with configurable trajectory refreshm
 
 # Examples
 ```julia
-ConditionalSMC(BF(100), AncestorSampling())
-
-# Shorthand constructors
-CSMC(BF(100))                           # Vanilla CSMC
-CSMCAS(BF(100))                         # CSMC with ancestor sampling
-CSMCAS(RBPF(BF(200), KF()))             # Rao-Blackwellised PGAS
+ConditionalSMC(BF(100))                                  # Vanilla CSMC (NoRefreshment default)
+ConditionalSMC(BF(100), AncestorSampling())              # CSMC with ancestor sampling
+ConditionalSMC(RBPF(BF(200), KF()), AncestorSampling())  # Rao-Blackwellised PGAS
 ```
 """
 struct ConditionalSMC{PF<:AbstractParticleFilter,TR<:AbstractTrajectoryRefreshment} <:
@@ -65,9 +63,7 @@ struct ConditionalSMC{PF<:AbstractParticleFilter,TR<:AbstractTrajectoryRefreshme
     refreshment::TR
 end
 
-CSMC(pf) = ConditionalSMC(pf, NoRefreshment())
-CSMCBS(pf) = ConditionalSMC(pf, BackwardSimulation())
-CSMCAS(pf) = ConditionalSMC(pf, AncestorSampling())
+ConditionalSMC(pf) = ConditionalSMC(pf, NoRefreshment())
 
 ## STATE AND MODEL #########################################################################
 

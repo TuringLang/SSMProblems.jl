@@ -26,7 +26,7 @@
         rng, model, KalmanSmoother(), ys; t_smooth=t_smooth
     )
 
-    csmc = CSMC(BF(N_particles; threshold=0.6))
+    csmc = ConditionalSMC(BF(N_particles; threshold=0.6))
     trajectory_samples = []
     lls = Float64[]
 
@@ -75,7 +75,7 @@ end
         rng, model, KalmanSmoother(), ys; t_smooth=t_smooth
     )
 
-    csmc = CSMCAS(BF(N_particles; threshold=0.6))
+    csmc = ConditionalSMC(BF(N_particles; threshold=0.6), AncestorSampling())
     trajectory_samples = []
     lls = Float64[]
 
@@ -130,7 +130,7 @@ end
         rng, full_model, KalmanSmoother(), ys; t_smooth=t_smooth
     )
 
-    csmc = CSMC(RBPF(BF(N_particles; threshold=0.8), KalmanFilter()))
+    csmc = ConditionalSMC(RBPF(BF(N_particles; threshold=0.8), KalmanFilter()))
     trajectory_samples = []
 
     let ref_traj = nothing
@@ -199,7 +199,9 @@ end
         rng, full_model, KalmanSmoother(), ys; t_smooth=t_smooth
     )
 
-    csmc = CSMCAS(RBPF(BF(N_particles; threshold=0.8), KalmanFilter()))
+    csmc = ConditionalSMC(
+        RBPF(BF(N_particles; threshold=0.8), KalmanFilter()), AncestorSampling()
+    )
     trajectory_samples = []
 
     let ref_traj = nothing
@@ -272,7 +274,9 @@ end
         end
     end
 
-    csmc = CSMCAS(RBPF(BF(N_particles; threshold=0.8), DiscreteFilter()))
+    csmc = ConditionalSMC(
+        RBPF(BF(N_particles; threshold=0.8), DiscreteFilter()), AncestorSampling()
+    )
     trajectory_samples = []
 
     let ref_traj = nothing
@@ -339,7 +343,7 @@ end
     _, _, ys = sample(rng, model, 5)
 
     csmc_model = CSMCModel(model, ys)
-    csmc = CSMC(BF(10))
+    csmc = ConditionalSMC(BF(10))
 
     # Initial step (unconditional)
     transition, state = AbstractMCMC.step(rng, csmc_model, csmc)
@@ -353,7 +357,7 @@ end
     @test length(state2.trajectory) == 6
 
     # CSMC-BS
-    csmc_bs = CSMCBS(BF(10))
+    csmc_bs = ConditionalSMC(BF(10), BackwardSimulation())
     _, bs_state = AbstractMCMC.step(rng, csmc_model, csmc_bs)
     @test bs_state isa CSMCState
     @test length(bs_state.trajectory) == 6
@@ -367,7 +371,9 @@ end
     _, _, _, _, rb_ys = sample(rng, hier_model, 5)
 
     rb_model = CSMCModel(hier_model, rb_ys)
-    rb_csmc = CSMCAS(RBPF(BF(10; threshold=0.8), KalmanFilter()))
+    rb_csmc = ConditionalSMC(
+        RBPF(BF(10; threshold=0.8), KalmanFilter()), AncestorSampling()
+    )
 
     _, rb_state = AbstractMCMC.step(rng, rb_model, rb_csmc)
     @test rb_state isa CSMCState
@@ -402,7 +408,7 @@ end
         rng, model, KalmanSmoother(), ys; t_smooth=t_smooth
     )
 
-    csmc = CSMCBS(BF(N_particles))
+    csmc = ConditionalSMC(BF(N_particles), BackwardSimulation())
     trajectory_samples = []
     lls = Float64[]
 
@@ -453,7 +459,7 @@ end
         rng, full_model, KalmanSmoother(), ys; t_smooth=t_smooth
     )
 
-    csmc = CSMCBS(RBPF(BF(N_particles), KalmanFilter()))
+    csmc = ConditionalSMC(RBPF(BF(N_particles), KalmanFilter()), BackwardSimulation())
     trajectory_samples = []
 
     let ref_traj = nothing
