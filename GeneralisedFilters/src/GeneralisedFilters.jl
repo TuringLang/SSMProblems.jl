@@ -3,7 +3,6 @@ module GeneralisedFilters
 using AbstractMCMC: AbstractMCMC, AbstractSampler
 using ADTypes: ADTypes
 import Distributions: MvNormal, params
-using DynamicPPL: DynamicPPL
 import Random: AbstractRNG, default_rng, rand
 import SSMProblems: prior, dyn, obs
 using OffsetArrays
@@ -158,9 +157,8 @@ include("algorithms/csmc.jl")
 # Integrations (log-density interface for particle Gibbs)
 include("integrations/logdensity.jl")
 include("integrations/kalman_rrule.jl")
-include("integrations/ssm_trajectory.jl")
 include("integrations/particle_gibbs.jl")
-include("integrations/turing.jl")
+include("integrations/ssm_trajectory.jl")
 
 # Unit-testing helper module
 include("GFTest/GFTest.jl")

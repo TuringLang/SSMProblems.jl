@@ -7,8 +7,7 @@
     using AbstractMCMC: AbstractMCMC
     using AdvancedHMC: NUTS
     using MCMCChains: MCMCChains
-    using Turing: @model
-    using DynamicPPL: DynamicPPL
+    using Turing
     using StableRNGs
     using Distributions
     using PDMats
@@ -50,7 +49,7 @@
     end
 
     m = drift_model_smoke(ys)
-    pg = ParticleGibbs(CSMC(BF(N_particles)), NUTS(0.8))
+    pg = ParticleGibbs(ConditionalSMC(BF(N_particles)), NUTS(0.8))
 
     chain = AbstractMCMC.sample(
         rng, m, pg, N_iter; n_adapts=5, progress=false, chain_type=MCMCChains.Chains
@@ -67,7 +66,7 @@ end
     using AbstractMCMC: AbstractMCMC
     using AdvancedMH: RWMH
     using MCMCChains: MCMCChains
-    using Turing: @model
+    using Turing
     using StableRNGs
     using Distributions
     using PDMats
@@ -108,7 +107,7 @@ end
     end
 
     m = drift_model_mh(ys)
-    pg = ParticleGibbs(CSMC(BF(N_particles)), RWMH(MvNormal(zeros(1), 0.5 * I)))
+    pg = ParticleGibbs(ConditionalSMC(BF(N_particles)), RWMH(MvNormal(zeros(1), 0.5 * I)))
 
     chain = AbstractMCMC.sample(
         rng, m, pg, N_iter; progress=false, chain_type=MCMCChains.Chains
@@ -126,7 +125,7 @@ end
     using AbstractMCMC: AbstractMCMC
     using AdvancedHMC: NUTS
     using MCMCChains: MCMCChains
-    using Turing: @model
+    using Turing
     using StableRNGs
     using Distributions
     using PDMats
@@ -180,7 +179,7 @@ end
     end
 
     m = drift_model_reg(ys)
-    pg = ParticleGibbs(CSMC(BF(N_particles)), NUTS(0.8))
+    pg = ParticleGibbs(ConditionalSMC(BF(N_particles)), NUTS(0.8))
 
     chain = AbstractMCMC.sample(
         rng, m, pg, N_iter; n_adapts=N_adapts, progress=false, chain_type=MCMCChains.Chains
@@ -201,7 +200,7 @@ end
     using AdvancedHMC: NUTS
     using MCMCChains: MCMCChains
     using ADTypes: ADTypes
-    using Turing: @model
+    using Turing
     using StableRNGs
     using Distributions
     using PDMats
@@ -243,7 +242,7 @@ end
 
     m = drift_model_hier(ys)
     pg = ParticleGibbs(
-        CSMC(RBPF(BF(N_particles), KF())), NUTS(0.8); adtype=ADTypes.AutoZygote()
+        ConditionalSMC(RBPF(BF(N_particles), KF())), NUTS(0.8); adtype=ADTypes.AutoZygote()
     )
 
     chain = AbstractMCMC.sample(

@@ -1,6 +1,4 @@
 import Distributions: ContinuousMultivariateDistribution, _logpdf, _rand!
-using Bijectors: Bijectors
-import Bijectors: bijector
 
 export SSMTrajectory
 

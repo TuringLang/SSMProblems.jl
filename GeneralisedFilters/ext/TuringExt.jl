@@ -1,3 +1,30 @@
+module TuringExt
+
+using GeneralisedFilters
+import GeneralisedFilters:
+    SSMTrajectory,
+    _csmc_sample,
+    _build_chains,
+    _get_inner_filter,
+    _outer_trajectory,
+    _state_dim,
+    _flatten_trajectory,
+    ParticleGibbsTransition
+using AbstractMCMC: AbstractMCMC
+using Bijectors: Bijectors
+import Bijectors: bijector
+using Distributions: Distributions
+using DynamicPPL: DynamicPPL
+using MCMCChains: MCMCChains
+using OffsetArrays
+using Random: AbstractRNG
+using SSMProblems
+using Turing: Turing
+
+## BIJECTORS INTEGRATION #######################################################################
+
+bijector(::SSMTrajectory) = Bijectors.Identity{1}()
+
 ## CSMC CONTEXT ################################################################################
 
 """
@@ -265,4 +292,6 @@ function _turing_param_names(state::ParticleGibbsTuringState)
         end
     end
     return names
+end
+
 end

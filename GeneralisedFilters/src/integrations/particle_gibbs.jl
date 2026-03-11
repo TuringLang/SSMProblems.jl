@@ -12,7 +12,7 @@ Particle Gibbs sampler that alternates between a parameter update (e.g., NUTS) a
 trajectory update (conditional SMC).
 
 # Fields
-- `csmc::CS`: Conditional SMC sampler for trajectory updates (e.g., `CSMCAS(RBPF(BF(200), KF()))`)
+- `csmc::CS`: Conditional SMC sampler for trajectory updates (e.g., `ConditionalSMC(RBPF(BF(200), KF()), AncestorSampling())`)
 - `param::PS`: Parameter sampler (e.g., `AdvancedHMC.NUTS(0.8)`)
 - `adtype::ADT`: AD backend (`ADTypes.AbstractADType`). `nothing` uses AdvancedHMC's default
   (ForwardDiff). For HierarchicalSSM models, specify a reverse-mode backend that uses
@@ -22,10 +22,10 @@ trajectory update (conditional SMC).
 ```julia
 
 # Regular SSM
-ParticleGibbs(CSMC(BF(100)), NUTS(0.8))
+ParticleGibbs(ConditionalSMC(BF(100), NoRefreshment()), NUTS(0.8))
 
 # Hierarchical SSM (needs reverse-mode AD for KF rrule)
-ParticleGibbs(CSMCAS(RBPF(BF(200), KF())), NUTS(0.8); adtype=AutoZygote())
+ParticleGibbs(ConditionalSMC(RBPF(BF(200), KF()), AncestorSampling()), NUTS(0.8); adtype=AutoZygote())
 ```
 """
 struct ParticleGibbs{CS<:ConditionalSMC,PS,ADT<:Union{Nothing,ADTypes.AbstractADType}} <:
