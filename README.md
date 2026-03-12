@@ -1,4 +1,0 @@
-|           Package            |                                                                                                                                                    Docs                                                                                                                                                    |
-| :--------------------------: | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-|   SSMProblems   |   [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://turinglang.org/SSMProblems.jl/SSMProblems/dev/)        |
-| GeneralisedFilters | [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://turinglang.org/SSMProblems.jl/GeneralisedFilters/dev/)|

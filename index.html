@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SSMProblems.jl Packages</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      min-height: 100%;
+      background: #f3f0e8;
+    }
+
+    .ext-navigation a,
+    .ext-navigation a:hover,
+    .ext-navigation a:focus,
+    .ext-navigation a:active {
+      text-decoration: none;
+    }
+
+    .ext-navigation,
+    .ext-navigation * {
+      box-sizing: border-box;
+    }
+
+    .ext-navigation {
+      width: 100%;
+      max-width: 100vw;
+    }
+
+    .ext-navigation .ext-navbar-icons a,
+    .ext-navigation .ext-menu-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .ext-navigation .ext-menu-toggle {
+      display: none;
+    }
+
+    .ext-navigation .ext-menu-toggle i,
+    .ext-navigation .ext-navbar-icons i {
+      line-height: 1;
+    }
+
+    .ext-dropdown ul {
+      list-style: none;
+      padding-left: 0;
+    }
+
+    @media (max-width: 768px) {
+      .ext-navigation .ext-menu-toggle {
+        display: inline-flex;
+      }
+    }
+
+    .landing-page,
+    .landing-page * {
+      box-sizing: border-box;
+    }
+
+    .landing-page {
+      --lp-bg: #f3f0e8;
+      --lp-panel: rgba(255, 255, 255, 0.84);
+      --lp-border: rgba(29, 39, 51, 0.12);
+      --lp-text: #18212c;
+      --lp-muted: #5f6b79;
+      --lp-link: #0f5c4d;
+      --lp-shadow: 0 20px 60px rgba(31, 43, 56, 0.08);
+      --lp-radius: 24px;
+      width: 100%;
+      min-height: 100vh;
+      font-family: Georgia, "Times New Roman", serif;
+      line-height: 1.6;
+      color: var(--lp-text);
+      background:
+        radial-gradient(circle at top left, rgba(16, 92, 77, 0.12), transparent 28rem),
+        radial-gradient(circle at bottom right, rgba(196, 132, 73, 0.12), transparent 24rem),
+        var(--lp-bg);
+    }
+
+    .landing-page main {
+      width: min(960px, calc(100% - 2rem));
+      margin: 0 auto;
+      padding: calc(var(--navbar-height, 0px) + 2rem) 0 4rem;
+    }
+
+    .landing-page .shell {
+      overflow: hidden;
+      border: 1px solid var(--lp-border);
+      border-radius: var(--lp-radius);
+      background: var(--lp-panel);
+      box-shadow: var(--lp-shadow);
+      -webkit-backdrop-filter: blur(14px);
+      backdrop-filter: blur(14px);
+    }
+
+    .landing-page .hero {
+      padding: 3rem 2rem 1.5rem;
+    }
+
+    .landing-page .eyebrow {
+      margin: 0 0 0.75rem;
+      font-family: "Segoe UI", sans-serif;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--lp-link);
+    }
+
+    .landing-page h1 {
+      margin: 0;
+      font-size: clamp(2rem, 5vw, 3.5rem);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+    }
+
+    .landing-page .intro {
+      max-width: 44rem;
+      margin: 1rem 0 0;
+      color: var(--lp-muted);
+      font-size: 1.05rem;
+    }
+
+    .landing-page .brand-link {
+      color: var(--lp-link);
+      text-decoration: none;
+    }
+
+    .landing-page .brand-link:hover {
+      color: var(--lp-muted);
+    }
+
+    .landing-page .table-wrap {
+      padding: 0 1rem 1rem;
+    }
+
+    .landing-page .footer {
+      padding: 0 2rem 2rem;
+      color: var(--lp-muted);
+      font-size: 0.95rem;
+    }
+
+    .landing-page table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      border: 1px solid var(--lp-border);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.78);
+      overflow: hidden;
+    }
+
+    .landing-page th,
+    .landing-page td {
+      padding: 1rem 1.1rem;
+      text-align: left;
+      vertical-align: top;
+      border-bottom: 1px solid var(--lp-border);
+    }
+
+    .landing-page th {
+      background: rgba(24, 33, 44, 0.04);
+      font-family: "Segoe UI", sans-serif;
+      font-size: 0.8rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--lp-muted);
+    }
+
+    .landing-page tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .landing-page td:first-child {
+      white-space: nowrap;
+      font-weight: 700;
+    }
+
+    .landing-page a {
+      color: var(--lp-link);
+      text-decoration-thickness: 0.08em;
+      text-underline-offset: 0.16em;
+    }
+
+    .landing-page a:hover {
+      text-decoration-thickness: 0.12em;
+      color: var(--lp-muted);
+      text-decoration: none;
+    }
+
+    .landing-page .mono {
+      font-family: "Consolas", "Courier New", monospace;
+      font-size: 0.94rem;
+      word-break: break-word;
+    }
+
+    @media (max-width: 700px) {
+      .landing-page main {
+        width: min(100% - 1rem, 960px);
+        padding: calc(var(--navbar-height, 0px) + 1rem) 0 1rem;
+      }
+
+      .landing-page .hero {
+        padding: 2rem 1.25rem 1rem;
+      }
+
+      .landing-page .table-wrap {
+        padding: 0 0.75rem 0.75rem;
+      }
+
+      .landing-page .footer {
+        padding: 0 1.25rem 1.5rem;
+      }
+
+      .landing-page table,
+      .landing-page thead,
+      .landing-page tbody,
+      .landing-page tr,
+      .landing-page th,
+      .landing-page td {
+        display: block;
+      }
+
+      .landing-page thead {
+        display: none;
+      }
+
+      .landing-page table {
+        border: 0;
+        background: transparent;
+      }
+
+      .landing-page tr {
+        margin-bottom: 0.75rem;
+        overflow: hidden;
+        border: 1px solid var(--lp-border);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.86);
+      }
+
+      .landing-page td {
+        padding: 0.9rem 1rem;
+        border-bottom: 1px solid var(--lp-border);
+      }
+
+      .landing-page td:last-child {
+        border-bottom: 0;
+      }
+
+      .landing-page td::before {
+        content: attr(data-label);
+        display: block;
+        margin-bottom: 0.35rem;
+        font-family: "Segoe UI", sans-serif;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--lp-muted);
+      }
+
+      .landing-page td:first-child {
+        white-space: normal;
+      }
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      .landing-page .shell {
+        animation: fade-in 500ms ease-out;
+      }
+    }
+
+    @keyframes fade-in {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="landing-page">
+    <main>
+      <section class="shell">
+        <div class="hero">
+          <p class="eyebrow">State Space Models</p>
+          <h1><a class="brand-link" href="https://github.com/TuringLang/SSMProblems.jl">SSMProblems.jl</a> packages</h1>
+          <p class="intro">
+            This repository is a monorepo that contains multiple active Julia packages. Use the links below to access the package documentation.
+          </p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Package</th>
+                <th>Documentation</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td data-label="Package">SSMProblems</td>
+                <td data-label="Documentation" class="mono">
+                  <a href="https://turinglang.org/SSMProblems.jl/SSMProblems/dev/">turinglang.org/SSMProblems.jl/SSMProblems/dev/</a>
+                </td>
+                <td data-label="Notes">Core interfaces and utilities for defining state space models and associated log-densities.</td>
+              </tr>
+              <tr>
+                <td data-label="Package">GeneralisedFilters</td>
+                <td data-label="Documentation" class="mono">
+                  <a href="https://turinglang.org/SSMProblems.jl/GeneralisedFilters/dev/">turinglang.org/SSMProblems.jl/GeneralisedFilters/dev/</a>
+                </td>
+                <td data-label="Notes">Filtering and inference algorithms built on top of the SSMProblems interfaces.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="footer">
+          This site is open source.
+          <a href="https://github.com/TuringLang/SSMProblems.jl/edit/gh-pages/index.html">Improve this page</a>.
+        </p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
