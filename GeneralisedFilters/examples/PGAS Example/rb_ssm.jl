@@ -24,8 +24,8 @@ r² = 0.5
 σ_b² = 4.0
 T_len = 100
 N_particles = 50
-N_iter = 50
-N_adapts = 10
+N_iter = 5000
+N_adapts = 1000
 
 # HierarchicalSSM with inner drift b:
 #   outer state — AR(1), sampled via particles
@@ -78,9 +78,13 @@ end
 
 m = drift_model_rb(ys)
 param_sampler = HMC(0.01, 10)
-adtype = ADTypes.AutoZygote()
-# adtype = ADTypes.AutoMooncake()
-pg = ParticleGibbs(CSMCAS(RBPF(BF(N_particles), KF())), param_sampler; adtype=adtype)
+# adtype = ADTypes.AutoZygote()
+adtype = ADTypes.AutoMooncake()
+pg = ParticleGibbs(
+    ConditionalSMC(RBPF(BF(N_particles), KF()), AncestorSampling()),
+    param_sampler;
+    adtype=adtype,
+)
 
 chain = AbstractMCMC.sample(
     rng, m, pg, N_iter; n_adapts=N_adapts, progress=true, chain_type=MCMCChains.Chains
