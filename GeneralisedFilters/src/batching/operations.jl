@@ -380,18 +380,38 @@ function broadcasted(::typeof(logdetcov), d::BatchedStruct{<:MvNormal{T}}) where
 end
 
 # logdetcov for BatchedStruct{PDMat}: 2 * sum(log.(diag(L))) for each batch element
+# Uses a custom kernel to avoid allocating CartesianIndex arrays on CPU
+
+function logdetcov_kernel!(result, L, D)
+    batch_idx = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+    N = length(result)
+
+    if batch_idx <= N
+        acc = zero(eltype(result))
+        for i in Int32(1):Int32(D)
+            @inbounds acc += log(L[i, i, batch_idx])
+        end
+        @inbounds result[batch_idx] = eltype(result)(2) * acc
+    end
+    return nothing
+end
+
+function logdetcov_batched!(result::CuVector{T}, L::CuArray{T,3}) where {T}
+    D, _, N = size(L)
+    threads = 256
+    blocks = cld(N, threads)
+    @cuda threads = threads blocks = blocks logdetcov_kernel!(result, L, D)
+    return result
+end
+
 function broadcasted(::typeof(logdetcov), P::BatchedStruct{<:PDMat{T}}) where {T}
     # P.chol.factors is BatchedStruct{LowerTriangular}, .parent is BatchedCuMatrix
     L_data = P.chol.factors.data.data  # D×D×N CuArray
-    D, _, N = size(L_data)
+    _, _, N = size(L_data)
 
-    # Extract diagonal: L_data[i,i,k] for each i,k
-    diag_indices = [CartesianIndex(i, i, k) for k in 1:N for i in 1:D]
-    diag_flat = L_data[diag_indices]  # (D*N,) vector
-    diag_matrix = reshape(diag_flat, D, N)  # D×N
-
-    # logdet = 2 * sum(log.(diag(L)))
-    return vec(T(2) .* sum(log.(diag_matrix); dims=1))
+    result = CuVector{T}(undef, N)
+    logdetcov_batched!(result, L_data)
+    return result
 end
 
 # invquad for BatchedStruct{PDMat} and BatchedCuVector: x' * inv(P) * x
