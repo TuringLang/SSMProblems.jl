@@ -60,7 +60,7 @@ struct ParticleGibbsModel{PT,MT<:ParameterisedSSM} <: AbstractMCMC.AbstractModel
 end
 
 """
-    ParticleGibbsState{VT, TT, PS, LDT}
+    ParticleGibbsState{VT, TT, PS}
 
 Internal state of the particle Gibbs sampler.
 
@@ -68,14 +68,11 @@ Internal state of the particle Gibbs sampler.
 - `θ`: Current parameter vector
 - `trajectory`: Current reference trajectory (OffsetVector)
 - `param_state`: Parameter sampler state (e.g., `AdvancedHMC.HMCState`)
-- `log_density`: `AbstractMCMC.LogDensityModel` wrapping the SSM log-density (persisted
-  so the trajectory `Ref` can be updated between steps)
 """
-struct ParticleGibbsState{VT,TT,PS,LDT}
+struct ParticleGibbsState{VT,TT,PS}
     θ::VT
     trajectory::TT
     param_state::PS
-    log_density::LDT
 end
 
 """
@@ -100,17 +97,6 @@ _outer_trajectory(trajectory, ::AbstractFilter) = map(s -> s.x, trajectory)
 
 ## LOG-DENSITY MODEL CONSTRUCTION #############################################################
 
-function _get_traj_ref(ld_model::AbstractMCMC.LogDensityModel)
-    ld = ld_model.logdensity
-    # Unwrap LogDensityProblemsAD wrapper if present
-    inner = if hasproperty(ld, :ℓ)
-        ld.ℓ
-    else
-        ld
-    end
-    return inner.trajectory
-end
-
 function _create_log_density_model(
     model::ParticleGibbsModel, af, trajectory, adtype::Nothing
 )
@@ -125,7 +111,7 @@ function _create_log_density_model(
             ),
         )
     end
-    ld = SSMParameterLogDensity(model.prior, model.param_model, Ref(trajectory))
+    ld = SSMParameterLogDensity(model.prior, model.param_model, trajectory)
     return AbstractMCMC.LogDensityModel(ld)
 end
 
@@ -133,9 +119,9 @@ function _create_log_density_model(
     model::ParticleGibbsModel, af, trajectory, adtype::ADTypes.AbstractADType
 )
     ld = if isnothing(af)
-        SSMParameterLogDensity(model.prior, model.param_model, Ref(trajectory))
+        SSMParameterLogDensity(model.prior, model.param_model, trajectory)
     else
-        SSMParameterLogDensity(model.prior, model.param_model, af, Ref(trajectory))
+        SSMParameterLogDensity(model.prior, model.param_model, af, trajectory)
     end
     ld_with_grad = LogDensityProblemsAD.ADgradient(adtype, ld)
     return AbstractMCMC.LogDensityModel(ld_with_grad)
@@ -176,12 +162,8 @@ function AbstractMCMC.step(
         rng, ssm_new, pg.csmc, model.param_model.observations, trajectory
     )
 
-    # Update trajectory ref with outer-only trajectory
-    traj_ref = _get_traj_ref(ld_model)
-    traj_ref[] = _outer_trajectory(trajectory_new, af)
-
     transition = ParticleGibbsTransition(θ_new, AbstractMCMC.getstats(param_state))
-    state = ParticleGibbsState(θ_new, trajectory_new, param_state, ld_model)
+    state = ParticleGibbsState(θ_new, trajectory_new, param_state)
 
     return transition, state
 end
@@ -193,14 +175,14 @@ function AbstractMCMC.step(
     state::ParticleGibbsState;
     kwargs...,
 )
-    # Update trajectory ref so the log-density reflects the current trajectory
+    # Create fresh log-density model with current trajectory
     af = _get_inner_filter(pg.csmc.pf)
-    traj_ref = _get_traj_ref(state.log_density)
-    traj_ref[] = _outer_trajectory(state.trajectory, af)
+    outer_traj = _outer_trajectory(state.trajectory, af)
+    ld_model = _create_log_density_model(model, af, outer_traj, pg.adtype)
 
-    # Run parameter step (picks up updated trajectory Ref)
+    # Run parameter step (preserves adaptation via state.param_state)
     _, param_state = AbstractMCMC.step(
-        rng, state.log_density, pg.param, state.param_state; kwargs...
+        rng, ld_model, pg.param, state.param_state; kwargs...
     )
 
     # Extract new θ and run CSMC (pass full trajectory for conditioning)
@@ -211,7 +193,7 @@ function AbstractMCMC.step(
     )
 
     transition = ParticleGibbsTransition(θ_new, AbstractMCMC.getstats(param_state))
-    new_state = ParticleGibbsState(θ_new, trajectory_new, param_state, state.log_density)
+    new_state = ParticleGibbsState(θ_new, trajectory_new, param_state)
 
     return transition, new_state
 end

@@ -198,15 +198,14 @@ Log-density for SSM parameters θ conditioned on a fixed trajectory:
 
     log p(θ | trajectory, y) ∝ log p(θ) + log p(trajectory, y | θ)
 
-Implements the `LogDensityProblems` interface. The `trajectory` field should be a `Ref` so
-it can be mutated between Gibbs iterations.
+Implements the `LogDensityProblems` interface.
 
 # Fields
 - `prior`: Prior distribution on θ (any Distributions.jl distribution)
 - `param_model`: A `ParameterisedSSM` mapping θ to an SSM
 - `af`: Inner analytical filter for HierarchicalSSM (e.g., `KalmanFilter()`), or `nothing`
   for regular SSMs
-- `trajectory`: A `Ref` holding the current reference trajectory (OffsetVector indexed from 0)
+- `trajectory`: Current reference trajectory (OffsetVector indexed from 0)
 """
 struct SSMParameterLogDensity{PT,MT<:ParameterisedSSM,AFT,TT}
     prior::PT
@@ -230,7 +229,7 @@ end
 function LogDensityProblems.logdensity(ld::SSMParameterLogDensity{<:Any,<:Any,Nothing}, θ)
     model = ld.param_model.build(θ)
     return logpdf(ld.prior, θ) +
-           trajectory_logdensity(model, ld.trajectory[], ld.param_model.observations)
+           trajectory_logdensity(model, ld.trajectory, ld.param_model.observations)
 end
 
 function LogDensityProblems.logdensity(
@@ -238,5 +237,5 @@ function LogDensityProblems.logdensity(
 )
     model = ld.param_model.build(θ)
     return logpdf(ld.prior, θ) +
-           trajectory_logdensity(model, ld.af, ld.trajectory[], ld.param_model.observations)
+           trajectory_logdensity(model, ld.af, ld.trajectory, ld.param_model.observations)
 end

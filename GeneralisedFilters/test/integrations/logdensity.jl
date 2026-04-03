@@ -511,7 +511,7 @@ end
 
     prior = MvNormal([0.0], [4.0;;])
     pssm = ParameterisedSSM(build_ssm, ys)
-    ld = SSMParameterLogDensity(prior, pssm, Ref(trajectory))
+    ld = SSMParameterLogDensity(prior, pssm, trajectory)
 
     θ_test = [0.5]
     ll = LogDensityProblems.logdensity(ld, θ_test)
@@ -551,7 +551,7 @@ end
 
     prior = MvNormal(zeros(D_inner), 4.0 * I)
     pssm = ParameterisedSSM(build_hier, ys)
-    ld = SSMParameterLogDensity(prior, pssm, KF(), Ref(outer_traj))
+    ld = SSMParameterLogDensity(prior, pssm, KF(), outer_traj)
 
     θ_test = [0.5]
     ll = LogDensityProblems.logdensity(ld, θ_test)
