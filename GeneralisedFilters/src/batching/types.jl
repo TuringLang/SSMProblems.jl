@@ -1,3 +1,4 @@
+using Adapt
 using CUDA
 using LinearAlgebra:
     Adjoint, Transpose, LowerTriangular, UpperTriangular, UniformScaling, Cholesky
@@ -13,45 +14,50 @@ export BatchedStruct
 # =============================================================================
 
 """
-    BatchedCuArray{T, NE, NB, NT, M} <: AbstractArray{CuArray{T,NE,M}, NB}
+    BatchedCuArray{T,NE,NB,NT,A<:AbstractArray{T,NT}} <: AbstractArray{Any,NB}
 
-An `NB`-dimensional batch of `NE`-dimensional CuArrays, stored as a single contiguous
-`CuArray{T, NT, M}` where `NT = NE + NB`.
+An `NB`-dimensional batch of `NE`-dimensional arrays, stored as a single contiguous
+`NT`-dimensional array `data` where `NT = NE + NB`.
 
 - `NE`: number of element dimensions (the "inner" array shape)
 - `NB`: number of batch dimensions
 - `NT`: total number of dimensions (`NE + NB`); required explicitly because Julia's type
   system cannot express arithmetic on type parameters
+- `A`: storage array type
 
 The first `NE` dimensions index within each element; the last `NB` dimensions index across
 the batch.
 
-# Common aliases
-- `BatchedCuMatrix{T,M}` = `BatchedCuArray{T,2,1,3,M}` — a vector of matrices
-- `BatchedCuVector{T,M}` = `BatchedCuArray{T,1,1,2,M}` — a vector of vectors
-"""
-struct BatchedCuArray{T,NE,NB,NT,M} <: AbstractArray{CuArray{T,NE,M},NB}
-    data::CuArray{T,NT,M}
+This type is generic over the storage array type so that it can participate in `Adapt.jl`
+transformations. In the user-facing intended usage, `data` is a `CuArray{T, NT, M}`.
 
-    function BatchedCuArray{T,NE,NB,NT,M}(data::CuArray{T,NT,M}) where {T,NE,NB,NT,M}
+# Common aliases
+- `BatchedCuMatrix{T,A}` = `BatchedCuArray{T,2,1,3,A}` — a vector of matrices
+- `BatchedCuVector{T,A}` = `BatchedCuArray{T,1,1,2,A}` — a vector of vectors
+"""
+struct BatchedCuArray{T,NE,NB,NT,A<:AbstractArray{T,NT}} <: AbstractArray{Any,NB}
+    data::A
+
+    function BatchedCuArray{T,NE,NB,NT,A}(data::A) where {T,NE,NB,NT,A<:AbstractArray{T,NT}}
         NE + NB == NT || error("NE ($NE) + NB ($NB) must equal ndims(data) ($NT)")
-        return new{T,NE,NB,NT,M}(data)
+        return new{T,NE,NB,NT,A}(data)
     end
 end
 
 # Convenience constructor: infer T and M, require explicit NE and NB
-function BatchedCuArray{T,NE,NB}(data::CuArray{T,NT,M}) where {T,NE,NB,NT,M}
+function BatchedCuArray{T,NE,NB}(data::A) where {T,NE,NB,A<:AbstractArray{T}}
+    NT = ndims(data)
     NE + NB == NT || error("NE ($NE) + NB ($NB) must equal ndims(data) ($NT)")
-    return BatchedCuArray{T,NE,NB,NT,M}(data)
+    return BatchedCuArray{T,NE,NB,NT,A}(data)
 end
 
 # Common case aliases
-const BatchedCuMatrix{T,M} = BatchedCuArray{T,2,1,3,M}
-const BatchedCuVector{T,M} = BatchedCuArray{T,1,1,2,M}
+const BatchedCuMatrix{T,A<:AbstractArray{T,3}} = BatchedCuArray{T,2,1,3,A}
+const BatchedCuVector{T,A<:AbstractArray{T,2}} = BatchedCuArray{T,1,1,2,A}
 
 # Constructors for aliased cases
-BatchedCuMatrix(data::CuArray{T,3,M}) where {T,M} = BatchedCuArray{T,2,1,3,M}(data)
-BatchedCuVector(data::CuArray{T,2,M}) where {T,M} = BatchedCuArray{T,1,1,2,M}(data)
+BatchedCuMatrix(data::A) where {T,A<:AbstractArray{T,3}} = BatchedCuArray{T,2,1,3,A}(data)
+BatchedCuVector(data::A) where {T,A<:AbstractArray{T,2}} = BatchedCuArray{T,1,1,2,A}(data)
 
 const BatchedArray = BatchedCuArray
 
@@ -71,47 +77,69 @@ end
 
 batch_size(x::BatchedCuArray) = length(x)
 
+# Adapting BatchedCuArray to bitstype
+function Adapt.adapt_structure(
+    to,
+    x::BatchedCuArray{T,NE,NB,NT,A},
+) where {T,NE,NB,NT,A}
+    data_adapted = Adapt.adapt(to, x.data)
+    return BatchedCuArray{T,NE,NB,NT,typeof(data_adapted)}(data_adapted)
+end
+
 # =============================================================================
 # Shared Types (same data reused across all batch elements)
 # =============================================================================
 
 """
-    SharedCuArray{T, InnerN, BatchN, M} <: AbstractArray{CuArray{T,InnerN,M}, BatchN}
+    SharedCuArray{T,InnerN,BatchN,A<:AbstractArray{T,InnerN}} <: AbstractArray{Any,BatchN}
 
-A batch of CuArrays where every element is the same underlying `CuArray{T,InnerN,M}`.
+A batch of arrays where every element is the same underlying array.
 Unlike `Ref(array)`, this type carries an explicit batch size and satisfies the
 `AbstractArray` contract honestly.
 
 Use `Ref(array)` when the batch size is unknown or irrelevant (e.g. during broadcast
 setup). Use `SharedCuArray` when you need a proper `AbstractArray` with a known size.
 
+This type is generic over the storage array type so that it can participate in `Adapt.jl`
+transformations. In the user-facing intended usage, `data` is a `CuArray{T,InnerN,M}`.
+
 # Common aliases
-- `SharedCuMatrix{T,M}` = `SharedCuArray{T,2,1,M}`
-- `SharedCuVector{T,M}` = `SharedCuArray{T,1,1,M}`
+- `SharedCuMatrix{T,A}` = `SharedCuArray{T,2,1,A}`
+- `SharedCuVector{T,A}` = `SharedCuArray{T,1,1,A}`
 """
-struct SharedCuArray{T,InnerN,BatchN,M} <: AbstractArray{CuArray{T,InnerN,M},BatchN}
-    data::CuArray{T,InnerN,M}
+struct SharedCuArray{T,InnerN,BatchN,A<:AbstractArray{T,InnerN}} <: AbstractArray{Any,BatchN}
+    data::A
     batchsize::NTuple{BatchN,Int}
 end
 
 # Outer constructor: accept a plain Int for the common 1D-batch case
-function SharedCuArray{T,InnerN,1,M}(data::CuArray{T,InnerN,M}, N::Int) where {T,InnerN,M}
-    return SharedCuArray{T,InnerN,1,M}(data, (N,))
+function SharedCuArray{T,InnerN,1,A}(data::A, N::Int) where {T,InnerN,A<:AbstractArray{T,InnerN}}
+    return SharedCuArray{T,InnerN,1,A}(data, (N,))
 end
 
-const SharedCuMatrix{T,M} = SharedCuArray{T,2,1,M}
-const SharedCuVector{T,M} = SharedCuArray{T,1,1,M}
+const SharedCuMatrix{T,A<:AbstractArray{T,2}} = SharedCuArray{T,2,1,A}
+const SharedCuVector{T,A<:AbstractArray{T,1}} = SharedCuArray{T,1,1,A}
+
+# Constructors for aliased cases
+SharedCuMatrix(data::A, N::Int) where {T,A<:AbstractArray{T,2}} = SharedCuArray{T,2,1,A}(data, N)
+SharedCuVector(data::A, N::Int) where {T,A<:AbstractArray{T,1}} = SharedCuArray{T,1,1,A}(data, N)
 
 const SharedArray = SharedCuArray
 
-"""
-    Shared(data::CuArray, N::Int) -> SharedCuArray
+Base.eltype(::Type{<:BatchedCuArray{T,NE}}) where {T,NE} = AbstractArray{T,NE}
+Base.eltype(::Type{<:SharedCuArray{T,InnerN}}) where {T,InnerN} = AbstractArray{T,InnerN}
 
-Convenience constructor: create a `SharedCuArray` from a CuArray with an explicit
-1D batch size `N`.
 """
-Shared(x::CuArray{T,2,M}, N::Int) where {T,M} = SharedCuArray{T,2,1,M}(x, (N,))
-Shared(x::CuArray{T,1,M}, N::Int) where {T,M} = SharedCuArray{T,1,1,M}(x, (N,))
+    Shared(data::AbstractArray, N::Int) -> SharedCuArray
+
+Convenience constructor: create a `SharedCuArray` from an arrat with an explicit
+1D batch size `N`.
+
+The underlying storage is generic to support `Adapt.jl` transformations, but in
+the user-facing intended interface `A` is type `CuArray`
+"""
+Shared(x::A, N::Int) where {T,A<:AbstractArray{T,2}} = SharedCuArray{T,2,1,A}(x, (N,))
+Shared(x::A, N::Int) where {T,A<:AbstractArray{T,1}} = SharedCuArray{T,1,1,A}(x, (N,))
 
 Base.IndexStyle(::Type{<:SharedCuArray}) = Base.IndexCartesian()
 
@@ -128,6 +156,15 @@ function inner_size(x::SharedCuArray)
 end
 
 batch_size(x::SharedCuArray) = length(x)
+
+# Adapting SharedCuArray to bitstype
+function Adapt.adapt_structure(
+    to,
+    x::SharedCuArray{T,InnerN,BatchN,A},
+) where {T,InnerN,BatchN,A<:AbstractArray{T,InnerN}}
+    data_adapted = Adapt.adapt(to, x.data)
+    return SharedCuArray{T,InnerN,BatchN,typeof(data_adapted)}(data_adapted, x.batchsize)
+end
 
 # =============================================================================
 # SharedScalar: a scalar value shared across all batch elements
@@ -148,6 +185,9 @@ _get_component_batch_size(::SharedScalar) = nothing
 Base.:(==)(x::SharedScalar, y) = x.value == y
 Base.:(==)(x, y::SharedScalar) = x == y.value
 Base.:(==)(x::SharedScalar, y::SharedScalar) = x.value == y.value
+
+# Adapting SharedScalar to bitstype
+Adapt.@adapt_structure SharedScalar
 
 # =============================================================================
 # BatchedStruct - Custom wrapper for batched composite types
@@ -225,6 +265,15 @@ end
 Base.size(x::BatchedStruct) = (batch_size(x),)
 Base.IndexStyle(::Type{<:BatchedStruct}) = IndexLinear()
 
+# Non-generic indexing
+function Base.getindex(x::BatchedStruct{<:Adjoint}, i::Integer)
+    return adjoint(getfield(x, :components).parent[i])
+end
+
+function Base.getindex(x::BatchedStruct{<:Transpose}, i::Integer)
+    return transpose(getfield(x, :components).parent[i])
+end
+
 # Indexing: construct an element of type T by calling its constructor
 @generated function Base.getindex(x::BatchedStruct{T}, i::Integer) where {T}
     fields = fieldnames(T)
@@ -269,6 +318,15 @@ function Base.show(io::IO, ::MIME"text/plain", x::BatchedStruct{T}) where {T}
             println(io, typeof(component))
         end
     end
+end
+
+# Adapting BatchedStruct to bitstype
+function Adapt.adapt_structure(
+    to,
+    x::BatchedStruct{T,C},
+) where {T,C<:NamedTuple}
+    comps_adapted = Adapt.adapt(to, x.components)
+    return BatchedStruct{T}(comps_adapted)
 end
 
 # =============================================================================
