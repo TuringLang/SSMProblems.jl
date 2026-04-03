@@ -62,7 +62,7 @@ function _unflatten_trajectory(x_flat::AbstractVector, T::Integer, Dx::Integer)
 end
 
 function _flatten_trajectory(traj, T::Integer, Dx::Integer)
-    x_flat = Vector{Float64}(undef, (T + 1) * Dx)
+    x_flat = Vector{eltype(first(traj))}(undef, (T + 1) * Dx)
     for i in 0:T
         x_flat[((i * Dx) + 1):((i + 1) * Dx)] = traj[i]
     end

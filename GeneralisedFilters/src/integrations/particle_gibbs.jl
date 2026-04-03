@@ -138,9 +138,9 @@ function AbstractMCMC.step(
 )
     # Sample initial θ
     θ = if isnothing(initial_params)
-        Vector{Float64}(rand(rng, model.prior))
+        Vector(rand(rng, model.prior))
     else
-        Vector{Float64}(initial_params)
+        Vector(initial_params)
     end
 
     # Build SSM and run unconditional CSMC for initial trajectory
