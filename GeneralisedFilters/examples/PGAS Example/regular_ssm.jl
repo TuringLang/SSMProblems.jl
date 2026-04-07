@@ -49,9 +49,7 @@ _, _, ys = SSMProblems.sample(rng, true_ssm, T_len)
 end
 
 m = drift_model_reg(ys)
-# pg = ParticleGibbs(CSMC(BF(N_particles)), NUTS(0.8))
-pg = ParticleGibbs(CSMCAS(BF(N_particles)), NUTS(0.8))
-# pg = ParticleGibbs(CSMCBS(BF(N_particles)), NUTS(0.8))
+pg = ParticleGibbs(ConditionalSMC(BF(N_particles), AncestorSampling()), NUTS(0.8))
 
 chain = AbstractMCMC.sample(
     rng, m, pg, N_iter; n_adapts=N_adapts, progress=false, chain_type=MCMCChains.Chains
