@@ -192,6 +192,66 @@ end
     @test std(post_samples) ≈ kf_std rtol = 0.2
 end
 
+## NUTS: BF on HierarchicalSSM against augmented KF ###########################################
+
+@testitem "ParticleGibbs Turing NUTS: BF on HierarchicalSSM" begin
+    using GeneralisedFilters
+    using AbstractMCMC: AbstractMCMC
+    using AdvancedHMC: NUTS
+    using MCMCChains: MCMCChains
+    using Turing
+    using StableRNGs
+    using Distributions
+    using PDMats
+    using LinearAlgebra
+    using Statistics
+    using SSMProblems
+    using ForwardDiff
+
+    rng = StableRNG(42)
+
+    Dx, Dz, Dy = 1, 1, 1
+    T_len = 4
+    N_particles = 500
+    N_iter = 5000
+    N_adapts = 500
+    σ²_b = 4.0
+
+    full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
+        rng, Dx, Dz, Dy; static_arrays=true
+    )
+    _, _, _, _, ys = SSMProblems.sample(rng, hier_model, T_len)
+
+    fixed = hier_model
+
+    drift_indices = (Dx + 1):(Dx + Dz)
+    kf_post = GeneralisedFilters.GFTest.augmented_kf_drift_posterior(
+        full_model, ys, drift_indices; σ²_b=σ²_b, ε=1e-12
+    )
+    kf_mean = kf_post.mean
+    kf_std = kf_post.std
+
+    @model function drift_model_bf_hier(ys)
+        b ~ MvNormal(zeros(Dz), σ²_b * I)
+        ssm = GeneralisedFilters.GFTest.with_inner_drift(fixed, b)
+        # No inner filter: BF samples the full HierarchicalState (outer + inner)
+        x ~ SSMTrajectory(ssm, ys)
+        return nothing
+    end
+
+    m = drift_model_bf_hier(ys)
+    pg = ParticleGibbs(ConditionalSMC(BF(N_particles), AncestorSampling()), NUTS(0.8))
+
+    chain = AbstractMCMC.sample(
+        rng, m, pg, N_iter; n_adapts=N_adapts, progress=false, chain_type=MCMCChains.Chains
+    )
+
+    post_samples = Array(chain[:b])[(N_adapts + 1):end]
+
+    @test mean(post_samples) ≈ kf_mean[1] rtol = 1e-1
+    @test std(post_samples) ≈ kf_std[1] rtol = 1e-1
+end
+
 ## NUTS: HierarchicalSSM against augmented KF ##################################################
 
 @testitem "ParticleGibbs Turing NUTS: HierarchicalSSM" begin

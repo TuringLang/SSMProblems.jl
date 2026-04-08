@@ -117,3 +117,36 @@ function SSMProblems.distribution(
 )
     return distribution(obs.obs, step, state.z; new_outer=state.x, kwargs...)
 end
+
+# When any observation process or dynamics receives a HierarchicalState, delegate to the
+# inner component and inject the outer state via new_outer/prev_outer kwargs. This allows
+# BF (and other non-Rao-Blackwellised samplers) to operate on HierarchicalSSM without
+# needing to wrap the model.
+
+function SSMProblems.logdensity(
+    obs::ObservationProcess, step::Integer, state::HierarchicalState, observation; kwargs...
+)
+    return SSMProblems.logdensity(
+        obs, step, state.z, observation; new_outer=state.x, kwargs...
+    )
+end
+
+function SSMProblems.logdensity(
+    dyn::HierarchicalDynamics,
+    step::Integer,
+    prev_state::HierarchicalState,
+    new_state::HierarchicalState;
+    kwargs...,
+)
+    ll = SSMProblems.logdensity(dyn.outer_dyn, step, prev_state.x, new_state.x; kwargs...)
+    ll += SSMProblems.logdensity(
+        dyn.inner_dyn,
+        step,
+        prev_state.z,
+        new_state.z;
+        prev_outer=prev_state.x,
+        new_outer=new_state.x,
+        kwargs...,
+    )
+    return ll
+end
