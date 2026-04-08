@@ -23,7 +23,7 @@ using Turing: Turing
 
 ## BIJECTORS INTEGRATION #######################################################################
 
-bijector(::SSMTrajectory) = Bijectors.Identity{1}()
+bijector(::SSMTrajectory) = identity
 
 ## CSMC CONTEXT ################################################################################
 

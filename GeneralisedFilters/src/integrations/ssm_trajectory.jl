@@ -43,8 +43,6 @@ function SSMTrajectory(model::AbstractStateSpaceModel, observations)
     return SSMTrajectory(model, nothing, observations)
 end
 
-bijector(::SSMTrajectory) = Bijectors.Identity{1}()
-
 ## DIMENSIONS ####################################################################################
 
 function _state_dim(d::SSMTrajectory{<:StateSpaceModel})
