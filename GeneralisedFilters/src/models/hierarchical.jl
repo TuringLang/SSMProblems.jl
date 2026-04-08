@@ -108,21 +108,6 @@ function SSMProblems.simulate(
     return HierarchicalState(x, z)
 end
 
-struct HierarchicalObservations{OP<:ObservationProcess} <: ObservationProcess
-    obs::OP
-end
-
-function SSMProblems.distribution(
-    obs::HierarchicalObservations, step::Integer, state::HierarchicalState; kwargs...
-)
-    return distribution(obs.obs, step, state.z; new_outer=state.x, kwargs...)
-end
-
-# When any observation process or dynamics receives a HierarchicalState, delegate to the
-# inner component and inject the outer state via new_outer/prev_outer kwargs. This allows
-# BF (and other non-Rao-Blackwellised samplers) to operate on HierarchicalSSM without
-# needing to wrap the model.
-
 function SSMProblems.logdensity(
     obs::ObservationProcess, step::Integer, state::HierarchicalState, observation; kwargs...
 )
