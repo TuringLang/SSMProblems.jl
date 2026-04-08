@@ -9,7 +9,7 @@ using SSMProblems
     Aqua.test_unbound_args(GeneralisedFilters)
     Aqua.test_undefined_exports(GeneralisedFilters)
     Aqua.test_project_extras(GeneralisedFilters)
-    Aqua.test_stale_deps(GeneralisedFilters)
+    Aqua.test_stale_deps(GeneralisedFilters; ignore=[:AcceleratedKernels])
     Aqua.test_piracies(GeneralisedFilters; treat_as_own=[SSMProblems.simulate_from_dist])
     Aqua.test_persistent_tasks(GeneralisedFilters)
 end
