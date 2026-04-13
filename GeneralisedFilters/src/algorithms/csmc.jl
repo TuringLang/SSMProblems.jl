@@ -132,7 +132,7 @@ end
 function _init_tree(state::ParticleDistribution)
     states = map(p -> p.state, state.particles)
     N = length(states)
-    return ParticleTree(states, floor(Int64, N * log(N)))
+    return ParticleTree(states, max(N, floor(Int64, N * log(N))))
 end
 
 function _update_tree!(tree::ParticleTree, state::ParticleDistribution)
