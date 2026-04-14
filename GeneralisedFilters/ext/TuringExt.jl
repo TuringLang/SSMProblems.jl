@@ -13,8 +13,10 @@ import GeneralisedFilters:
 using AbstractMCMC: AbstractMCMC
 using Bijectors: Bijectors
 import Bijectors: bijector
+import DifferentiationInterface as DI
 using Distributions: Distributions
 using DynamicPPL: DynamicPPL
+using LogDensityProblems: LogDensityProblems
 using MCMCChains: MCMCChains
 using OffsetArrays
 using Random: AbstractRNG
@@ -73,14 +75,83 @@ function DynamicPPL.tilde_observe!!(
     return DynamicPPL.tilde_observe!!(DynamicPPL.DefaultContext(), right, left, vn, vi)
 end
 
+## CACHED PREP LDF #############################################################################
+
+"""
+    CachedPrepLDF
+
+Wrapper that reuses the AD preparation (`_adprep`) from an existing `LogDensityFunction`
+while evaluating against a different conditioned model. This avoids calling
+`prepare_gradient` every MCMC iteration when only the conditioned trajectory changes.
+"""
+struct CachedPrepLDF{Tlink,L<:DynamicPPL.LogDensityFunction{Tlink},M}
+    base::L
+    model::M
+end
+
+function LogDensityProblems.capabilities(::Type{<:CachedPrepLDF{T,L}}) where {T,L}
+    return LogDensityProblems.capabilities(L)
+end
+LogDensityProblems.dimension(c::CachedPrepLDF) = c.base._dim
+
+function LogDensityProblems.logdensity(
+    c::CachedPrepLDF{Tlink}, params::AbstractVector
+) where {Tlink}
+    b = c.base
+    return DynamicPPL.logdensity_at(
+        params,
+        Val{Tlink}(),
+        c.model,
+        b._getlogdensity,
+        b._iden_varname_ranges,
+        b._varname_ranges,
+        b._accs,
+    )
+end
+
+function LogDensityProblems.logdensity_and_gradient(
+    c::CachedPrepLDF{Tlink}, params::AbstractVector
+) where {Tlink}
+    b = c.base
+    params = convert(DynamicPPL._get_input_vector_type(b), params)
+    return if DynamicPPL._use_closure(b.adtype)
+        DI.value_and_gradient(
+            DynamicPPL.LogDensityAt{Tlink}(
+                c.model,
+                b._getlogdensity,
+                b._iden_varname_ranges,
+                b._varname_ranges,
+                b._accs,
+            ),
+            b._adprep,
+            b.adtype,
+            params,
+        )
+    else
+        DI.value_and_gradient(
+            DynamicPPL.logdensity_at,
+            b._adprep,
+            b.adtype,
+            params,
+            DI.Constant(Val{Tlink}()),
+            DI.Constant(c.model),
+            DI.Constant(b._getlogdensity),
+            DI.Constant(b._iden_varname_ranges),
+            DI.Constant(b._varname_ranges),
+            DI.Constant(b._accs),
+        )
+    end
+end
+
 ## TURING STATE ################################################################################
 
-struct ParticleGibbsTuringState{VIT,TT,VNT,PS,CVI}
+struct ParticleGibbsTuringState{VIT,TT,VNT,PS,CVI,LT}
     vi::VIT
     trajectory::TT
     traj_vn::VNT
     param_state::PS
     cond_vi_linked::CVI
+    ldf::LT
 end
 
 ## HELPERS #####################################################################################
@@ -194,7 +265,7 @@ function AbstractMCMC.step(
 
     transition = ParticleGibbsTransition(θ_new, AbstractMCMC.getstats(param_state))
     state = ParticleGibbsTuringState(
-        vi, trajectory_new, traj_vn, param_state, cond_vi_linked
+        vi, trajectory_new, traj_vn, param_state, cond_vi_linked, ldf
     )
 
     return transition, state
@@ -221,9 +292,10 @@ function AbstractMCMC.step(
     traj_flat = _flatten_trajectory(outer_traj, T_len, Dx)
     cond_model = _condition_on_trajectory(model, traj_vn, traj_flat)
 
-    # 3. Create LogDensityFunction (new each step since trajectory changed)
-    ldf, cond_vi_linked = _make_conditioned_ldf(cond_model, vi, traj_vn, pg.adtype)
-    ld_model = AbstractMCMC.LogDensityModel(ldf)
+    # 3. Reuse AD prep from initial step; only swap in new conditioned model
+    cond_vi_linked = state.cond_vi_linked
+    cached_ldf = CachedPrepLDF(state.ldf, cond_model)
+    ld_model = AbstractMCMC.LogDensityModel(cached_ldf)
 
     # 4. Parameter step (preserves adaptation via state.param_state)
     _, param_state = AbstractMCMC.step(
@@ -253,7 +325,7 @@ function AbstractMCMC.step(
 
     transition = ParticleGibbsTransition(θ_new, AbstractMCMC.getstats(param_state))
     new_state = ParticleGibbsTuringState(
-        vi, trajectory_new, traj_vn, param_state, cond_vi_linked
+        vi, trajectory_new, traj_vn, param_state, cond_vi_linked, state.ldf
     )
 
     return transition, new_state
