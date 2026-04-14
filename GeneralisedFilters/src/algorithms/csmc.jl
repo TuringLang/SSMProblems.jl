@@ -103,7 +103,7 @@ end
 # TODO: is this actually needed?
 _make_ref_state(::Nothing) = nothing
 _make_ref_state(traj) = traj
-_make_ref_state(traj::OffsetVector{<:RBState}) = getproperty.(traj, :x)
+_make_ref_state(traj::OffsetVector{<:RBState}) = map(s -> s.x, traj)
 
 ## TRAJECTORY SAMPLING #####################################################################
 
