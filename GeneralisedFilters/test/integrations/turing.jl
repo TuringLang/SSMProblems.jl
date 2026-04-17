@@ -314,3 +314,129 @@ end
     @test mean(post_samples) ≈ kf_mean[1] rtol = 1e-1
     @test std(post_samples) ≈ kf_std[1] rtol = 1e-1
 end
+
+## Joint NUTS: regular SSM with Mooncake #######################################################
+# Runs NUTS directly on (b, x₀:T) — no ParticleGibbs alternation. Mooncake handles the
+# in-place Cholesky inside logpdf(MvNormal, PDMat) that breaks Zygote on this path.
+
+@testitem "Joint NUTS: regular SSM with Mooncake" tags = [:mooncake] begin
+    using GeneralisedFilters
+    using ADTypes: AutoMooncake
+    using MCMCChains: MCMCChains
+    using Turing
+    using StableRNGs
+    using Distributions
+    using PDMats
+    using LinearAlgebra
+    using Statistics
+    using SSMProblems
+    using Mooncake
+
+    rng = StableRNG(42)
+
+    a = 0.8
+    q² = 0.1
+    r² = 0.5
+    σ₀² = 1.0
+    σ_b² = 4.0
+    T_len = 10
+    N_iter = 2000
+    N_adapts = 500
+
+    function build_ssm_joint_reg_mooncake(drift)
+        return create_homogeneous_linear_gaussian_model(
+            [0.0],
+            PDMat([σ₀²;;]),
+            [a;;],
+            [drift[1]],
+            PDMat([q²;;]),
+            [1.0;;],
+            [0.0],
+            PDMat([r²;;]),
+        )
+    end
+
+    true_ssm = build_ssm_joint_reg_mooncake([1.5])
+    _, _, ys = SSMProblems.sample(rng, true_ssm, T_len)
+
+    ref_model = build_ssm_joint_reg_mooncake([0.0])
+    kf_post = GeneralisedFilters.GFTest.augmented_kf_drift_posterior(
+        ref_model, ys, 1; σ²_b=σ_b², ε=1e-12
+    )
+
+    @model function joint_drift_model_reg_mooncake(ys)
+        b ~ MvNormal([0.0], σ_b² * I)
+        ssm = build_ssm_joint_reg_mooncake(b)
+        x ~ SSMTrajectory(ssm, ys)
+        return nothing
+    end
+
+    chain = Turing.sample(
+        rng,
+        joint_drift_model_reg_mooncake(ys),
+        Turing.NUTS(N_adapts, 0.8; adtype=AutoMooncake(; config=nothing)),
+        N_iter;
+        progress=false,
+    )
+
+    post_samples = vec(Array(chain[Symbol("b[1]")]))[(N_adapts + 1):end]
+
+    @test mean(post_samples) ≈ kf_post.mean[1] rtol = 1e-1
+    @test std(post_samples) ≈ kf_post.std[1] rtol = 2e-1
+end
+
+## Joint NUTS: RB SSM with Mooncake ############################################################
+# Runs NUTS directly on (b, u₀:T) — no ParticleGibbs alternation. MooncakeExt provides a
+# native rrule!! for kf_loglikelihood that handles PDMat covariances correctly.
+
+@testitem "Joint NUTS: RB SSM with Mooncake" tags = [:mooncake] begin
+    using GeneralisedFilters
+    using ADTypes: AutoMooncake
+    using MCMCChains: MCMCChains
+    using Turing
+    using StableRNGs
+    using Distributions
+    using PDMats
+    using LinearAlgebra
+    using Statistics
+    using SSMProblems
+    using Mooncake
+
+    rng = StableRNG(42)
+
+    Dx, Dz, Dy = 1, 1, 1
+    T_len = 10
+    N_iter = 2000
+    N_adapts = 500
+    σ²_b = 4.0
+
+    full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
+        rng, Dx, Dz, Dy; static_arrays=false
+    )
+    _, _, _, _, ys = SSMProblems.sample(rng, hier_model, T_len)
+
+    drift_indices = (Dx + 1):(Dx + Dz)
+    kf_post = GeneralisedFilters.GFTest.augmented_kf_drift_posterior(
+        full_model, ys, drift_indices; σ²_b=σ²_b, ε=1e-12
+    )
+
+    @model function joint_drift_model_rb_mooncake(ys)
+        b ~ MvNormal(zeros(Dz), σ²_b * I)
+        ssm = GeneralisedFilters.GFTest.with_inner_drift(hier_model, b)
+        x ~ SSMTrajectory(ssm, KF(), ys)
+        return nothing
+    end
+
+    chain = Turing.sample(
+        rng,
+        joint_drift_model_rb_mooncake(ys),
+        Turing.NUTS(N_adapts, 0.8; adtype=AutoMooncake(; config=nothing)),
+        N_iter;
+        progress=false,
+    )
+
+    post_samples = vec(Array(chain[Symbol("b[1]")]))[(N_adapts + 1):end]
+
+    @test mean(post_samples) ≈ kf_post.mean[1] rtol = 1e-1
+    @test std(post_samples) ≈ kf_post.std[1] rtol = 2e-1
+end
