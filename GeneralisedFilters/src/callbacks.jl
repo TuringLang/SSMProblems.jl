@@ -240,7 +240,10 @@ end
 
 function (c::AncestorCallback)(model, filter, state, data, ::PostInitCallback; kwargs...)
     N = num_particles(filter)
-    c.tree = ParticleTree(getfield.(state.particles, :state), floor(Int64, N * log(N)))
+    c.tree = ParticleTree(
+        getfield.(state.particles, :state),
+        max(N, floor(Int64, N * log(N))),
+    )
     return nothing
 end
 
@@ -265,7 +268,7 @@ end
 
 function (c::ResamplerCallback)(model, filter, state, data, ::PostInitCallback; kwargs...)
     N = num_particles(filter)
-    c.tree = ParticleTree(collect(1:N), floor(Int64, N * log(N)))
+    c.tree = ParticleTree(collect(1:N), max(N, floor(Int64, N * log(N))))
     return nothing
 end
 

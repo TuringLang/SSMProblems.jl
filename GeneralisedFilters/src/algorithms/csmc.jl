@@ -128,7 +128,7 @@ end
 function _init_tree(state::ParticleDistribution)
     states = map(p -> p.state, state.particles)
     N = length(states)
-    return ParticleTree(states, floor(Int64, N * log(N)))
+    return ParticleTree(states, max(N, floor(Int64, N * log(N))))
 end
 
 function _update_tree!(tree::ParticleTree, state::ParticleDistribution)
@@ -348,16 +348,16 @@ function _csmc_sample(
 
     # Forward filtering pass, storing particles at each timestep
     init_state = initialise(rng, prior(model), pf; ref_state)
-    init_particles = deepcopy(init_state.particles)
+    init_particles = copy(init_state.particles)
 
     state, ll = step(rng, model, pf, 1, init_state, observations[1]; ref_state)
     particle_history = Vector{typeof(state.particles)}(undef, K)
-    particle_history[1] = deepcopy(state.particles)
+    particle_history[1] = copy(state.particles)
 
     for t in 2:K
         state, ll_inc = step(rng, model, pf, t, state, observations[t]; ref_state)
         ll += ll_inc
-        particle_history[t] = deepcopy(state.particles)
+        particle_history[t] = copy(state.particles)
     end
 
     # Backward simulation pass
