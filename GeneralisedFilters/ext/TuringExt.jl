@@ -27,6 +27,14 @@ using Turing: Turing
 
 bijector(::SSMTrajectory) = identity
 
+function Bijectors.VectorBijectors.to_linked_vec(::SSMTrajectory)
+    return identity
+end
+
+function Bijectors.VectorBijectors.from_linked_vec(::SSMTrajectory)
+    return identity
+end
+
 ## CSMC CONTEXT ################################################################################
 
 """
@@ -48,6 +56,7 @@ function DynamicPPL.tilde_assume!!(
     ctx::CSMCContext,
     dist::SSMTrajectory,
     vn::DynamicPPL.VarName,
+    ::Any,
     vi::DynamicPPL.AbstractVarInfo,
 )
     ctx.ssm_dist[] = dist
@@ -60,9 +69,10 @@ function DynamicPPL.tilde_assume!!(
     ::CSMCContext,
     dist::Distributions.Distribution,
     vn::DynamicPPL.VarName,
+    template::Any,
     vi::DynamicPPL.AbstractVarInfo,
 )
-    return DynamicPPL.tilde_assume!!(DynamicPPL.DefaultContext(), dist, vn, vi)
+    return DynamicPPL.tilde_assume!!(DynamicPPL.DefaultContext(), dist, vn, template, vi)
 end
 
 function DynamicPPL.tilde_observe!!(
@@ -70,9 +80,12 @@ function DynamicPPL.tilde_observe!!(
     right::Distributions.Distribution,
     left,
     vn::Union{DynamicPPL.VarName,Nothing},
+    template::Any,
     vi::DynamicPPL.AbstractVarInfo,
 )
-    return DynamicPPL.tilde_observe!!(DynamicPPL.DefaultContext(), right, left, vn, vi)
+    return DynamicPPL.tilde_observe!!(
+        DynamicPPL.DefaultContext(), right, left, vn, template, vi
+    )
 end
 
 ## CACHED PREP LDF #############################################################################
@@ -97,14 +110,12 @@ LogDensityProblems.dimension(c::CachedPrepLDF) = c.base._dim
 function LogDensityProblems.logdensity(
     c::CachedPrepLDF{Tlink}, params::AbstractVector
 ) where {Tlink}
-    b = c.base
     return DynamicPPL.logdensity_at(
         params,
-        Val{Tlink}(),
         c.model,
         b._getlogdensity,
-        b._iden_varname_ranges,
         b._varname_ranges,
+        b.transform_strategy,
         b._accs,
     )
 end
@@ -113,14 +124,14 @@ function LogDensityProblems.logdensity_and_gradient(
     c::CachedPrepLDF{Tlink}, params::AbstractVector
 ) where {Tlink}
     b = c.base
-    params = convert(DynamicPPL._get_input_vector_type(b), params)
+    params = convert(DynamicPPL.get_input_vector_type(b), params)
     return if DynamicPPL._use_closure(b.adtype)
         DI.value_and_gradient(
             DynamicPPL.LogDensityAt{Tlink}(
                 c.model,
                 b._getlogdensity,
-                b._iden_varname_ranges,
                 b._varname_ranges,
+                b.transform_strategy,
                 b._accs,
             ),
             b._adprep,
@@ -133,11 +144,10 @@ function LogDensityProblems.logdensity_and_gradient(
             b._adprep,
             b.adtype,
             params,
-            DI.Constant(Val{Tlink}()),
             DI.Constant(c.model),
             DI.Constant(b._getlogdensity),
-            DI.Constant(b._iden_varname_ranges),
             DI.Constant(b._varname_ranges),
+            DI.Constant(b.transform_strategy),
             DI.Constant(b._accs),
         )
     end
@@ -155,6 +165,10 @@ struct ParticleGibbsTuringState{VIT,TT,VNT,PS,CVI,LT}
 end
 
 ## HELPERS #####################################################################################
+
+function get_trajectories(vi::DynamicPPL.AbstractVarInfo)
+    return DynamicPPL.getacc(vi, Val(SSM_ACCUMULATOR)).values
+end
 
 function _discover_ssm(model::DynamicPPL.Model, vi::DynamicPPL.AbstractVarInfo)
     ctx = CSMCContext()
@@ -199,9 +213,9 @@ Given a linked VarInfo template and new unconstrained parameters from NUTS,
 recover the constrained parameter values as a NamedTuple.
 """
 function _recover_params(cond_vi_linked, cond_model, θ_new)
-    vi_updated = DynamicPPL.unflatten(cond_vi_linked, θ_new)
+    vi_updated = DynamicPPL.unflatten!!(cond_vi_linked, θ_new)
     vi_constrained = DynamicPPL.invlink(vi_updated, cond_model)
-    return DynamicPPL.values_as(vi_constrained, NamedTuple)
+    return vi_constrained
 end
 
 ## ABSTRACTMCMC INTERFACE ######################################################################
@@ -230,7 +244,7 @@ function AbstractMCMC.step(
     Dx = _state_dim(ssm_dist)
     outer_traj = _outer_trajectory(trajectory, af)
     traj_flat = _flatten_trajectory(outer_traj, T_len, Dx)
-    vi = DynamicPPL.setindex!!(vi, traj_flat, traj_vn)
+    vi = DynamicPPL.setindex_internal!!(vi, traj_flat, traj_vn)
     vi = last(DynamicPPL.evaluate!!(model, vi))
 
     # 5. Condition on trajectory, create LogDensityFunction for parameter step
@@ -243,12 +257,9 @@ function AbstractMCMC.step(
     _, param_state = AbstractMCMC.step(rng, ld_model, pg.param; initial_params=θ, kwargs...)
 
     # 7. Update VarInfo with new parameters, discover new SSM
-    θ_new = AbstractMCMC.getparams(param_state)
+    θ_new = AbstractMCMC.getparams(cond_model, param_state)
     param_vals = _recover_params(cond_vi_linked, cond_model, θ_new)
-    for (k, v) in pairs(param_vals)
-        vn = DynamicPPL.VarName{k}()
-        vi = DynamicPPL.setindex!!(vi, v, vn)
-    end
+    vi = merge(vi, param_vals)
     vi = last(DynamicPPL.evaluate!!(model, vi))
 
     # 8. Discover new SSM and run CSMC
@@ -260,8 +271,9 @@ function AbstractMCMC.step(
     # 9. Update trajectory in VarInfo
     outer_traj_new = _outer_trajectory(trajectory_new, af)
     traj_flat_new = _flatten_trajectory(outer_traj_new, T_len, Dx)
-    vi = DynamicPPL.setindex!!(vi, traj_flat_new, traj_vn)
-    vi = last(DynamicPPL.evaluate!!(model, vi))
+    init_vi = DynamicPPL.setindex!!(vi.values, traj_flat_new, traj_vn)
+    init_strategy = DynamicPPL.InitFromParams(init_vi)
+    _, vi = DynamicPPL.init!!(rng, model, vi, init_strategy, DynamicPPL.LinkAll())
 
     transition = ParticleGibbsTransition(θ_new, AbstractMCMC.getstats(param_state))
     state = ParticleGibbsTuringState(
@@ -303,12 +315,9 @@ function AbstractMCMC.step(
     )
 
     # 5. Extract new θ and update VarInfo
-    θ_new = AbstractMCMC.getparams(param_state)
+    θ_new = AbstractMCMC.getparams(cond_model, param_state)
     param_vals = _recover_params(cond_vi_linked, cond_model, θ_new)
-    for (k, v) in pairs(param_vals)
-        vn = DynamicPPL.VarName{k}()
-        vi = DynamicPPL.setindex!!(vi, v, vn)
-    end
+    vi = merge(vi, param_vals)
     vi = last(DynamicPPL.evaluate!!(model, vi))
 
     # 6. Discover new SSM and run CSMC
@@ -320,8 +329,9 @@ function AbstractMCMC.step(
     # 7. Update trajectory in VarInfo
     outer_traj_new = _outer_trajectory(trajectory_new, af)
     traj_flat_new = _flatten_trajectory(outer_traj_new, T_len, Dx)
-    vi = DynamicPPL.setindex!!(vi, traj_flat_new, traj_vn)
-    vi = last(DynamicPPL.evaluate!!(model, vi))
+    init_vi = DynamicPPL.setindex!!(vi.values, traj_flat_new, traj_vn)
+    init_strategy = DynamicPPL.InitFromParams(init_vi)
+    _, vi = DynamicPPL.init!!(rng, model, vi, init_strategy, DynamicPPL.LinkAll())
 
     transition = ParticleGibbsTransition(θ_new, AbstractMCMC.getstats(param_state))
     new_state = ParticleGibbsTuringState(
@@ -352,15 +362,16 @@ end
 
 function _turing_param_names(state::ParticleGibbsTuringState)
     vi = state.cond_vi_linked
-    nt = DynamicPPL.values_as(vi, NamedTuple)
+    # nt = DynamicPPL.values_as(vi, NamedTuple)
+    vnt = DynamicPPL.get_values(vi)
     names = Symbol[]
-    for (k, v) in pairs(nt)
+    for (k, v) in pairs(vnt)
         if v isa AbstractArray && length(v) > 1
             for i in 1:length(v)
                 push!(names, Symbol("$(k)[$i]"))
             end
         else
-            push!(names, k)
+            push!(names, Symbol(k))
         end
     end
     return names
