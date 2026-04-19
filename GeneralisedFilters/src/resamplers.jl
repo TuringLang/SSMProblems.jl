@@ -194,26 +194,6 @@ function set_ancestor(particle::Particle, ancestor::Int)
     return Particle(particle.state, log_weight(particle), ancestor)
 end
 
-## CATEGORICAL RESAMPLE ####################################################################
-
-# this is adapted from AdvancedPS
-function randcat(rng::AbstractRNG, weights::AbstractVector{WT}) where {WT<:Real}
-    # pre-calculations
-    @inbounds v = weights[1]
-    u = rand(rng, WT)
-
-    # initialize sampling algorithm
-    n = length(weights)
-    idx = 1
-
-    while (v ≤ u) && (idx < n)
-        idx += 1
-        v += weights[idx]
-    end
-
-    return idx
-end
-
 ## DOUBLE PRECISION STABLE ALGORITHMS ######################################################
 
 struct Multinomial <: AbstractResampler end
