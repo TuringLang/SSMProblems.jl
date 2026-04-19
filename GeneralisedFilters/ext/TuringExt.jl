@@ -111,12 +111,7 @@ function LogDensityProblems.logdensity(
     c::CachedPrepLDF{Tlink}, params::AbstractVector
 ) where {Tlink}
     return DynamicPPL.logdensity_at(
-        params,
-        c.model,
-        b._getlogdensity,
-        b._varname_ranges,
-        b.transform_strategy,
-        b._accs,
+        params, c.model, b._getlogdensity, b._varname_ranges, b.transform_strategy, b._accs
     )
 end
 
@@ -128,11 +123,7 @@ function LogDensityProblems.logdensity_and_gradient(
     return if DynamicPPL._use_closure(b.adtype)
         DI.value_and_gradient(
             DynamicPPL.LogDensityAt{Tlink}(
-                c.model,
-                b._getlogdensity,
-                b._varname_ranges,
-                b.transform_strategy,
-                b._accs,
+                c.model, b._getlogdensity, b._varname_ranges, b.transform_strategy, b._accs
             ),
             b._adprep,
             b.adtype,
