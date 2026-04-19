@@ -302,10 +302,18 @@ end
 # Build reference state for backward weights (combines state with backward likelihood)
 _build_bs_ref(state, ::Nothing) = state
 _build_bs_ref(state::RBState, back_lik) = RBState(state.x, back_lik)
+_build_bs_ref(::RBState, ::Nothing) = error("again this should error")
 
 # Update backward predictive likelihood during backward pass (no-op for non-RBPF)
 function _bs_step_back_lik(
-    rng, model, pf, t, ::Nothing, observations, prev_state, next_state
+    rng::AbstractRNG,
+    model::AbstractStateSpaceModel,
+    pf::AbstractFilter,
+    t::Integer,
+    ::Nothing,
+    observations,
+    prev_state,
+    next_state,
 )
     return nothing
 end
@@ -333,6 +341,19 @@ function _bs_step_back_lik(
     return backward_update(
         model.inner_model.obs, bp, t, pred_lik, observations[t]; new_outer=prev_state.x
     )
+end
+
+function _bs_step_back_lik(
+    rng::AbstractRNG,
+    model::HierarchicalSSM,
+    pf::RBPF,
+    t::Integer,
+    ::Nothing,
+    observations,
+    prev_state::RBState,
+    next_state::RBState,
+)
+    return error("this should error")
 end
 
 function _csmc_sample(

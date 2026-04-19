@@ -8,6 +8,9 @@ import SSMProblems: prior, dyn, obs
 using OffsetArrays
 using SSMProblems
 using StatsBase
+using DifferentiationInterface
+
+const DI = DifferentiationInterface
 
 # Filtering utilities
 include("callbacks.jl")
