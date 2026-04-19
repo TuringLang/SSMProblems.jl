@@ -12,6 +12,7 @@ import GeneralisedFilters:
     ParticleGibbsTransition
 using AbstractMCMC: AbstractMCMC
 using Bijectors: Bijectors
+using Bijectors.VectorBijectors: TypedIdentity
 import Bijectors: bijector
 import DifferentiationInterface as DI
 using Distributions: Distributions
@@ -27,13 +28,9 @@ using Turing: Turing
 
 bijector(::SSMTrajectory) = identity
 
-function Bijectors.VectorBijectors.to_linked_vec(::SSMTrajectory)
-    return identity
-end
-
-function Bijectors.VectorBijectors.from_linked_vec(::SSMTrajectory)
-    return identity
-end
+Bijectors.VectorBijectors.to_linked_vec(::SSMTrajectory) = TypedIdentity()
+Bijectors.VectorBijectors.from_linked_vec(::SSMTrajectory) = TypedIdentity()
+Bijectors.VectorBijectors.linked_vec_length(d::SSMTrajectory) = length(d)
 
 ## CSMC CONTEXT ################################################################################
 
@@ -110,6 +107,7 @@ LogDensityProblems.dimension(c::CachedPrepLDF) = c.base._dim
 function LogDensityProblems.logdensity(
     c::CachedPrepLDF{Tlink}, params::AbstractVector
 ) where {Tlink}
+    b = c.base
     return DynamicPPL.logdensity_at(
         params, c.model, b._getlogdensity, b._varname_ranges, b.transform_strategy, b._accs
     )
