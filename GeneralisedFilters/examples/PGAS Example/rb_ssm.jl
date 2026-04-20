@@ -48,9 +48,9 @@ function make_ssm_builder(; a, q², c_val, r², σ₀²)
     inner_obs = HomogeneousLinearGaussianObservationProcess(
         SMatrix{1,1}(1.0), SVector{1}(0.0), PDMat(SMatrix{1,1}(r²))
     )
-    return function (b)
+    return function (b::AbstractVector{BT}) where {BT<:Real}
         inner_dyn = GeneralisedFilters.GFTest.InnerDynamics(
-            A_inner, SVector{1,Float64}(b), C, Q_inner
+            A_inner, SVector{1,BT}(b), C, Q_inner
         )
         return HierarchicalSSM(outer_prior, outer_dyn, inner_prior, inner_dyn, inner_obs)
     end
