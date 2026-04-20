@@ -11,10 +11,18 @@ using StatsBase
 # TODO: heavy modules—move to extension
 using CUDA
 
+export initialise, step, predict, update, filter
+
 # Filtering utilities
 include("callbacks.jl")
 include("containers.jl")
 include("resamplers.jl")
+
+# Batching utilities
+include("batching/types.jl")
+include("batching/broadcasting.jl")
+include("batching/wrappers.jl")
+include("batching/operations.jl")
 
 ## FILTERING BASE ##########################################################################
 
