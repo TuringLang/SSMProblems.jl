@@ -1,15 +1,16 @@
 module GeneralisedFilters
 
 using AbstractMCMC: AbstractMCMC, AbstractSampler
+using ADTypes: ADTypes
 import Distributions: MvNormal, params
 import Random: AbstractRNG, default_rng, rand
 import SSMProblems: prior, dyn, obs
 using OffsetArrays
 using SSMProblems
 using StatsBase
+using DifferentiationInterface
 
-# TODO: heavy modules—move to extension
-using CUDA
+const DI = DifferentiationInterface
 
 # Filtering utilities
 include("callbacks.jl")
@@ -152,6 +153,15 @@ include("algorithms/forward.jl")
 include("algorithms/rbpf.jl")
 
 include("ancestor_sampling.jl")
+
+# Conditional SMC (particle Gibbs trajectory sampling)
+include("algorithms/csmc.jl")
+
+# Integrations (log-density interface for particle Gibbs)
+include("integrations/logdensity.jl")
+include("integrations/kalman_rrule.jl")
+include("integrations/particle_gibbs.jl")
+include("integrations/ssm_trajectory.jl")
 
 # Unit-testing helper module
 include("GFTest/GFTest.jl")

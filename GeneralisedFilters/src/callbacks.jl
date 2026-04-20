@@ -1,14 +1,13 @@
 """Storage and callback methods for recording historic filtering information."""
 
-using AcceleratedKernels
 using DataStructures: Stack
 using Random: rand
 
 export AbstractCallback, CallbackTrigger
 export PostInit, PostResample, PostPredict, PostUpdate
 export PostInitCallback, PostResampleCallback, PostPredictCallback, PostUpdateCallback
-export DenseParticleContainer, ParticleTree, ParallelParticleTree
-export DenseAncestorCallback, AncestorCallback, ParallelAncestorCallback
+export DenseParticleContainer, ParticleTree
+export DenseAncestorCallback, AncestorCallback
 
 ## ABSTRACT CALLBACK SYSTEM ################################################################
 
@@ -227,145 +226,6 @@ function rand(rng::AbstractRNG, tree::ParticleTree, weights::AbstractVector{<:Re
     return reverse(xs)
 end
 
-## GPU SPARSE PARTICLE STORAGE #############################################################
-
-mutable struct ParallelParticleTree{ST,M<:CUDA.AbstractMemory}
-    states::ST
-    parents::CuVector{Int64,M}
-    leaves::CuVector{Int64,M}
-    offspring::CuVector{Int64,M}
-
-    function ParallelParticleTree(states::ST, M::Integer) where {ST}
-        if M < length(states)
-            throw(ArgumentError("M must be greater than or equal to the number of states"))
-        end
-
-        parents = CUDA.zeros(Int64, M)
-        offspring = CUDA.zeros(Int64, M)
-        N = length(states)
-        states = expand(states, M)
-        tree_states = states
-        leaves = CuArray(1:N)
-        return new{ST,CUDA.DeviceMemory}(tree_states, parents, leaves, offspring)
-    end
-end
-
-function scatter!(r, p, q)
-    return r[q] .= p
-end
-
-function gather!(r, p, q)
-    return r .= p[q]
-end
-
-function update_offspring!(offspring, leaves, parents)
-    AcceleratedKernels.foreachindex(leaves) do i
-        j = leaves[i]
-        while (j > 0) && (offspring[j] == 0)
-            j = parents[j]
-            if j > 0
-                offspring[j] -= 1
-            end
-        end
-    end
-end
-
-function insert!(tree::ParallelParticleTree, states, ancestors::CuVector{Int64})
-    b = CuVector{Int64}(undef, length(ancestors))
-    gather!(b, tree.leaves, ancestors)
-
-    # Update offspring counts
-    offspring = ancestors_to_offspring(ancestors)
-    scatter!(tree.offspring, offspring, tree.leaves)
-
-    # Prune tree
-    update_offspring!(tree.offspring, tree.leaves, tree.parents)
-
-    # Expand tree if necessary
-    if sum(tree.offspring .== 0) < length(ancestors)
-        @debug "expanding tree"
-        expand!(tree)
-    end
-    z = cumsum(tree.offspring .== 0)
-
-    # Insert new states
-    new_leaves = searchsortedfirst(z, CuArray(1:length(tree.leaves)))
-    scatter!(tree.parents, b, new_leaves)
-    tree.states[new_leaves] = states
-    tree.leaves .= new_leaves
-    return tree
-end
-
-function expand!(tree::ParallelParticleTree{T}) where {T}
-    M = length(tree.states)
-
-    new_parents = CUDA.zeros(Int64, 2M)
-    new_parents[1:length(tree.parents)] = tree.parents
-    tree.parents = new_parents
-
-    new_offspring = CUDA.zeros(Int64, 2M)
-    new_offspring[1:length(tree.offspring)] = tree.offspring
-    tree.offspring = new_offspring
-
-    tree.states = expand(tree.states, 2M)
-
-    return tree
-end
-
-# Get ancestry of all particles
-function get_ancestry(tree::ParallelParticleTree{ST}, T::Integer) where {ST}
-    paths = OffsetVector(Vector{ST}(undef, T + 1), -1)
-    parents = copy(tree.leaves)
-    for t in T:-1:1
-        paths[t] = tree.states[parents]
-        gather!(parents, tree.parents, parents)
-    end
-    return paths
-end
-
-# Get ancestory of a single particle
-function get_ancestry(
-    container::ParallelParticleTree{ST}, i::Integer, T::Integer
-) where {ST}
-    path = OffsetVector(Vector{ST}(undef, T + 1), -1)
-    CUDA.@allowscalar begin
-        ancestor_index = container.leaves[i]
-        for t in T:-1:0
-            path[t] = container.states[ancestor_index]
-            ancestor_index = container.parents[ancestor_index]
-        end
-        return path
-    end
-end
-
-"""
-    ParallelAncestorCallback
-
-A callback for parallel sparse ancestry storage, which preallocates and returns a populated 
-`ParallelParticleTree` object.
-"""
-# TODO: this should be initialised during inference so types don't need to be predetermined
-struct ParallelAncestorCallback{T} <: AbstractCallback
-    tree::ParallelParticleTree{T}
-end
-
-function (c::ParallelAncestorCallback)(
-    model, filter, step, state, data, ::PostInitCallback; kwargs...
-)
-    N = num_particles(filter)
-    @inbounds c.tree.states[1:N] = deepcopy(state.particles)
-    return nothing
-end
-
-function (c::ParallelAncestorCallback)(
-    model, filter, step, state, data, ::PostUpdateCallback; kwargs...
-)
-    # insert! implicitly deepcopies
-    particles = state.particles
-    insert!(c.tree, getfield.(particles, :state), getfield.(particles, :ancestor))
-    return nothing
-end
-
 ## ANCESTOR STORAGE CALLBACK ###############################################################
 
 """
@@ -380,7 +240,10 @@ end
 
 function (c::AncestorCallback)(model, filter, state, data, ::PostInitCallback; kwargs...)
     N = num_particles(filter)
-    c.tree = ParticleTree(getfield.(state.particles, :state), floor(Int64, N * log(N)))
+    c.tree = ParticleTree(
+        getfield.(state.particles, :state),
+        max(N, floor(Int64, N * log(N))),
+    )
     return nothing
 end
 
@@ -405,7 +268,7 @@ end
 
 function (c::ResamplerCallback)(model, filter, state, data, ::PostInitCallback; kwargs...)
     N = num_particles(filter)
-    c.tree = ParticleTree(collect(1:N), floor(Int64, N * log(N)))
+    c.tree = ParticleTree(collect(1:N), max(N, floor(Int64, N * log(N))))
     return nothing
 end
 

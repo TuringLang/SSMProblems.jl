@@ -1,8 +1,9 @@
 import LogExpFunctions: softmax
 import SSMProblems: prior, dyn
 
-export ConditionalSMC, CSMC, CSMCBS, CSMCAS
+export ConditionalSMC
 export CSMCModel, CSMCState
+export NoRefreshment, AncestorSampling, BackwardSimulation
 
 ## TRAJECTORY REFRESHMENT STRATEGIES #######################################################
 
@@ -51,12 +52,9 @@ Conditional Sequential Monte Carlo sampler with configurable trajectory refreshm
 
 # Examples
 ```julia
-ConditionalSMC(BF(100), AncestorSampling())
-
-# Shorthand constructors
-CSMC(BF(100))                           # Vanilla CSMC
-CSMCAS(BF(100))                         # CSMC with ancestor sampling
-CSMCAS(RBPF(BF(200), KF()))             # Rao-Blackwellised PGAS
+ConditionalSMC(BF(100))                                  # Vanilla CSMC (NoRefreshment default)
+ConditionalSMC(BF(100), AncestorSampling())              # CSMC with ancestor sampling
+ConditionalSMC(RBPF(BF(200), KF()), AncestorSampling())  # Rao-Blackwellised PGAS
 ```
 """
 struct ConditionalSMC{PF<:AbstractParticleFilter,TR<:AbstractTrajectoryRefreshment} <:
@@ -65,9 +63,7 @@ struct ConditionalSMC{PF<:AbstractParticleFilter,TR<:AbstractTrajectoryRefreshme
     refreshment::TR
 end
 
-CSMC(pf) = ConditionalSMC(pf, NoRefreshment())
-CSMCBS(pf) = ConditionalSMC(pf, BackwardSimulation())
-CSMCAS(pf) = ConditionalSMC(pf, AncestorSampling())
+ConditionalSMC(pf) = ConditionalSMC(pf, NoRefreshment())
 
 ## STATE AND MODEL #########################################################################
 
@@ -107,7 +103,7 @@ end
 # TODO: is this actually needed?
 _make_ref_state(::Nothing) = nothing
 _make_ref_state(traj) = traj
-_make_ref_state(traj::OffsetVector{<:RBState}) = getproperty.(traj, :x)
+_make_ref_state(traj::OffsetVector{<:RBState}) = map(s -> s.x, traj)
 
 ## TRAJECTORY SAMPLING #####################################################################
 
@@ -115,7 +111,7 @@ function _sample_trajectory(
     rng::AbstractRNG, container::DenseParticleContainer, state::ParticleDistribution
 )
     ws = get_weights(state)
-    idx = randcat(rng, ws)
+    idx = StatsBase.sample(rng, StatsBase.Weights(ws))
     return get_ancestry(container, idx)
 end
 
@@ -262,7 +258,8 @@ function _csmc_sample(
             as_weights = map(state.particles) do particle
                 ancestor_weight(particle, dyn(model), pf, t, ref_as)
             end
-            ancestor_idx = randcat(rng, softmax(as_weights))
+            ancestor_idx = StatsBase.sample(rng, StatsBase.Weights(softmax(as_weights)))
+            
         end
 
         state = resample(rng, resampler(pf), state; ref_state)
@@ -306,10 +303,18 @@ end
 # Build reference state for backward weights (combines state with backward likelihood)
 _build_bs_ref(state, ::Nothing) = state
 _build_bs_ref(state::RBState, back_lik) = RBState(state.x, back_lik)
+_build_bs_ref(::RBState, ::Nothing) = error("again this should error")
 
 # Update backward predictive likelihood during backward pass (no-op for non-RBPF)
 function _bs_step_back_lik(
-    rng, model, pf, t, ::Nothing, observations, prev_state, next_state
+    rng::AbstractRNG,
+    model::AbstractStateSpaceModel,
+    pf::AbstractFilter,
+    t::Integer,
+    ::Nothing,
+    observations,
+    prev_state,
+    next_state,
 )
     return nothing
 end
@@ -339,6 +344,19 @@ function _bs_step_back_lik(
     )
 end
 
+function _bs_step_back_lik(
+    rng::AbstractRNG,
+    model::HierarchicalSSM,
+    pf::RBPF,
+    t::Integer,
+    ::Nothing,
+    observations,
+    prev_state::RBState,
+    next_state::RBState,
+)
+    return error("this should error")
+end
+
 function _csmc_sample(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
@@ -352,21 +370,21 @@ function _csmc_sample(
 
     # Forward filtering pass, storing particles at each timestep
     init_state = initialise(rng, prior(model), pf; ref_state)
-    init_particles = deepcopy(init_state.particles)
+    init_particles = copy(init_state.particles)
 
     state, ll = step(rng, model, pf, 1, init_state, observations[1]; ref_state)
     particle_history = Vector{typeof(state.particles)}(undef, K)
-    particle_history[1] = deepcopy(state.particles)
+    particle_history[1] = copy(state.particles)
 
     for t in 2:K
         state, ll_inc = step(rng, model, pf, t, state, observations[t]; ref_state)
         ll += ll_inc
-        particle_history[t] = deepcopy(state.particles)
+        particle_history[t] = copy(state.particles)
     end
 
     # Backward simulation pass
     ws = get_weights(state)
-    idx = randcat(rng, ws)
+    idx = StatsBase.sample(rng, StatsBase.Weights(ws))
     sampled_state = particle_history[K][idx].state
 
     back_lik = _bs_init_back_lik(rng, model, pf, observations, K, sampled_state)
@@ -380,7 +398,7 @@ function _csmc_sample(
         backward_ws = map(particle_history[t]) do particle
             ancestor_weight(particle, dyn(model), pf, t + 1, ref_next)
         end
-        idx = randcat(rng, softmax(backward_ws))
+        idx = StatsBase.sample(rng, StatsBase.Weights(softmax(backward_ws)))
         trajectory[t] = particle_history[t][idx].state
 
         back_lik = _bs_step_back_lik(
@@ -393,7 +411,7 @@ function _csmc_sample(
     backward_ws = map(init_particles) do particle
         ancestor_weight(particle, dyn(model), pf, 1, ref_at_1)
     end
-    idx = randcat(rng, softmax(backward_ws))
+    idx = StatsBase.sample(rng, StatsBase.Weights(softmax(backward_ws)))
     trajectory[0] = init_particles[idx].state
 
     return trajectory, ll
