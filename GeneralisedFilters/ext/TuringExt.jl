@@ -24,6 +24,8 @@ using Random: AbstractRNG
 using SSMProblems
 using Turing: Turing
 
+# include("dppl_csmc.jl")
+
 ## BIJECTORS INTEGRATION #######################################################################
 
 bijector(::SSMTrajectory) = identity
@@ -32,34 +34,55 @@ Bijectors.VectorBijectors.to_linked_vec(::SSMTrajectory) = TypedIdentity()
 Bijectors.VectorBijectors.from_linked_vec(::SSMTrajectory) = TypedIdentity()
 Bijectors.VectorBijectors.linked_vec_length(d::SSMTrajectory) = length(d)
 
-## CSMC CONTEXT ################################################################################
+## CSMC SAMPLING CONTEXT #######################################################################
 
 """
-    CSMCContext <: DynamicPPL.AbstractContext
+    CSMCContext{<:AbstractRNG,<:ConditionalSMC}
 
-A DynamicPPL leaf context that intercepts `x ~ SSMTrajectory(...)` during model evaluation,
-capturing the distribution and variable name so the sampler can extract the SSM and run CSMC.
-
-For non-SSMTrajectory variables, delegates to `DefaultContext`.
+A DynamicPPL leaf context that intercepts `x ~ SSMTrajectory(...)` and, rather than
+evaluating the prior-path log-density, runs conditional SMC to draw a new trajectory.
 """
-struct CSMCContext <: DynamicPPL.AbstractContext
-    ssm_dist::Ref{Any}
-    traj_vn::Ref{Any}
+struct CSMCContext{RT<:AbstractRNG,FT<:ConditionalSMC} <: DynamicPPL.AbstractContext
+    rng::RT
+    algo::FT
+    ref_traj::Ref{Any}
+    sampled_traj::Ref{Any}
 end
 
-CSMCContext() = CSMCContext(Ref{Any}(nothing), Ref{Any}(nothing))
+# TODO: remove Ref{Any}
+function CSMCContext(rng::AbstractRNG, algo::ConditionalSMC; ref=nothing)
+    return CSMCContext(rng, algo, Ref{Any}(ref), Ref{Any}(nothing))
+end
+
+function conditional_smc(ctx::CSMCContext, dist::SSMTrajectory)
+    trajectory, _ = _csmc_sample(
+        ctx.rng, dist.model, ctx.algo, dist.observations, ctx.ref_traj[]
+    )
+    return trajectory
+end
+
+function flatten_trajectory(ctx::CSMCContext, dist::SSMTrajectory)
+    af = _get_inner_filter(ctx.algo.pf)
+    trajectory = ctx.sampled_traj[]
+    return _flatten_trajectory(
+        _outer_trajectory(trajectory, af), length(dist.observations), _state_dim(dist)
+    )
+end
 
 function DynamicPPL.tilde_assume!!(
     ctx::CSMCContext,
     dist::SSMTrajectory,
     vn::DynamicPPL.VarName,
-    ::Any,
+    template,
     vi::DynamicPPL.AbstractVarInfo,
 )
-    ctx.ssm_dist[] = dist
-    ctx.traj_vn[] = vn
-    x = DynamicPPL.getindex_internal(vi, vn)
-    return x, vi
+    ctx.sampled_traj[] = conditional_smc(ctx, dist)
+    x_flat = flatten_trajectory(ctx, dist)
+    vi = DynamicPPL.setindex_internal!!(vi, x_flat, vn)
+    vi = DynamicPPL.accumulate_assume!!(
+        vi, x_flat, x_flat, zero(Float64), vn, dist, template
+    )
+    return x_flat, vi
 end
 
 function DynamicPPL.tilde_assume!!(
@@ -84,6 +107,53 @@ function DynamicPPL.tilde_observe!!(
         DynamicPPL.DefaultContext(), right, left, vn, template, vi
     )
 end
+
+## CSMC ACCUMULATOR ############################################################################
+
+# TODO: replace the sampling context with one of these eventually...
+struct CSMCFunctor{RT<:AbstractRNG,FT<:ConditionalSMC}
+    rng::RT
+    algo::FT
+    ref::Ref{Any}
+end
+
+function CSMCFunctor(rng::AbstractRNG, algo::ConditionalSMC)
+    return CSMCFunctor(rng, algo, Ref{Any}(nothing))
+end
+
+set_reference!(f::CSMCFunctor, traj) = (f.ref[] = traj)
+
+function (f::CSMCFunctor)(_, _, _, _, dist::SSMTrajectory)
+    trajectory, _ = _csmc_sample(f.rng, dist.model, f.algo, dist.observations, f.ref[])
+    return trajectory
+end
+
+(::CSMCFunctor)(_, _, _, _, _) = DynamicPPL.DoNotAccumulate()
+
+const CSMC_TRAJECTORY = :CSMCTrajectory
+
+function csmc_accumulator(rng::AbstractRNG, algo::ConditionalSMC; ref=nothing)
+    f = CSMCFunctor(rng, algo, Ref{Any}(ref))
+    return DynamicPPL.VNTAccumulator{CSMC_TRAJECTORY}(f), f
+end
+
+function _get_csmc_trajectories(vi::DynamicPPL.AbstractVarInfo)
+    return DynamicPPL.getacc(vi, Val(CSMC_TRAJECTORY)).values
+end
+
+## TRAJECTORY VNT ACCUMULATOR ##################################################################
+
+const TRAJ_ACCUMULATOR = :StateTrajectory
+
+_collect_traj(val, _, _, _, ::SSMTrajectory) = val
+_collect_traj(_, _, _, _, _) = DynamicPPL.DoNotAccumulate()
+
+TrajectoryVNTAccumulator() = DynamicPPL.VNTAccumulator{TRAJ_ACCUMULATOR}(_collect_traj)
+
+function get_trajectory(vi::DynamicPPL.AbstractVarInfo)
+    return DynamicPPL.getacc(vi, Val(TRAJ_ACCUMULATOR)).values
+end
+
 
 ## CACHED PREP LDF #############################################################################
 
@@ -144,67 +214,13 @@ end
 
 ## TURING STATE ################################################################################
 
-struct ParticleGibbsTuringState{VIT,TT,VNT,PS,CVI,LT}
+struct ParticleGibbsTuringState{VIT,TT,PS,LT,VNTT,PT}
     vi::VIT
     trajectory::TT
-    traj_vn::VNT
     param_state::PS
-    cond_vi_linked::CVI
     ldf::LT
-end
-
-## HELPERS #####################################################################################
-
-function get_trajectories(vi::DynamicPPL.AbstractVarInfo)
-    return DynamicPPL.getacc(vi, Val(SSM_ACCUMULATOR)).values
-end
-
-function _discover_ssm(model::DynamicPPL.Model, vi::DynamicPPL.AbstractVarInfo)
-    ctx = CSMCContext()
-    discovery_model = DynamicPPL.setleafcontext(model, ctx)
-    DynamicPPL.evaluate!!(discovery_model, vi)
-    return ctx.ssm_dist[]::SSMTrajectory, ctx.traj_vn[]::DynamicPPL.VarName
-end
-
-function _condition_on_trajectory(
-    model::DynamicPPL.Model, traj_vn::DynamicPPL.VarName, traj_flat::AbstractVector
-)
-    return DynamicPPL.condition(model, traj_vn => traj_flat)
-end
-
-"""
-    _make_conditioned_ldf(cond_model, vi, traj_vn, adtype)
-
-Create a `LogDensityFunction` for the conditioned model (trajectory fixed) plus
-a linked VarInfo for parameter recovery after NUTS steps.
-
-Returns `(ldf, cond_vi_linked)`.
-"""
-function _make_conditioned_ldf(
-    cond_model::DynamicPPL.Model,
-    vi::DynamicPPL.AbstractVarInfo,
-    traj_vn::DynamicPPL.VarName,
-    adtype,
-)
-    param_vns = Base.filter(vn -> vn != traj_vn, keys(vi))
-    cond_vi = DynamicPPL.subset(vi, param_vns)
-    cond_vi_linked = DynamicPPL.link(cond_vi, cond_model)
-    ldf = DynamicPPL.LogDensityFunction(
-        cond_model, DynamicPPL.getlogjoint_internal, cond_vi_linked; adtype=adtype
-    )
-    return ldf, cond_vi_linked
-end
-
-"""
-    _recover_params(cond_vi_linked, cond_model, θ_new)
-
-Given a linked VarInfo template and new unconstrained parameters from NUTS,
-recover the constrained parameter values as a NamedTuple.
-"""
-function _recover_params(cond_vi_linked, cond_model, θ_new)
-    vi_updated = DynamicPPL.unflatten!!(cond_vi_linked, θ_new)
-    vi_constrained = DynamicPPL.invlink(vi_updated, cond_model)
-    return vi_constrained
+    vnt_traj::VNTT
+    θ::PT
 end
 
 ## ABSTRACTMCMC INTERFACE ######################################################################
@@ -216,59 +232,42 @@ function AbstractMCMC.step(
     initial_params=nothing,
     kwargs...,
 )
-    # 1. Create VarInfo (samples all variables from prior)
-    vi = DynamicPPL.VarInfo(rng, model)
+    # 1. Sample all variables from prior
+    vi = DynamicPPL.setacc!!(DynamicPPL.VarInfo(rng, model), TrajectoryVNTAccumulator())
 
-    # 2. Discover trajectory variable
-    ssm_dist, traj_vn = _discover_ssm(model, vi)
+    # 2. Unconditional CSMC sweep
+    ctx = CSMCContext(rng, pg.csmc)
+    _, vi = DynamicPPL.evaluate!!(DynamicPPL.setleafcontext(model, ctx), vi)
+    trajectory = ctx.sampled_traj[]
+    vnt_traj = get_trajectory(vi)
 
-    # 3. Run unconditional CSMC for initial trajectory
-    af = _get_inner_filter(pg.csmc.pf)
-    trajectory, _ = _csmc_sample(
-        rng, ssm_dist.model, pg.csmc, ssm_dist.observations, nothing
+    # 3. Condition on trajectory
+    cond_model = model | vnt_traj
+    θ = DynamicPPL.subset(vi, Base.filter(vn -> !(vn in keys(vnt_traj)), keys(vi)))
+    ldf = DynamicPPL.LogDensityFunction(cond_model, DynamicPPL.getlogjoint_internal, θ)
+    _, param_state = AbstractMCMC.step(
+        rng, AbstractMCMC.LogDensityModel(ldf), pg.param; initial_params=θ[:], kwargs...
     )
 
-    # 4. Flatten trajectory and update VarInfo
-    T_len = length(ssm_dist.observations)
-    Dx = _state_dim(ssm_dist)
-    outer_traj = _outer_trajectory(trajectory, af)
-    traj_flat = _flatten_trajectory(outer_traj, T_len, Dx)
-    vi = DynamicPPL.setindex_internal!!(vi, traj_flat, traj_vn)
-    vi = last(DynamicPPL.evaluate!!(model, vi))
-
-    # 5. Condition on trajectory, create LogDensityFunction for parameter step
-    cond_model = _condition_on_trajectory(model, traj_vn, traj_flat)
-    ldf, cond_vi_linked = _make_conditioned_ldf(cond_model, vi, traj_vn, pg.adtype)
-    ld_model = AbstractMCMC.LogDensityModel(ldf)
-
-    # 6. Initial parameter step
-    θ = cond_vi_linked[:]
-    _, param_state = AbstractMCMC.step(rng, ld_model, pg.param; initial_params=θ, kwargs...)
-
-    # 7. Update VarInfo with new parameters, discover new SSM
+    # 4. Update VarInfo with new parameters
     θ_new = AbstractMCMC.getparams(cond_model, param_state)
-    param_vals = _recover_params(cond_vi_linked, cond_model, θ_new)
-    vi = merge(vi, param_vals)
-    vi = last(DynamicPPL.evaluate!!(model, vi))
+    vi = merge(vi, DynamicPPL.unflatten!!(θ, θ_new))
 
-    # 8. Discover new SSM and run CSMC
-    ssm_dist_new, _ = _discover_ssm(model, vi)
-    trajectory_new, _ = _csmc_sample(
-        rng, ssm_dist_new.model, pg.csmc, ssm_dist_new.observations, trajectory
+    # 5. Conditional CSMC with updated parameters
+    vi = DynamicPPL.setacc!!(vi, TrajectoryVNTAccumulator())
+    ctx_next = CSMCContext(rng, pg.csmc; ref=trajectory)
+    _, vi = DynamicPPL.evaluate!!(DynamicPPL.setleafcontext(model, ctx_next), vi)
+    trajectory_new = ctx_next.sampled_traj[]
+    vnt_traj_new = get_trajectory(vi)
+
+    # 6. Re-initialise vi in transformed space
+    init_vi = merge(vi.values, vnt_traj_new)
+    _, vi = DynamicPPL.init!!(
+        rng, model, vi, DynamicPPL.InitFromParams(init_vi), DynamicPPL.LinkAll()
     )
-
-    # 9. Update trajectory in VarInfo
-    outer_traj_new = _outer_trajectory(trajectory_new, af)
-    traj_flat_new = _flatten_trajectory(outer_traj_new, T_len, Dx)
-    init_vi = DynamicPPL.setindex!!(vi.values, traj_flat_new, traj_vn)
-    init_strategy = DynamicPPL.InitFromParams(init_vi)
-    _, vi = DynamicPPL.init!!(rng, model, vi, init_strategy, DynamicPPL.LinkAll())
 
     transition = ParticleGibbsTransition(θ_new, AbstractMCMC.getstats(param_state))
-    state = ParticleGibbsTuringState(
-        vi, trajectory_new, traj_vn, param_state, cond_vi_linked, ldf
-    )
-
+    state = ParticleGibbsTuringState(vi, trajectory_new, param_state, ldf, vnt_traj_new, θ)
     return transition, state
 end
 
@@ -279,54 +278,42 @@ function AbstractMCMC.step(
     state::ParticleGibbsTuringState;
     kwargs...,
 )
-    af = _get_inner_filter(pg.csmc.pf)
+    # 1. Condition on current trajectory via stored VNT
     vi = state.vi
-    traj_vn = state.traj_vn
+    cond_model = model | get_trajectory(vi)
 
-    # 1. Get trajectory dimensions
-    ssm_dist, _ = _discover_ssm(model, vi)
-    T_len = length(ssm_dist.observations)
-    Dx = _state_dim(ssm_dist)
-
-    # 2. Condition on current trajectory
-    outer_traj = _outer_trajectory(state.trajectory, af)
-    traj_flat = _flatten_trajectory(outer_traj, T_len, Dx)
-    cond_model = _condition_on_trajectory(model, traj_vn, traj_flat)
-
-    # 3. Reuse AD prep from initial step; only swap in new conditioned model
-    cond_vi_linked = state.cond_vi_linked
+    # 2. Reuse AD prep; only swap in new conditioned model
     cached_ldf = CachedPrepLDF(state.ldf, cond_model)
-    ld_model = AbstractMCMC.LogDensityModel(cached_ldf)
-
-    # 4. Parameter step (preserves adaptation via state.param_state)
     _, param_state = AbstractMCMC.step(
-        rng, ld_model, pg.param, state.param_state; kwargs...
+        rng,
+        AbstractMCMC.LogDensityModel(cached_ldf),
+        pg.param,
+        state.param_state;
+        adtype=pg.adtype,
+        kwargs...,
     )
 
-    # 5. Extract new θ and update VarInfo
+    # 3. Update VarInfo with new parameters
     θ_new = AbstractMCMC.getparams(cond_model, param_state)
-    param_vals = _recover_params(cond_vi_linked, cond_model, θ_new)
-    vi = merge(vi, param_vals)
-    vi = last(DynamicPPL.evaluate!!(model, vi))
+    vi = merge(vi, DynamicPPL.unflatten!!(state.θ, θ_new))
 
-    # 6. Discover new SSM and run CSMC
-    ssm_dist_new, _ = _discover_ssm(model, vi)
-    trajectory_new, _ = _csmc_sample(
-        rng, ssm_dist_new.model, pg.csmc, ssm_dist_new.observations, state.trajectory
+    # 4. Conditional CSMC with updated parameters
+    vi = DynamicPPL.setacc!!(vi, TrajectoryVNTAccumulator())
+    ctx = CSMCContext(rng, pg.csmc; ref=state.trajectory)
+    _, vi = DynamicPPL.evaluate!!(DynamicPPL.setleafcontext(model, ctx), vi)
+    trajectory_new = ctx.sampled_traj[]
+    vnt_traj_new = get_trajectory(vi)
+
+    # 5. Re-initialise vi in linked space for next iteration
+    init_vi = merge(vi.values, vnt_traj_new)
+    _, vi = DynamicPPL.init!!(
+        rng, model, vi, DynamicPPL.InitFromParams(init_vi), DynamicPPL.LinkAll()
     )
-
-    # 7. Update trajectory in VarInfo
-    outer_traj_new = _outer_trajectory(trajectory_new, af)
-    traj_flat_new = _flatten_trajectory(outer_traj_new, T_len, Dx)
-    init_vi = DynamicPPL.setindex!!(vi.values, traj_flat_new, traj_vn)
-    init_strategy = DynamicPPL.InitFromParams(init_vi)
-    _, vi = DynamicPPL.init!!(rng, model, vi, init_strategy, DynamicPPL.LinkAll())
 
     transition = ParticleGibbsTransition(θ_new, AbstractMCMC.getstats(param_state))
     new_state = ParticleGibbsTuringState(
-        vi, trajectory_new, traj_vn, param_state, cond_vi_linked, state.ldf
+        vi, trajectory_new, param_state, state.ldf, vnt_traj_new, state.θ
     )
-
     return transition, new_state
 end
 
@@ -350,8 +337,7 @@ function AbstractMCMC.bundle_samples(
 end
 
 function _turing_param_names(state::ParticleGibbsTuringState)
-    vi = state.cond_vi_linked
-    # nt = DynamicPPL.values_as(vi, NamedTuple)
+    vi = state.θ
     vnt = DynamicPPL.get_values(vi)
     names = Symbol[]
     for (k, v) in pairs(vnt)
