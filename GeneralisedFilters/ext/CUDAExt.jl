@@ -23,7 +23,6 @@ using GeneralisedFilters.OffsetArrays: OffsetVector
 
 using AcceleratedKernels: searchsortedfirst, foreachindex
 using CUDA
-import CUDACore: AbstractMemory, DeviceMemory
 using Random: AbstractRNG
 
 ## GPU RESAMPLING ##########################################################################
@@ -144,7 +143,7 @@ end
 
 ## GPU SPARSE PARTICLE STORAGE #############################################################
 
-mutable struct ParallelParticleTree{ST,M<:AbstractMemory}
+mutable struct ParallelParticleTree{ST,M<:CUDA.AbstractMemory}
     states::ST
     parents::CuVector{Int64,M}
     leaves::CuVector{Int64,M}
@@ -161,7 +160,7 @@ mutable struct ParallelParticleTree{ST,M<:AbstractMemory}
         states = expand(states, M)
         tree_states = states
         leaves = CuArray(1:N)
-        return new{ST,DeviceMemory}(tree_states, parents, leaves, offspring)
+        return new{ST,CUDA.DeviceMemory}(tree_states, parents, leaves, offspring)
     end
 end
 
