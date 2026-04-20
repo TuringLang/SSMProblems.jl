@@ -236,7 +236,7 @@ function AbstractMCMC.step(
 
     # 2. Unconditional CSMC sweep
     ctx = CSMCContext(rng, pg.csmc)
-    _, vi = DynamicPPL.evaluate!!(DynamicPPL.setleafcontext(model, ctx), vi)
+    _, vi = DynamicPPL.evaluate_nowarn!!(DynamicPPL.setleafcontext(model, ctx), vi)
     trajectory = ctx.sampled_traj[]
     vnt_traj = get_trajectory(vi)
 
@@ -255,7 +255,7 @@ function AbstractMCMC.step(
     # 5. Conditional CSMC with updated parameters
     vi = DynamicPPL.setacc!!(vi, TrajectoryVNTAccumulator())
     ctx_next = CSMCContext(rng, pg.csmc; ref=trajectory)
-    _, vi = DynamicPPL.evaluate!!(DynamicPPL.setleafcontext(model, ctx_next), vi)
+    _, vi = DynamicPPL.evaluate_nowarn!!(DynamicPPL.setleafcontext(model, ctx_next), vi)
     trajectory_new = ctx_next.sampled_traj[]
     vnt_traj_new = get_trajectory(vi)
 
@@ -299,7 +299,7 @@ function AbstractMCMC.step(
     # 4. Conditional CSMC with updated parameters
     vi = DynamicPPL.setacc!!(vi, TrajectoryVNTAccumulator())
     ctx = CSMCContext(rng, pg.csmc; ref=state.trajectory)
-    _, vi = DynamicPPL.evaluate!!(DynamicPPL.setleafcontext(model, ctx), vi)
+    _, vi = DynamicPPL.evaluate_nowarn!!(DynamicPPL.setleafcontext(model, ctx), vi)
     trajectory_new = ctx.sampled_traj[]
     vnt_traj_new = get_trajectory(vi)
 

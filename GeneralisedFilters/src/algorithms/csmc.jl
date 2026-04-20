@@ -111,7 +111,7 @@ function _sample_trajectory(
     rng::AbstractRNG, container::DenseParticleContainer, state::ParticleDistribution
 )
     ws = get_weights(state)
-    idx = randcat(rng, ws)
+    idx = StatsBase.sample(rng, StatsBase.Weights(ws))
     return get_ancestry(container, idx)
 end
 
@@ -258,7 +258,8 @@ function _csmc_sample(
             as_weights = map(state.particles) do particle
                 ancestor_weight(particle, dyn(model), pf, t, ref_as)
             end
-            ancestor_idx = randcat(rng, softmax(as_weights))
+            ancestor_idx = StatsBase.sample(rng, StatsBase.Weights(softmax(as_weights)))
+            
         end
 
         state = resample(rng, resampler(pf), state; ref_state)
@@ -383,7 +384,7 @@ function _csmc_sample(
 
     # Backward simulation pass
     ws = get_weights(state)
-    idx = randcat(rng, ws)
+    idx = StatsBase.sample(rng, StatsBase.Weights(ws))
     sampled_state = particle_history[K][idx].state
 
     back_lik = _bs_init_back_lik(rng, model, pf, observations, K, sampled_state)
@@ -397,7 +398,7 @@ function _csmc_sample(
         backward_ws = map(particle_history[t]) do particle
             ancestor_weight(particle, dyn(model), pf, t + 1, ref_next)
         end
-        idx = randcat(rng, softmax(backward_ws))
+        idx = StatsBase.sample(rng, StatsBase.Weights(softmax(backward_ws)))
         trajectory[t] = particle_history[t][idx].state
 
         back_lik = _bs_step_back_lik(
@@ -410,7 +411,7 @@ function _csmc_sample(
     backward_ws = map(init_particles) do particle
         ancestor_weight(particle, dyn(model), pf, 1, ref_at_1)
     end
-    idx = randcat(rng, softmax(backward_ws))
+    idx = StatsBase.sample(rng, StatsBase.Weights(softmax(backward_ws)))
     trajectory[0] = init_particles[idx].state
 
     return trajectory, ll

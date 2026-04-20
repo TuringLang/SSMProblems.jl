@@ -212,7 +212,7 @@ function get_ancestry(tree::ParticleTree{T}) where {T}
 end
 
 function rand(rng::AbstractRNG, tree::ParticleTree, weights::AbstractVector{<:Real})
-    b = randcat(rng, weights)
+    b = StatsBase.sample(rng, StatsBase.Weights(weights))
     leaf = tree.leaves[b]
 
     j = tree.parents[leaf]
