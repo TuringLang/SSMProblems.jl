@@ -1,16 +1,16 @@
 module GeneralisedFilters
 
 using AbstractMCMC: AbstractMCMC, AbstractSampler
-import Distributions: MvNormal
+using ADTypes: ADTypes
+import Distributions: MvNormal, params
 import Random: AbstractRNG, default_rng, rand
-using GaussianDistributions: pairs, Gaussian
+import SSMProblems: prior, dyn, obs
 using OffsetArrays
 using SSMProblems
 using StatsBase
+using DifferentiationInterface
 
-# TODO: heavy modules—move to extension
-using CUDA
-using NNlib
+const DI = DifferentiationInterface
 
 # Filtering utilities
 include("callbacks.jl")
@@ -20,60 +20,63 @@ include("resamplers.jl")
 ## FILTERING BASE ##########################################################################
 
 abstract type AbstractFilter <: AbstractSampler end
-abstract type AbstractBatchFilter <: AbstractFilter end
+abstract type AbstractBackwardPredictor <: AbstractSampler end
+
+# Abstract interface definitions (filtering, smoothing, backward likelihood)
+include("algorithms/interface.jl")
 
 """
-    initialise([rng,] model, alg; kwargs...)
+    filter([rng,] model, algo, observations; callback=nothing, kwargs...)
 
-Propose an initial state distribution.
+Run a filtering algorithm on a state-space model.
+
+Performs sequential Bayesian inference by iterating through observations,
+calling [`predict`](@ref) and [`update`](@ref) at each time step.
+
+# Arguments
+- `rng::AbstractRNG`: Random number generator (optional, defaults to `default_rng()`)
+- `model::AbstractStateSpaceModel`: The state-space model to filter
+- `algo::AbstractFilter`: The filtering algorithm (e.g., `KalmanFilter()`, `BootstrapFilter(N)`)
+- `observations::AbstractVector`: Vector of observations y₁:ₜ
+
+# Keyword Arguments
+- `callback`: Optional callback for recording intermediate states
+- `kwargs...`: Additional arguments passed to model parameter functions
+
+# Returns
+A tuple `(state, log_likelihood)` where:
+- `state`: The final filtered state (algorithm-dependent type)
+- `log_likelihood`: The total log-marginal likelihood log p(y₁:ₜ)
+
+# Example
+```julia
+model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
+state, ll = filter(model, KalmanFilter(), observations)
+```
+
+See also: [`predict`](@ref), [`update`](@ref), [`step`](@ref), [`smooth`](@ref)
 """
-function initialise end
-
-"""
-    step([rng,] model, alg, iter, state, observation; kwargs...)
-
-Perform a combined predict and update call of the filtering on the state.
-"""
-function step end
-
-"""
-    predict([rng,] model, alg, iter, filtered; kwargs...)
-
-Propagate the filtered distribution forward in time.
-"""
-function predict end
-
-"""
-    update(model, alg, iter, proposed, observation; kwargs...)
-
-Update beliefs on the propagated distribution given an observation.
-"""
-function update end
-
-function initialise(model, alg; kwargs...)
-    return initialise(default_rng(), model, alg; kwargs...)
-end
-
-function predict(model, alg, step, filtered; kwargs...)
-    return predict(default_rng(), model, alg, step, filtered; kwargs...)
-end
-
 function filter(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
-    alg::AbstractFilter,
+    algo::AbstractFilter,
     observations::AbstractVector;
-    callback::Union{AbstractCallback,Nothing}=nothing,
+    callback::CallbackType=nothing,
     kwargs...,
 )
-    state = initialise(rng, model, alg; kwargs...)
-    isnothing(callback) || callback(model, alg, state, observations, PostInit; kwargs...)
+    # draw from the prior
+    init_state = initialise(rng, prior(model), algo; kwargs...)
+    callback(model, algo, init_state, observations, PostInit; kwargs...)
 
-    log_evidence = initialise_log_evidence(alg, model)
+    # iterations starts here for type stability
+    state, log_evidence = step(
+        rng, model, algo, 1, init_state, observations[1]; callback, kwargs...
+    )
 
-    for t in eachindex(observations)
+    # subsequent iteration
+    for t in 2:length(observations)
         state, ll_increment = step(
-            rng, model, alg, t, state, observations[t]; callback, kwargs...
+            rng, model, algo, t, state, observations[t]; callback, kwargs...
         )
         log_evidence += ll_increment
     end
@@ -81,40 +84,53 @@ function filter(
     return state, log_evidence
 end
 
-function initialise_log_evidence(::AbstractFilter, model::AbstractStateSpaceModel)
-    return zero(SSMProblems.arithmetic_type(model))
-end
-
-function initialise_log_evidence(alg::AbstractBatchFilter, model::AbstractStateSpaceModel)
-    return CUDA.zeros(SSMProblems.arithmetic_type(model), alg.batch_size)
-end
-
 function filter(
     model::AbstractStateSpaceModel,
-    alg::AbstractFilter,
+    algo::AbstractFilter,
     observations::AbstractVector;
     kwargs...,
 )
-    return filter(default_rng(), model, alg, observations; kwargs...)
+    return filter(default_rng(), model, algo, observations; kwargs...)
 end
 
 function step(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
-    alg::AbstractFilter,
+    algo::AbstractFilter,
     iter::Integer,
     state,
     observation;
-    callback::Union{AbstractCallback,Nothing}=nothing,
     kwargs...,
 )
-    state = predict(rng, model, alg, iter, state; kwargs...)
-    isnothing(callback) ||
-        callback(model, alg, iter, state, observation, PostPredict; kwargs...)
+    # generalised to fit analytical filters
+    return move(rng, model, algo, iter, state, observation; kwargs...)
+end
+function step(
+    model::AbstractStateSpaceModel,
+    algo::AbstractFilter,
+    iter::Integer,
+    state,
+    observation;
+    kwargs...,
+)
+    return step(default_rng(), model, algo, iter, state, observation; kwargs...)
+end
 
-    state, ll_increment = update(model, alg, iter, state, observation; kwargs...)
-    isnothing(callback) ||
-        callback(model, alg, iter, state, observation, PostUpdate; kwargs...)
+function move(
+    rng::AbstractRNG,
+    model::AbstractStateSpaceModel,
+    algo::AbstractFilter,
+    iter::Integer,
+    state,
+    observation;
+    callback::CallbackType=nothing,
+    kwargs...,
+)
+    state = predict(rng, dyn(model), algo, iter, state, observation; kwargs...)
+    callback(model, algo, iter, state, observation, PostPredict; kwargs...)
+
+    state, ll_increment = update(obs(model), algo, iter, state, observation; kwargs...)
+    callback(model, algo, iter, state, observation, PostUpdate; kwargs...)
 
     return state, ll_increment
 end
@@ -123,19 +139,29 @@ end
 
 abstract type AbstractSmoother <: AbstractSampler end
 
-# function smooth end
-# function backward end
-
 # Model types
 include("models/linear_gaussian.jl")
 include("models/discrete.jl")
 include("models/hierarchical.jl")
 
 # Filtering/smoothing algorithms
-include("algorithms/bootstrap.jl")
+include("algorithms/particles.jl")
 include("algorithms/kalman.jl")
+include("algorithms/srkf.jl")
+include("algorithms/kalman_gradient.jl")
 include("algorithms/forward.jl")
 include("algorithms/rbpf.jl")
+
+include("ancestor_sampling.jl")
+
+# Conditional SMC (particle Gibbs trajectory sampling)
+include("algorithms/csmc.jl")
+
+# Integrations (log-density interface for particle Gibbs)
+include("integrations/logdensity.jl")
+include("integrations/kalman_rrule.jl")
+include("integrations/particle_gibbs.jl")
+include("integrations/ssm_trajectory.jl")
 
 # Unit-testing helper module
 include("GFTest/GFTest.jl")

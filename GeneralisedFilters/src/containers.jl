@@ -1,158 +1,245 @@
+using LogExpFunctions
+
+export AbstractLikelihood, InformationLikelihood, DiscreteLikelihood, log_likelihoods
+
 """Containers used for storing representations of the filtering distribution."""
+
+## TYPELESS INITIALIZERS ###################################################################
+
+"""
+    TypelessZero
+
+A lazy promotion for uninitialized particle weights whos type is not yet known at the first
+simulation of a particle filter.
+"""
+struct TypelessZero <: Number end
+
+Base.convert(::Type{T}, ::TypelessZero) where {T<:Number} = zero(T)
+Base.convert(::Type{TypelessZero}, ::TypelessZero) = TypelessZero()
+
+Base.:+(::TypelessZero, ::TypelessZero) = TypelessZero()
+
+Base.promote_rule(::Type{TypelessZero}, ::Type{T}) where {T<:Number} = T
+Base.promote_rule(::Type{TypelessZero}, ::Type{TypelessZero}) = TypelessZero
+
+Base.zero(::TypelessZero) = TypelessZero()
+Base.zero(::Type{TypelessZero}) = TypelessZero()
+
+Base.iszero(::TypelessZero) = true
+Base.isone(::TypelessZero) = false
+
+Base.show(io::IO, ::TypelessZero) = print(io, "TypelessZero()")
+
+"""
+    TypelessBaseline
+
+A lazy promotion for the computation of log-likelihood baslines given a collection of
+unweighted particles.
+"""
+struct TypelessBaseline <: Number
+    N::Int64
+end
+
+# Constructors for compatibility with Base.Number
+TypelessBaseline(x::TypelessBaseline) = x
+TypelessBaseline(x::Base.TwicePrecision) = TypelessBaseline(Int64(x))
+TypelessBaseline(x::AbstractChar) = TypelessBaseline(Int64(x))
+
+Base.convert(::Type{T}, b::TypelessBaseline) where {T<:Number} = T(log(b.N))
+Base.promote_rule(::Type{TypelessBaseline}, ::Type{T}) where {T<:Number} = T
+
+Base.iszero(::TypelessBaseline) = false
+Base.isone(::TypelessBaseline) = false
+
+function LogExpFunctions.logsumexp(weights::AbstractVector{TypelessZero})
+    return TypelessBaseline(length(weights))
+end
+
+function LogExpFunctions.softmax(x::AbstractVector{TypelessZero})
+    # TODO: horrible, but theoretically never used... except in the unit tests
+    return fill(1 / length(x), length(x))
+end
+
+Base.:+(::TypelessZero, b::TypelessBaseline) = b
+Base.:+(b::TypelessBaseline, ::TypelessZero) = b
+
+Base.show(io::IO, b::TypelessBaseline) = print(io, "Typeless(log($(b.N)))")
 
 ## PARTICLES ###############################################################################
 
 """
-    ParticleDistribution
+    Particle
 
-A container for particle filters which composes the weighted sample into a distibution-like
-object, with the states (or particles) distributed accoring to their log-weights.
+A container representing a single particle in a particle filter distribution, composed of a
+weighted sampled (stored as a log weight) and its ancestor index.
 """
-mutable struct ParticleDistribution{PT,WT<:Real}
-    particles::Vector{PT}
-    ancestors::Vector{Int}
-    log_weights::Vector{WT}
-end
-function ParticleDistribution(particles::Vector{PT}, log_weights::Vector{WT}) where {PT,WT}
-    N = length(particles)
-    return ParticleDistribution(particles, Vector{Int}(1:N), log_weights)
+struct Particle{ST,WT,AT<:Integer}
+    state::ST
+    log_w::WT
+    ancestor::AT
 end
 
-StatsBase.weights(state::ParticleDistribution) = softmax(state.log_weights)
+# NOTE: this is only ever used for initializing a particle filter
+const UnweightedParticle{ST,AT} = Particle{ST,TypelessZero,AT}
 
-Base.collect(state::ParticleDistribution) = state.particles
-Base.length(state::ParticleDistribution) = length(state.particles)
-Base.keys(state::ParticleDistribution) = LinearIndices(state.particles)
-
-# not sure if this is kosher, since it doesn't follow the convention of Base.getindex
-Base.@propagate_inbounds Base.getindex(state::ParticleDistribution, i) = state.particles[i]
-# Base.@propagate_inbounds Base.getindex(state::ParticleDistribution, i::Vector{Int}) = state.particles[i]
-
-function reset_weights!(state::ParticleDistribution{T,WT}) where {T,WT<:Real}
-    fill!(state.log_weights, zero(WT))
-    return state.log_weights
+Particle(state, ancestor) = Particle(state, TypelessZero(), ancestor)
+Particle(particle::UnweightedParticle, ancestor) = Particle(particle.state, ancestor)
+function Particle(particle::Particle{<:Any,WT}, ancestor) where {WT<:Real}
+    return Particle(particle.state, zero(WT), ancestor)
 end
 
-function update_ref!(
-    proposed::ParticleDistribution,
-    ref_state::Union{Nothing,AbstractVector},
-    step::Integer=0,
-)
-    if !isnothing(ref_state)
-        proposed.particles[1] = ref_state[step]
-    end
-    return proposed
-end
-
-## RAO-BLACKWELLISED PARTICLE ##############################################################
+log_weight(p::Particle) = p.log_w
 
 """
-    RaoBlackwellisedParticle
+    RBState
 
-A container for Rao-Blackwellised states, composed of a marginalised state `z` (e.g. a
-Gaussian or Categorical distribution) and a singular state `x`.
+A container representing a single state with a Rao-Blackwellised component. This differs
+from a `HierarchicalState` which contains a sample of the conditionally analytical state
+rather than the distribution itself.
+
+# Fields
+- `x::XT`: The sampled state component
+- `z::ZT`: The Rao-Blackwellised distribution component
 """
-mutable struct RaoBlackwellisedParticle{XT,ZT}
+struct RBState{XT,ZT}
     x::XT
     z::ZT
 end
 
-## RAO-BLACKWELLISED PARTICLE DISTRIBUTIONS ################################################
+"""
+    ParticleDistribution
 
-mutable struct BatchRaoBlackwellisedParticles{XT,ZT}
-    xs::XT
-    zs::ZT
-end
+A container for particle filters which composes a collection of weighted particles (with
+their ancestories) into a distibution-like object.
 
-mutable struct RaoBlackwellisedParticleDistribution{
-    T,M<:CUDA.AbstractMemory,PT<:BatchRaoBlackwellisedParticles
-}
-    particles::PT
-    ancestors::CuVector{Int,M}
-    log_weights::CuVector{T,M}
-end
-function RaoBlackwellisedParticleDistribution(
-    particles::PT, log_weights::CuVector{T,M}
-) where {T,M,PT}
-    N = length(log_weights)
-    return RaoBlackwellisedParticleDistribution(particles, CuVector{Int}(1:N), log_weights)
+# Fields
+- `particles::VT`: Vector of weighted particles
+- `ll_baseline::WT`: Baseline for computing log-likelihood increment. A scalar that caches
+  the unnormalized logsumexp of weights before update (for standard PF/guided filters)
+  or a modified value that includes APF first-stage correction (for auxiliary PF).
+"""
+mutable struct ParticleDistribution{WT,PT<:Particle,VT<:AbstractVector{PT}}
+    particles::VT
+    ll_baseline::WT
 end
 
-function StatsBase.weights(state::RaoBlackwellisedParticleDistribution)
-    return softmax(state.log_weights)
-end
-function Base.length(state::RaoBlackwellisedParticleDistribution)
-    return length(state.log_weights)
+# Helper functions to make ParticleDistribution behave like a collection
+Base.collect(state::ParticleDistribution) = state.particles
+Base.length(state::ParticleDistribution) = length(state.particles)
+Base.keys(state::ParticleDistribution) = LinearIndices(state.particles)
+Base.iterate(state::ParticleDistribution, i) = iterate(state.particles, i)
+Base.iterate(state::ParticleDistribution) = iterate(state.particles)
+
+# Not sure if this is kosher, since it doesn't follow the convention of Base.getindex
+Base.@propagate_inbounds Base.getindex(state::ParticleDistribution, i) = state.particles[i]
+
+log_weights(state::ParticleDistribution) = map(p -> log_weight(p), state.particles)
+get_weights(state::ParticleDistribution) = softmax(log_weights(state))
+
+# Helpers for StatsBase compatibility
+StatsBase.weights(state::ParticleDistribution) = StatsBase.Weights(get_weights(state))
+
+"""
+    marginalise!(state::ParticleDistribution)
+
+Compute the log-likelihood increment and normalize particle weights. This function:
+1. Computes LSE of current (post-observation) log-weights
+2. Calculates ll_increment = LSE_after - ll_baseline
+3. Normalizes weights by subtracting LSE_after
+4. Resets ll_baseline to 0.0
+
+The ll_baseline field handles both standard particle filter and auxiliary particle filter
+cases through a single-scalar caching mechanism. For standard PF, ll_baseline equals the
+LSE before adding observation weights. For APF with resampling, it includes first-stage
+correction terms computed during the APF resampling step.
+"""
+function marginalise!(state::ParticleDistribution, particles)
+    # Compute logsumexp after adding observation likelihoods
+    LSE_after = logsumexp(log_weight.(particles))
+
+    # Compute log-likelihood increment: works for both PF and APF cases
+    ll_increment = LSE_after - state.ll_baseline
+
+    # Create new particles with normalized weights
+    particles = map(p -> Particle(p.state, p.log_w - LSE_after, p.ancestor), particles)
+
+    # Reset baseline for next iteration
+    new_state = ParticleDistribution(particles, zero(ll_increment))
+    return new_state, ll_increment
 end
 
-# Allow particle to be get and set via tree_states[:, 1:N] = states
-function Base.getindex(state::BatchRaoBlackwellisedParticles, i)
-    return BatchRaoBlackwellisedParticles(state.xs[:, [i]], state.zs[i])
-end
-function Base.getindex(state::BatchRaoBlackwellisedParticles, i::AbstractVector)
-    return BatchRaoBlackwellisedParticles(state.xs[:, i], state.zs[i])
-end
-function Base.setindex!(
-    state::BatchRaoBlackwellisedParticles, value::BatchRaoBlackwellisedParticles, i
-)
-    state.xs[:, i] = value.xs
-    state.zs[i] = value.zs
-    return state
-end
-Base.length(state::BatchRaoBlackwellisedParticles) = size(state.xs, 2)
+## LIKELIHOOD CONTAINERS ###################################################################
 
-function expand(particles::CuArray{T,2,Mem}, M::Integer) where {T,Mem<:CUDA.AbstractMemory}
-    new_particles = CuArray(zeros(eltype(particles), size(particles, 1), M))
-    new_particles[:, 1:size(particles, 2)] = particles
-    return new_particles
-end
+"""
+    AbstractLikelihood
 
-# Method for increasing size of particle container
-function expand(p::BatchRaoBlackwellisedParticles, M::Integer)
-    new_x = expand(p.xs, M)
-    new_z = expand(p.zs, M)
-    return BatchRaoBlackwellisedParticles(new_x, new_z)
-end
+Abstract type for backward likelihood representations used in smoothing and ancestor sampling.
 
-function update_ref!(
-    proposed::RaoBlackwellisedParticleDistribution,
-    ref_state::Union{Nothing,AbstractVector},
-    step::Integer=0,
-)
-    if !isnothing(ref_state)
-        CUDA.@allowscalar begin
-            proposed.particles.xs[:, 1] = ref_state[step].xs
-            proposed.particles.zs[1] = ref_state[step].zs
-        end
-    end
-    return proposed
+Subtypes represent the predictive likelihood p(y | x) in different forms depending
+on the state space structure (continuous Gaussian vs discrete).
+"""
+abstract type AbstractLikelihood end
+
+"""
+    InformationLikelihood <: AbstractLikelihood
+
+A container representing an unnormalized Gaussian likelihood p(y | x) in information form,
+parameterized by natural parameters (λ, Ω).
+
+The unnormalized log-likelihood is given by:
+    log p(y | x) ∝ λ'x - (1/2)x'Ωx
+
+This representation is particularly useful in backward filtering algorithms and
+Rao-Blackwellised particle filtering, where it represents the predictive likelihood
+p(y_{t:T} | x_t) conditioned on future observations.
+
+# Fields
+- `λ::λT`: The natural parameter vector (information vector)
+- `Ω::ΩT`: The natural parameter matrix (information/precision matrix)
+
+# See also
+- [`natural_params`](@ref): Extract the natural parameters (λ, Ω)
+- [`BackwardInformationPredictor`](@ref): Algorithm that uses this representation
+"""
+struct InformationLikelihood{λT,ΩT} <: AbstractLikelihood
+    λ::λT
+    Ω::ΩT
 end
 
-## BATCH GAUSSIAN DISTRIBUTION #############################################################
+"""
+    natural_params(state::InformationLikelihood)
 
-mutable struct BatchGaussianDistribution{T}
-    μs::CuArray{T,2,CUDA.DeviceMemory}
-    Σs::CuArray{T,3,CUDA.DeviceMemory}
+Extract the natural parameters (λ, Ω) from an InformationLikelihood.
+
+Returns a tuple `(λ, Ω)` where λ is the information vector and Ω is the
+information/precision matrix.
+"""
+function natural_params(state::InformationLikelihood)
+    return state.λ, state.Ω
 end
 
-function Base.getindex(d::BatchGaussianDistribution, i)
-    return BatchGaussianDistribution(d.μs[:, [i]], d.Σs[:, :, [i]])
+"""
+    DiscreteLikelihood <: AbstractLikelihood
+
+A container representing the backward likelihood β_t(i) = p(y | x = i) for discrete
+state spaces, stored in log-space for numerical stability.
+
+This representation is used in backward filtering algorithms for discrete SSMs (HMMs) and
+Rao-Blackwellised particle filtering with discrete inner states.
+
+# Fields
+- `log_β::VT`: Vector of log backward likelihoods, where `log_β[i] = log p(y | x = i)`
+
+# See also
+- [`BackwardDiscretePredictor`](@ref): Algorithm that uses this representation
+"""
+struct DiscreteLikelihood{VT<:AbstractVector} <: AbstractLikelihood
+    log_β::VT
 end
 
-function Base.getindex(d::BatchGaussianDistribution, i::AbstractVector)
-    return BatchGaussianDistribution(d.μs[:, i], d.Σs[:, :, i])
-end
+"""
+    log_likelihoods(state::DiscreteLikelihood)
 
-function Base.setindex!(d::BatchGaussianDistribution, value::BatchGaussianDistribution, i)
-    d.μs[:, i] = value.μs
-    d.Σs[:, :, i] = value.Σs
-    return d
-end
-
-function expand(d::BatchGaussianDistribution{T}, M::Integer) where {T}
-    new_μs = CuArray{T}(undef, size(d.μs, 1), M)
-    new_Σs = CuArray{T}(undef, size(d.Σs, 1), size(d.Σs, 2), M)
-    new_μs[:, 1:size(d.μs, 2)] = d.μs
-    new_Σs[:, :, 1:size(d.Σs, 3)] = d.Σs
-    return BatchGaussianDistribution(new_μs, new_Σs)
-end
+Extract the log backward likelihoods from a DiscreteLikelihood.
+"""
+log_likelihoods(state::DiscreteLikelihood) = state.log_β

@@ -1,80 +1,204 @@
 using Random
 using Distributions
 
-using AcceleratedKernels: searchsortedfirst
-
 export Multinomial, Systematic, Stratified, Metropolis, Rejection
+export ESSResampler
 
 abstract type AbstractResampler end
 
-function resample(rng::AbstractRNG, resampler::AbstractResampler, states)
-    weights = StatsBase.weights(states)
-    idxs = sample_ancestors(rng, resampler, weights)
-    # TODO: generalise these
-    return construct_new_state(states, idxs)
+"""
+    will_resample(resampler::AbstractResampler, state::ParticleDistribution)
+
+Determine whether a resampler will trigger resampling given the current particle state.
+For uncondition resamplers, always returns `true`. For conditional resamplers (e.g.,
+`ESSResampler`), checks the resampling condition.
+"""
+function will_resample(::AbstractResampler, state, weights=get_weights(state))
+    # Default: unconditional resamplers always resample
+    return true
 end
 
-function construct_new_state(states::ParticleDistribution{PT,WT}, idxs) where {PT,WT}
-    return ParticleDistribution(states.particles[idxs], idxs, zeros(WT, length(states)))
+"""
+    maybe_resample(
+        rng::AbstractRNG,
+        resampler::AbstractResampler,
+        state::ParticleDistribution;
+        ref_state::Union{Nothing,AbstractVector}=nothing,
+    ) -> ParticleDistribution
+
+Perform resampling if the resampler's condition is met (for conditional resamplers),
+otherwise return the input state unchanged (but with ancestors set to self).
+"""
+
+function maybe_resample(
+    rng::AbstractRNG,
+    resampler::AbstractResampler,
+    state,
+    weights=get_weights(state);
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+    auxiliary_weights=nothing,
+)
+    return resample(rng, resampler, state, weights; ref_state, auxiliary_weights)
+end
+
+"""
+    _set_ref_index!(idxs)
+
+Set the first ancestor index to 1 for conditional SMC (preserving the reference trajectory).
+This is a separate function so it can be overloaded for GPU arrays (which require
+`CUDA.@allowscalar` for scalar indexing).
+"""
+_set_ref_index!(idxs) = (idxs[1]=1; nothing)
+
+function resample(
+    rng::AbstractRNG,
+    resampler::AbstractResampler,
+    state,
+    weights=get_weights(state);
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+    auxiliary_weights::Union{Nothing,AbstractVector}=nothing,
+    kwargs...,
+)
+    idxs = sample_ancestors(rng, resampler, weights)
+    if !isnothing(ref_state)
+        _set_ref_index!(idxs)
+    end
+    return construct_new_state(state, idxs, auxiliary_weights)
 end
 
 function construct_new_state(
-    states::RaoBlackwellisedParticleDistribution{T}, idxs
-) where {T}
-    return RaoBlackwellisedParticleDistribution(
-        BatchRaoBlackwellisedParticles(
-            states.particles.xs[:, idxs], states.particles.zs[idxs]
-        ),
-        idxs,
-        CUDA.zeros(T, length(states)),
+    state::ParticleDistribution{WT,PT}, idxs, ::Nothing
+) where {WT<:Number,PT}
+    new_particles = Vector{PT}(undef, length(state.particles))
+    for i in eachindex(state.particles)
+        particle = state.particles[idxs[i]]
+        new_particles[i] = resample_ancestor(particle, idxs[i])
+    end
+
+    return ParticleDistribution(new_particles, zero(WT))
+end
+
+function resample_ancestor(particle::Particle, ancestor::Int)
+    return Particle(particle, ancestor)
+end
+
+## AUXILIARY RESAMPLER #####################################################################
+
+"""
+    AuxiliaryResampler
+
+A resampling scheme for multistage particle resampling with auxiliary weights
+"""
+struct AuxiliaryResampler <: AbstractResampler
+    resampler::AbstractResampler
+    log_weights::AbstractVector
+end
+
+function resample(
+    rng::AbstractRNG,
+    auxiliary::AuxiliaryResampler,
+    state;
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+)
+    weights = softmax(log_weights(state) + auxiliary.log_weights)
+    auxiliary_weights = auxiliary.log_weights
+    return resample(rng, auxiliary.resampler, state, weights; ref_state, auxiliary_weights)
+end
+
+function maybe_resample(
+    rng::AbstractRNG, auxiliary::AuxiliaryResampler, state; ref_state=nothing
+)
+    weights = softmax(log_weights(state) + auxiliary.log_weights)
+    auxiliary_weights = auxiliary.log_weights
+    return maybe_resample(
+        rng, auxiliary.resampler, state, weights; ref_state, auxiliary_weights
     )
+end
+
+function will_resample(auxiliary::AuxiliaryResampler, state, weights)
+    return will_resample(auxiliary.resampler, state, weights)
+end
+
+function construct_new_state(
+    state::ParticleDistribution, idxs, auxiliary_weights::AbstractVector
+)
+    new_particles = map(eachindex(state.particles)) do i
+        particle = state.particles[idxs[i]]
+        resample_ancestor(particle, idxs[i], auxiliary_weights)
+    end
+
+    # calculate the baseline log-likelihood (not a fan, but it works...)
+    LSE_1 = logsumexp(auxiliary_weights + log_weights(state))
+    LSE_2 = logsumexp(log_weights(state))
+    LSE_3 = logsumexp(log_weight.(new_particles))
+    LSE_4 = TypelessBaseline(length(auxiliary_weights))
+
+    return ParticleDistribution(new_particles, -((LSE_1 - LSE_2) + (LSE_3 - LSE_4)))
+end
+
+function resample_ancestor(
+    particle::Particle, ancestor::Int, auxiliary_weights::AbstractVector
+)
+    return Particle(particle.state, -auxiliary_weights[ancestor], ancestor)
 end
 
 ## CONDITIONAL RESAMPLING ##################################################################
 
 abstract type AbstractConditionalResampler <: AbstractResampler end
 
-struct ESSResampler <: AbstractConditionalResampler
-    threshold::Float64
-    resampler::AbstractResampler
-    function ESSResampler(threshold, resampler::AbstractResampler=Systematic())
-        return new(threshold, resampler)
+function preserve_sample(state::ParticleDistribution)
+    new_particles = map(eachindex(state.particles)) do i
+        set_ancestor(state.particles[i], i)
     end
+    return ParticleDistribution(new_particles, state.ll_baseline)
 end
 
-function resample(rng::AbstractRNG, cond_resampler::ESSResampler, state)
-    n = length(state)
-    # TODO: computing weights twice. Should create a wrapper to avoid this
-    weights = StatsBase.weights(state)
-    ess = inv(sum(abs2, weights))
-    @debug "ESS: $ess"
-
-    if cond_resampler.threshold * n ≥ ess
-        return resample(rng, cond_resampler.resampler, state)
+function maybe_resample(
+    rng::AbstractRNG,
+    cond_resampler::AbstractConditionalResampler,
+    state,
+    weights=get_weights(state);
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+    auxiliary_weights::Union{Nothing,AbstractVector}=nothing,
+)
+    if will_resample(cond_resampler, state, weights)
+        return resample(rng, cond_resampler, state, weights; ref_state, auxiliary_weights)
     else
-        state.ancestors = collect(1:n)
-        return state
+        return preserve_sample(state)
     end
 end
 
-## CATEGORICAL RESAMPLE ####################################################################
-
-# this is adapted from AdvancedPS
-function randcat(rng::AbstractRNG, weights::AbstractVector{WT}) where {WT<:Real}
-    # pre-calculations
-    @inbounds v = weights[1]
-    u = rand(rng, WT)
-
-    # initialize sampling algorithm
-    n = length(weights)
-    idx = 1
-
-    while (v ≤ u) && (idx < n)
-        idx += 1
-        v += weights[idx]
+struct ESSResampler{RS<:AbstractResampler} <: AbstractConditionalResampler
+    threshold::Float64
+    resampler::RS
+    function ESSResampler(threshold, resampler::AbstractResampler=Systematic())
+        return new{typeof(resampler)}(threshold, resampler)
     end
+end
 
-    return idx
+function will_resample(cond_resampler::ESSResampler, state, weights=get_weights(state))
+    n = length(state)
+    ess = inv(sum(abs2, weights))
+    return cond_resampler.threshold * n ≥ ess
+end
+
+function resample(
+    rng::AbstractRNG,
+    cond_resampler::ESSResampler,
+    state,
+    weights=get_weights(state);
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+    auxiliary_weights::Union{Nothing,AbstractVector}=nothing,
+)
+    return resample(
+        rng, cond_resampler.resampler, state, weights; ref_state, auxiliary_weights
+    )
+end
+
+# TODO (RB): this can probably be cleaned up if we allow mutation (I'm just playing it safe
+# whilst developing)
+function set_ancestor(particle::Particle, ancestor::Int)
+    return Particle(particle.state, log_weight(particle), ancestor)
 end
 
 ## DOUBLE PRECISION STABLE ALGORITHMS ######################################################
@@ -87,24 +211,15 @@ function sample_ancestors(
     return rand(rng, Distributions.Categorical(weights), n)
 end
 
-# Following Code 5 of Murray et. al (2015)
-function sample_ancestors(
-    rng::AbstractRNG, ::Multinomial, weights::CuVector{WT}, n::Int=length(weights)
-) where {WT}
-    W = cumsum(weights)
-    Wn = CUDA.@allowscalar W[n]
-    us = CUDA.rand(WT, n) * Wn
-    as = searchsortedfirst(W, us)
-    return as
-end
-
 struct Systematic <: AbstractResampler end
 
 function sample_ancestors(
     rng::AbstractRNG, ::Systematic, weights::AbstractVector{WT}, n::Int64=length(weights)
 ) where {WT<:Real}
     # pre-calculations
-    vs = n * cumsum(weights)
+    vs = cumsum(weights)
+    vs *= n
+
     u0 = rand(rng, WT)
 
     # initialize sampling algorithm
@@ -122,46 +237,7 @@ function sample_ancestors(
     return a
 end
 
-function sample_ancestors(
-    rng::AbstractRNG, ::Systematic, weights::CuVector, n::Int=length(weights)
-)
-    offspring = sample_offspring(rng, Systematic(), weights, n)
-    return offspring_to_ancestors(offspring)
-end
-
-# Following Code 8 of Murray et. al (2015)
-function sample_offspring(
-    rng::AbstractRNG, ::Systematic, weights::CuVector{WT}, n::Int=length(weights)
-) where {WT}
-    W = cumsum(weights)
-    Wn = CUDA.@allowscalar W[n]
-    u0 = CUDA.@allowscalar rand(rng, WT)
-    r = n * W / Wn
-    offspring = min.(n, floor.(Int, r .+ u0))
-    return offspring
-end
-
 struct Stratified <: AbstractResampler end
-
-function sample_ancestors(
-    rng::AbstractRNG, ::Stratified, weights::CuVector, n::Int=length(weights)
-)
-    offspring = sample_offspring(rng, Stratified(), weights, n)
-    return offspring_to_ancestors(offspring)
-end
-
-# Following Code 7 of Murray et. al (2015)
-function sample_offspring(
-    rng::AbstractRNG, ::Stratified, weights::CuVector{WT}, n::Int=length(weights)
-) where {WT}
-    u = rand(rng, n)
-    W = cumsum(weights)
-    Wn = CUDA.@allowscalar W[n]
-    r = n * W / Wn
-    k = min.(n, floor.(Int, r .+ 1))
-    offspring = min.(n, floor.(Int, r .+ u[k]))
-    return offspring
-end
 
 ## SINGLE PRECISION STABLE ALGORITHMS ######################################################
 
@@ -224,60 +300,4 @@ function sample_ancestors(
     end
 
     return a
-end
-
-## ANCESTOR-OFFSPRING CONVERSION ###########################################################
-
-function _offspring_to_ancestors_kernel!(ancestors, offspring, N)
-    index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-    stride = blockDim().x * gridDim().x
-
-    @inbounds for i in index:stride:N
-        start = i == 1 ? 0 : offspring[i - 1]
-        finish = offspring[i]
-        for j in (start + 1):finish
-            ancestors[j] = i
-        end
-    end
-
-    return nothing
-end
-
-function offspring_to_ancestors(offspring::CuVector{<:Integer})
-    N = length(offspring)
-    ancestors = similar(offspring)
-
-    threads = 256
-    blocks = ceil(Int, N / threads)
-
-    @cuda threads = threads blocks = blocks _offspring_to_ancestors_kernel!(
-        ancestors, offspring, N
-    )
-
-    return ancestors
-end
-
-function _ancestors_to_offspring_kernel!(output, ancestors, N)
-    index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-    stride = blockDim().x * gridDim().x
-
-    @inbounds for i in index:stride:N
-        CUDA.@atomic output[ancestors[i]] += 1
-    end
-
-    return nothing
-end
-
-function ancestors_to_offspring(ancestors::CuVector{Int})
-    N = length(ancestors)
-    offspring = CUDA.zeros(Int, N)
-
-    threads = 256
-    blocks = ceil(Int, N / threads)
-
-    @cuda threads = threads blocks = blocks _ancestors_to_offspring_kernel!(
-        offspring, ancestors, N
-    )
-
-    return offspring
 end
