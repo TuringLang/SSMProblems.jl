@@ -154,7 +154,6 @@ function get_trajectory(vi::DynamicPPL.AbstractVarInfo)
     return DynamicPPL.getacc(vi, Val(TRAJ_ACCUMULATOR)).values
 end
 
-
 ## CACHED PREP LDF #############################################################################
 
 """
