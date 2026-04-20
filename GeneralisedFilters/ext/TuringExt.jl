@@ -243,7 +243,9 @@ function AbstractMCMC.step(
     # 3. Condition on trajectory
     cond_model = model | vnt_traj
     θ = DynamicPPL.subset(vi, Base.filter(vn -> !(vn in keys(vnt_traj)), keys(vi)))
-    ldf = DynamicPPL.LogDensityFunction(cond_model, DynamicPPL.getlogjoint_internal, θ)
+    ldf = DynamicPPL.LogDensityFunction(
+        cond_model, DynamicPPL.getlogjoint_internal, θ; adtype=pg.adtype
+    )
     _, param_state = AbstractMCMC.step(
         rng, AbstractMCMC.LogDensityModel(ldf), pg.param; initial_params=θ[:], kwargs...
     )
@@ -288,7 +290,6 @@ function AbstractMCMC.step(
         AbstractMCMC.LogDensityModel(cached_ldf),
         pg.param,
         state.param_state;
-        adtype=pg.adtype,
         kwargs...,
     )
 
