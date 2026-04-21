@@ -17,9 +17,9 @@ import Bijectors: bijector
 import DifferentiationInterface as DI
 using Distributions: Distributions
 using DynamicPPL: DynamicPPL
+using LinearAlgebra: PosDefException
 using LogDensityProblems: LogDensityProblems
 using MCMCChains: MCMCChains
-using OffsetArrays
 using Random: AbstractRNG
 using SSMProblems
 using Turing: Turing
@@ -177,9 +177,19 @@ function LogDensityProblems.logdensity(
     c::CachedPrepLDF{Tlink}, params::AbstractVector
 ) where {Tlink}
     b = c.base
-    return DynamicPPL.logdensity_at(
-        params, c.model, b._getlogdensity, b._varname_ranges, b.transform_strategy, b._accs
-    )
+    try
+        return DynamicPPL.logdensity_at(
+            params,
+            c.model,
+            b._getlogdensity,
+            b._varname_ranges,
+            b.transform_strategy,
+            b._accs,
+        )
+    catch e
+        e isa PosDefException || rethrow()
+        return convert(eltype(params), -Inf)
+    end
 end
 
 function LogDensityProblems.logdensity_and_gradient(
@@ -187,27 +197,37 @@ function LogDensityProblems.logdensity_and_gradient(
 ) where {Tlink}
     b = c.base
     params = convert(DynamicPPL.get_input_vector_type(b), params)
-    return if DynamicPPL._use_closure(b.adtype)
-        DI.value_and_gradient(
-            DynamicPPL.LogDensityAt{Tlink}(
-                c.model, b._getlogdensity, b._varname_ranges, b.transform_strategy, b._accs
-            ),
-            b._adprep,
-            b.adtype,
-            params,
-        )
-    else
-        DI.value_and_gradient(
-            DynamicPPL.logdensity_at,
-            b._adprep,
-            b.adtype,
-            params,
-            DI.Constant(c.model),
-            DI.Constant(b._getlogdensity),
-            DI.Constant(b._varname_ranges),
-            DI.Constant(b.transform_strategy),
-            DI.Constant(b._accs),
-        )
+    try
+        return if DynamicPPL._use_closure(b.adtype)
+            DI.value_and_gradient(
+                DynamicPPL.LogDensityAt{Tlink}(
+                    c.model,
+                    b._getlogdensity,
+                    b._varname_ranges,
+                    b.transform_strategy,
+                    b._accs,
+                ),
+                b._adprep,
+                b.adtype,
+                params,
+            )
+        else
+            DI.value_and_gradient(
+                DynamicPPL.logdensity_at,
+                b._adprep,
+                b.adtype,
+                params,
+                DI.Constant(c.model),
+                DI.Constant(b._getlogdensity),
+                DI.Constant(b._varname_ranges),
+                DI.Constant(b.transform_strategy),
+                DI.Constant(b._accs),
+            )
+        end
+    catch e
+        e isa PosDefException || rethrow()
+        T = eltype(params)
+        return (convert(T, -Inf), zero(params))
     end
 end
 
