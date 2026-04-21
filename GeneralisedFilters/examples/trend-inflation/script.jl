@@ -1,5 +1,7 @@
 # # Trend Inflation
 #
+#md # [![](https://colab.research.google.com/assets/colab-badge.svg)](@__COLAB_ROOT_URL__/examples/trend-inflation.ipynb)
+#
 # This example is a replication of the univariate state space model suggested by (Stock &
 # Watson, 2016) using GeneralisedFilters to define a heirarchical model for use in Rao-
 # Blackwellised particle filtering.
@@ -15,8 +17,10 @@ using PDMats
 const GF = GeneralisedFilters
 
 INFL_PATH = joinpath(@__DIR__, "..", "..", "..", "examples", "trend-inflation"); #hide
+#nb INFL_PATH = @__DIR__
 # INFL_PATH = joinpath(@__DIR__)
 include(joinpath(INFL_PATH, "utilities.jl")); #hide
+#nb include(joinpath(INFL_PATH, "utilities.jl"))
 
 # ## Model Definition
 

@@ -1,5 +1,7 @@
 # # Kalman Filter
 #
+#md # [![](https://colab.research.google.com/assets/colab-badge.svg)](@__COLAB_ROOT_URL__/examples/kalman-filter.ipynb)
+#
 # This example implements a Kalman filter for a linear Gaussian state space model using the
 # SSMProblems interface. 
 
