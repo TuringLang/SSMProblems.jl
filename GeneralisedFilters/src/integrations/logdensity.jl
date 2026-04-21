@@ -13,7 +13,8 @@ Compute the joint log-density of a trajectory and observations under a regular S
 
     log p(x₀) + Σ_t [log p(xₜ | xₜ₋₁) + log p(yₜ | xₜ)]
 
-The `trajectory` should be an OffsetVector indexed from 0 (matching the prior at time 0).
+The `trajectory` should be a [`ReferenceTrajectory`](@ref) indexed from 0 (matching the
+prior at time 0).
 """
 function trajectory_logdensity(
     model::StateSpaceModel, trajectory, observations::AbstractVector
@@ -37,7 +38,7 @@ Compute the joint log-density of an outer trajectory and observations under a hi
 The last term is the marginal log-likelihood of the inner model conditioned on the outer
 trajectory, computed by `inner_loglikelihood` using the analytical filter `af`.
 
-The `outer_trajectory` should be an OffsetVector indexed from 0.
+The `outer_trajectory` should be a [`ReferenceTrajectory`](@ref) indexed from 0.
 """
 function trajectory_logdensity(
     model::HierarchicalSSM,
@@ -80,7 +81,7 @@ KalmanFilter specialization: extracts linear-Gaussian parameters at each timeste
 delegates to `kf_loglikelihood`.
 
 `states` is a 1-indexed vector with `states[1] = u₀` and `states[t+1] = uₜ`.
-For OffsetVector trajectories (0-indexed), a converting wrapper is provided.
+For [`ReferenceTrajectory`](@ref) trajectories (0-indexed), a converting wrapper is provided.
 """
 function inner_loglikelihood(
     af::KalmanFilter,
@@ -106,11 +107,11 @@ function inner_loglikelihood(
     return kf_loglikelihood(μ0, Σ0, As, bs, Qs, Hs, cs, Rs, observations, af.jitter)
 end
 
-# Wrapper for OffsetVector trajectories (0-indexed), used by trajectory_logdensity.
+# Wrapper for 0-indexed ReferenceTrajectory inputs, used by trajectory_logdensity.
 function inner_loglikelihood(
     af::KalmanFilter,
     inner_model::StateSpaceModel,
-    outer_trajectory::OffsetVector,
+    outer_trajectory::ReferenceTrajectory,
     observations::AbstractVector,
 )
     T = length(observations)
@@ -205,7 +206,7 @@ Implements the `LogDensityProblems` interface.
 - `param_model`: A `ParameterisedSSM` mapping θ to an SSM
 - `af`: Inner analytical filter for HierarchicalSSM (e.g., `KalmanFilter()`), or `nothing`
   for regular SSMs
-- `trajectory`: Current reference trajectory (OffsetVector indexed from 0)
+- `trajectory`: Current reference trajectory ([`ReferenceTrajectory`](@ref) indexed from 0)
 """
 struct SSMParameterLogDensity{PT,MT<:ParameterisedSSM,AFT,TT}
     prior::PT

@@ -5,7 +5,6 @@ using ADTypes: ADTypes
 import Distributions: MvNormal, params
 import Random: AbstractRNG, default_rng, rand
 import SSMProblems: prior, dyn, obs
-using OffsetArrays
 using SSMProblems
 using StatsBase
 using DifferentiationInterface
@@ -13,8 +12,8 @@ using DifferentiationInterface
 const DI = DifferentiationInterface
 
 # Filtering utilities
-include("callbacks.jl")
 include("containers.jl")
+include("callbacks.jl")
 include("resamplers.jl")
 
 ## FILTERING BASE ##########################################################################

@@ -20,7 +20,6 @@ using DynamicPPL: DynamicPPL
 using LinearAlgebra: PosDefException
 using LogDensityProblems: LogDensityProblems
 using MCMCChains: MCMCChains
-using OffsetArrays
 using Random: AbstractRNG
 using SSMProblems
 using Turing: Turing
