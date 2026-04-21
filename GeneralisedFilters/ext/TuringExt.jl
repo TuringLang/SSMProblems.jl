@@ -267,7 +267,7 @@ function AbstractMCMC.step(
         rng, model, vi, DynamicPPL.InitFromParams(init_vi), DynamicPPL.LinkAll()
     )
 
-    transition = DynamicPPL.ParamsWithStats(vi, model)
+    transition = DynamicPPL.ParamsWithStats(vi, model, AbstractMCMC.getstats(param_state))
     state = ParticleGibbsTuringState(vi, trajectory_new, param_state, ldf, vnt_traj_new, θ)
     return transition, state
 end
@@ -310,7 +310,7 @@ function AbstractMCMC.step(
         rng, model, vi, DynamicPPL.InitFromParams(init_vi), DynamicPPL.LinkAll()
     )
 
-    transition = DynamicPPL.ParamsWithStats(vi, model)
+    transition = DynamicPPL.ParamsWithStats(vi, model, AbstractMCMC.getstats(param_state))
     new_state = ParticleGibbsTuringState(
         vi, trajectory_new, param_state, state.ldf, vnt_traj_new, state.θ
     )
