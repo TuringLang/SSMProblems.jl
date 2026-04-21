@@ -1,9 +1,20 @@
 using CSV, DataFrames
 using CairoMakie
 using Dates
+using Downloads
 using LogExpFunctions
 
-fred_data = CSV.read(joinpath(INFL_PATH, "data.csv"), DataFrame)
+const FRED_DATA_URL = "https://raw.githubusercontent.com/TuringLang/SSMProblems.jl/main/GeneralisedFilters/examples/trend-inflation/data.csv"
+
+function load_fred_data()
+    for path in (joinpath(pwd(), "data.csv"), joinpath(@__DIR__, "data.csv"))
+        isfile(path) && return CSV.read(path, DataFrame)
+    end
+
+    return CSV.read(Downloads.download(FRED_DATA_URL), DataFrame)
+end
+
+fred_data = load_fred_data()
 
 ## PLOTTING UTILITIES ######################################################################
 
@@ -25,7 +36,7 @@ function mean_path(paths::Vector{Vector{T}}, states) where {T<:GeneralisedFilter
 end
 
 function plot_ucsv(trend, volatilities, fred_data)
-    fig = Figure(; size=(1200, 500), fontsize=16)
+    fig = Figure(; size=(1200, 675), fontsize=16)
     dateticks = date_format(fred_data.date)
 
     trend_ax = Axis(
