@@ -267,7 +267,7 @@ function AbstractMCMC.step(
         rng, model, vi, DynamicPPL.InitFromParams(init_vi), DynamicPPL.LinkAll()
     )
 
-    transition = ParticleGibbsTransition(θ_new, AbstractMCMC.getstats(param_state))
+    transition = DynamicPPL.ParamsWithStats(vi, model)
     state = ParticleGibbsTuringState(vi, trajectory_new, param_state, ldf, vnt_traj_new, θ)
     return transition, state
 end
@@ -310,46 +310,10 @@ function AbstractMCMC.step(
         rng, model, vi, DynamicPPL.InitFromParams(init_vi), DynamicPPL.LinkAll()
     )
 
-    transition = ParticleGibbsTransition(θ_new, AbstractMCMC.getstats(param_state))
+    transition = DynamicPPL.ParamsWithStats(vi, model)
     new_state = ParticleGibbsTuringState(
         vi, trajectory_new, param_state, state.ldf, vnt_traj_new, state.θ
     )
     return transition, new_state
 end
-
-## CHAIN OUTPUT ################################################################################
-
-function AbstractMCMC.bundle_samples(
-    ts::Vector{<:ParticleGibbsTransition},
-    ::DynamicPPL.Model,
-    ::ParticleGibbs,
-    state::ParticleGibbsTuringState,
-    ::Type{MCMCChains.Chains};
-    param_names=nothing,
-    kwargs...,
-)
-    names = if isnothing(param_names)
-        _turing_param_names(state)
-    else
-        Symbol.(param_names)
-    end
-    return _build_chains(ts, names)
-end
-
-function _turing_param_names(state::ParticleGibbsTuringState)
-    vi = state.θ
-    vnt = DynamicPPL.get_values(vi)
-    names = Symbol[]
-    for (k, v) in pairs(vnt)
-        if v isa AbstractArray && length(v) > 1
-            for i in 1:length(v)
-                push!(names, Symbol("$(k)[$i]"))
-            end
-        else
-            push!(names, Symbol(k))
-        end
-    end
-    return names
-end
-
 end
