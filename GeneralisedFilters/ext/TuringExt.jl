@@ -267,8 +267,13 @@ function AbstractMCMC.step(
     ldf = DynamicPPL.LogDensityFunction(
         cond_model, DynamicPPL.getlogjoint_internal, θ; adtype=pg.adtype
     )
+    cached_ldf = CachedPrepLDF(ldf, cond_model)
     _, param_state = AbstractMCMC.step(
-        rng, AbstractMCMC.LogDensityModel(ldf), pg.param; initial_params=θ[:], kwargs...
+        rng,
+        AbstractMCMC.LogDensityModel(cached_ldf),
+        pg.param;
+        initial_params=θ[:],
+        kwargs...,
     )
 
     # 4. Update VarInfo with new parameters
