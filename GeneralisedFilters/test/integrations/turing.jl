@@ -186,7 +186,7 @@ end
     )
 
     # Find the parameter column (not trajectory)
-    post_samples = Array(chain[:b])[(N_adapts + 1):end]
+    post_samples = Array(chain[Symbol("b[1]")])[(N_adapts + 1):end]
 
     @test mean(post_samples) ≈ kf_mean rtol = 0.1
     @test std(post_samples) ≈ kf_std rtol = 0.2
@@ -246,7 +246,7 @@ end
         rng, m, pg, N_iter; n_adapts=N_adapts, progress=false, chain_type=MCMCChains.Chains
     )
 
-    post_samples = Array(chain[:b])[(N_adapts + 1):end]
+    post_samples = Array(chain[Symbol("b[1]")])[(N_adapts + 1):end]
 
     @test mean(post_samples) ≈ kf_mean[1] rtol = 1e-1
     @test std(post_samples) ≈ kf_std[1] rtol = 1e-1
@@ -309,7 +309,7 @@ end
         rng, m, pg, N_iter; n_adapts=N_adapts, progress=false, chain_type=MCMCChains.Chains
     )
 
-    post_samples = Array(chain[:b])[(N_adapts + 1):end]
+    post_samples = Array(chain[Symbol("b[1]")])[(N_adapts + 1):end]
 
     @test mean(post_samples) ≈ kf_mean[1] rtol = 1e-1
     @test std(post_samples) ≈ kf_std[1] rtol = 1e-1
