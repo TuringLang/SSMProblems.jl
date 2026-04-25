@@ -65,8 +65,19 @@ Base.eltype(::Type{<:SSMTrajectory}) = Float64
 ## FLATTEN / UNFLATTEN ###########################################################################
 
 function _unflatten_trajectory(x_flat::AbstractVector, T::Integer, Dx::Integer)
-    states = [x_flat[((i * Dx) + 1):((i + 1) * Dx)] for i in 0:T]
-    return OffsetVector(states, -1)
+    x0 = x_flat[1:Dx]
+    xs = [x_flat[((i * Dx) + 1):((i + 1) * Dx)] for i in 1:T]
+    ET = eltype(xs)
+    if !(typeof(x0) === ET)
+        throw(
+            ArgumentError(
+                "The Turing integration assumes the initial and subsequent state types " *
+                "match. Got $(typeof(x0)) for x₀ and $ET for subsequent states — cast " *
+                "the initial state to match the subsequent-state type.",
+            ),
+        )
+    end
+    return ReferenceTrajectory(x0, xs)
 end
 
 function _flatten_trajectory(traj, T::Integer, Dx::Integer)
@@ -92,7 +103,7 @@ end
 ## LOGPDF ########################################################################################
 
 # These methods inline the trajectory_logdensity computation with 1-based indexing to avoid
-# constructing an OffsetVector, which Zygote cannot differentiate through.
+# constructing a ReferenceTrajectory, which Zygote cannot differentiate through.
 
 function _logpdf(d::SSMTrajectory{<:StateSpaceModel}, x_flat::AbstractVector{<:Real})
     T = length(d.observations)

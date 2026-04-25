@@ -66,7 +66,7 @@ Internal state of the particle Gibbs sampler.
 
 # Fields
 - `θ`: Current parameter vector
-- `trajectory`: Current reference trajectory (OffsetVector)
+- `trajectory`: Current reference trajectory ([`ReferenceTrajectory`](@ref))
 - `param_state`: Parameter sampler state (e.g., `AdvancedHMC.HMCState`)
 """
 struct ParticleGibbsState{VT,TT,PS}

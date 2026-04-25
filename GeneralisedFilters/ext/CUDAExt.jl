@@ -19,7 +19,7 @@ using GeneralisedFilters:
     PostUpdateCallback,
     num_particles
 
-using GeneralisedFilters.OffsetArrays: OffsetVector
+using GeneralisedFilters: ReferenceTrajectory
 
 using AcceleratedKernels: searchsortedfirst, foreachindex
 using CUDA
@@ -226,29 +226,37 @@ function expand!(tree::ParallelParticleTree{T}) where {T}
     return tree
 end
 
-# Get ancestry of all particles
+# Get ancestry of all particles. The parallel tree stores initial and subsequent states
+# in a single `states` buffer (homogeneous type), so the returned trajectories have
+# T0 == T.
 function get_ancestry(tree::ParallelParticleTree{ST}, T::Integer) where {ST}
-    paths = OffsetVector(Vector{ST}(undef, T + 1), -1)
+    buf = Vector{Vector{ST}}(undef, T + 1)
     parents = copy(tree.leaves)
-    for t in T:-1:1
-        paths[t] = tree.states[parents]
+    for t in (T + 1):-1:2
+        buf[t] = Vector(tree.states[parents])
         gather!(parents, tree.parents, parents)
     end
-    return paths
+    buf[1] = Vector(tree.states[parents])
+    # Each leaf's trajectory: x0 = buf[1][k], xs = [buf[2][k], ..., buf[T+1][k]]
+    return [
+        ReferenceTrajectory(buf[1][k], [buf[t + 1][k] for t in 1:T]) for
+        k in eachindex(tree.leaves)
+    ]
 end
 
 # Get ancestry of a single particle
 function get_ancestry(
     container::ParallelParticleTree{ST}, i::Integer, T::Integer
 ) where {ST}
-    path = OffsetVector(Vector{ST}(undef, T + 1), -1)
+    xs = Vector{ST}(undef, T)
     CUDA.@allowscalar begin
         ancestor_index = container.leaves[i]
-        for t in T:-1:0
-            path[t] = container.states[ancestor_index]
+        for t in T:-1:1
+            xs[t] = container.states[ancestor_index]
             ancestor_index = container.parents[ancestor_index]
         end
-        return path
+        x0 = container.states[ancestor_index]
+        return ReferenceTrajectory(x0, xs)
     end
 end
 

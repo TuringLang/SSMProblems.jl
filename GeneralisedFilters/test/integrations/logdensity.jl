@@ -7,7 +7,7 @@
     using SSMProblems
     using StableRNGs
     using Distributions
-    using OffsetArrays
+    using GeneralisedFilters: ReferenceTrajectory
 
     let
         rng = StableRNG(1234)
@@ -15,7 +15,7 @@
         model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
 
         x0, xs, ys = SSMProblems.sample(rng, model, T)
-        trajectory = OffsetVector(vcat([x0], xs), -1)
+        trajectory = ReferenceTrajectory(x0, xs)
 
         ll = trajectory_logdensity(model, trajectory, ys)
 
@@ -40,7 +40,7 @@ end
     using SSMProblems
     using StableRNGs
     using Distributions
-    using OffsetArrays
+    using GeneralisedFilters: ReferenceTrajectory
 
     let
         rng = StableRNG(1234)
@@ -50,7 +50,7 @@ end
             rng, D_outer, D_inner, D_obs; static_arrays=false
         )
         x0, z0, xs, zs, ys = SSMProblems.sample(rng, hier_model, T)
-        outer_traj = OffsetVector(vcat([x0], xs), -1)
+        outer_traj = ReferenceTrajectory(x0, xs)
 
         ll = trajectory_logdensity(hier_model, KF(), outer_traj, ys)
 
@@ -476,7 +476,7 @@ end
     using Distributions
     using PDMats
     using LinearAlgebra
-    using OffsetArrays
+    using GeneralisedFilters: ReferenceTrajectory
 
     rng = StableRNG(1234)
 
@@ -507,7 +507,7 @@ end
 
     # Sample a trajectory
     x0, xs, _ = SSMProblems.sample(rng, true_ssm, T_len)
-    trajectory = OffsetVector(vcat([x0], xs), -1)
+    trajectory = ReferenceTrajectory(x0, xs)
 
     prior = MvNormal([0.0], [4.0;;])
     pssm = ParameterisedSSM(build_ssm, ys)
@@ -532,7 +532,7 @@ end
     using Distributions
     using PDMats
     using LinearAlgebra
-    using OffsetArrays
+    using GeneralisedFilters: ReferenceTrajectory
 
     rng = StableRNG(1234)
 
@@ -543,7 +543,7 @@ end
         rng, D_outer, D_inner, D_obs; static_arrays=false
     )
     x0, _, xs, _, ys = SSMProblems.sample(rng, hier_model, T_len)
-    outer_traj = OffsetVector(vcat([x0], xs), -1)
+    outer_traj = ReferenceTrajectory(x0, xs)
 
     # Parameterise the model by b (inner dynamics offset)
     fixed_model = hier_model
