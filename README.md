@@ -100,3 +100,13 @@ function distribution(
     return Normal(state, sig_v)
 end
 ```
+
+## Examples
+
+You can run our examples directly in your browser using Google Colab:
+
+| Example | Colab Link |
+| :------ | :--------: |
+| Trend Inflation (GeneralisedFilters) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/TuringLang/SSMProblems.jl/blob/gh-pages/GeneralisedFilters/dev/examples/trend-inflation.ipynb) |
+| Kalman Filter (SSMProblems) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/TuringLang/SSMProblems.jl/blob/gh-pages/SSMProblems/dev/examples/kalman-filter.ipynb) |
+
