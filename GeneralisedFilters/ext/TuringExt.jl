@@ -310,12 +310,16 @@ function AbstractMCMC.step(
 
     # 2. Reuse AD prep; only swap in new conditioned model
     cached_ldf = CachedPrepLDF(state.ldf, cond_model)
+    ld_model = AbstractMCMC.LogDensityModel(cached_ldf)
+    # Refresh any cached log-density on `param_state` against the new conditioning.
+    # Without this, MH acceptance compares the proposal's lp under the new trajectory
+    # against `state.logprob` cached under the previous trajectory, biasing stationarity.
+    # Mirrors Turing.jl's `setparams_varinfo!!` pattern in its Gibbs sampler.
+    refreshed_param_state = AbstractMCMC.setparams!!(
+        ld_model, state.param_state, AbstractMCMC.getparams(state.param_state)
+    )
     _, param_state = AbstractMCMC.step(
-        rng,
-        AbstractMCMC.LogDensityModel(cached_ldf),
-        pg.param,
-        state.param_state;
-        kwargs...,
+        rng, ld_model, pg.param, refreshed_param_state; kwargs...
     )
 
     # 3. Update VarInfo with new parameters
