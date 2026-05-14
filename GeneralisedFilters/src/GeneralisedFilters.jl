@@ -11,6 +11,11 @@ using DifferentiationInterface
 
 const DI = DifferentiationInterface
 
+# Parameter system
+include("parameters/parameters.jl")
+include("parameters/controls.jl")
+include("parameters/hoist.jl")
+
 # Filtering utilities
 include("containers.jl")
 include("callbacks.jl")
