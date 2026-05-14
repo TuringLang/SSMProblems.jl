@@ -13,7 +13,7 @@ struct DiscreteFilter <: AbstractFilter end
 const DF = DiscreteFilter
 
 function initialise(rng::AbstractRNG, prior::DiscretePrior, ::DiscreteFilter; kwargs...)
-    return calc_α0(prior; kwargs...)
+    return step_eval(prior; kwargs...).α0
 end
 
 function predict(
@@ -25,7 +25,7 @@ function predict(
     observation;
     kwargs...,
 )
-    P = calc_P(dyn, step; kwargs...)
+    P = step_eval(dyn, step; kwargs...).P
     return (states' * P)'
 end
 
@@ -101,7 +101,7 @@ function backward_predict(
     kwargs...,
 )
     log_β_next = log_likelihoods(state)
-    P = calc_P(dyn, iter + 1; kwargs...)
+    P = step_eval(dyn, iter + 1; kwargs...).P
     K = length(log_β_next)
 
     log_β = map(1:K) do i
@@ -168,7 +168,7 @@ function backward_smooth(
     predicted::AbstractVector,
     kwargs...,
 )
-    P = calc_P(dyn, step + 1; kwargs...)
+    P = step_eval(dyn, step + 1; kwargs...).P
     K = length(filtered)
 
     smoothed = map(1:K) do i

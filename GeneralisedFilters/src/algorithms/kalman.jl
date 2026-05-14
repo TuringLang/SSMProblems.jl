@@ -21,8 +21,8 @@ KalmanFilter(; jitter=nothing) = KalmanFilter(jitter)
 KF() = KalmanFilter()
 
 function initialise(rng::AbstractRNG, prior::GaussianPrior, filter::KalmanFilter; kwargs...)
-    μ0, Σ0 = calc_initial(prior; kwargs...)
-    return MvNormal(μ0, Σ0)
+    p = step_eval(prior; kwargs...)
+    return MvNormal(p.μ0, p.Σ0)
 end
 
 function predict(
@@ -34,9 +34,8 @@ function predict(
     observation=nothing;
     kwargs...,
 )
-    dyn_params = calc_params(dyn, iter; kwargs...)
-    state = kalman_predict(state, dyn_params)
-    return state
+    p = step_eval(dyn, iter; kwargs...)
+    return kalman_predict(state, (p.A, p.b, p.Q))
 end
 
 function kalman_predict(state, dyn_params)
@@ -73,9 +72,24 @@ function update(
     observation::AbstractVector;
     kwargs...,
 )
-    obs_params = calc_params(obs, iter; kwargs...)
-    state, ll = kalman_update(state, obs_params, observation, algo.jitter)
+    p = step_eval(obs, iter; kwargs...)
+    state, ll = kalman_update(state, (p.H, p.c, p.R), observation, algo.jitter)
     return state, ll
+end
+
+"""
+    _kalman_step(state, A, b, Q, H, c, R, y, jitter) -> (state_filt, ll)
+
+Single Kalman filter step (predict + update) on pre-resolved matrix arguments. Each of
+`A, b, Q, H, c, R` may be a [`Fixed`](@ref) wrapper or a plain value; `_val` unwraps both.
+This is the boundary at which the Mooncake rrule!! fires.
+"""
+function _kalman_step(state::MvNormal, A, b, Q, H, c, R, y, jitter)
+    A_v, b_v, Q_v = _val(A), _val(b), _val(Q)
+    H_v, c_v, R_v = _val(H), _val(c), _val(R)
+    state_pred = kalman_predict(state, (A_v, b_v, Q_v))
+    state_filt, ll, _ = _kalman_update_cached(state_pred, H_v, c_v, R_v, y, jitter)
+    return state_filt, ll
 end
 
 ## KALMAN SMOOTHER #########################################################################
@@ -100,7 +114,8 @@ function backward_smooth(
     μ_smooth_next, Σ_smooth_next = params(smoothed_next)
 
     # Get dynamics parameters for the transition from step to step+1
-    A, b, Q = calc_params(dyn, step + 1; kwargs...)
+    p = step_eval(dyn, step + 1; kwargs...)
+    A, b, Q = p.A, p.b, p.Q
 
     # Compute predicted distribution if not provided
     if isnothing(predicted)
@@ -271,7 +286,8 @@ function backward_initialise(
     y;
     kwargs...,
 )
-    H, c, R = calc_params(obs, iter; kwargs...)
+    p = step_eval(obs, iter; kwargs...)
+    H, c, R = p.H, p.c, p.R
     R_inv = inv(R)
     λ = H' * R_inv * (y - c)
     Ω = Xt_A_X(R_inv, H)
@@ -300,7 +316,8 @@ function backward_predict(
 )
     λ, Ω = natural_params(state)
     # Use iter + 1 to get transition from x_iter to x_{iter+1}, matching forward filter convention
-    A, b, Q = calc_params(dyn, iter + 1; kwargs...)
+    p = step_eval(dyn, iter + 1; kwargs...)
+    A, b, Q = p.A, p.b, p.Q
     F = cholesky(Q).L
 
     m = λ - Ω * b
@@ -336,7 +353,8 @@ function backward_update(
     kwargs...,
 )
     λ, Ω = natural_params(state)
-    H, c, R = calc_params(obs, iter; kwargs...)
+    p = step_eval(obs, iter; kwargs...)
+    H, c, R = p.H, p.c, p.R
     R_inv = inv(R)
 
     λ̂ = λ + H' * R_inv * (y - c)

@@ -180,7 +180,7 @@ _backward_predictor(::DiscreteFilter) = BackwardDiscretePredictor()
 
 _backward_init_kwargs(::HierarchicalSSM, ::KalmanFilter) = (;)
 function _backward_init_kwargs(model::HierarchicalSSM, ::DiscreteFilter)
-    return (; num_states=length(calc_α0(model.inner_model.prior)))
+    return (; num_states=length(step_eval(model.inner_model.prior).α0))
 end
 
 function _compute_backward_likelihoods(

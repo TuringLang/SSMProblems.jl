@@ -35,3 +35,26 @@ Evaluate a parameter for timestep `t` and unwrap to a plain value. Used by non-g
 code paths that do not need the inactive-tagging machinery.
 """
 _step_eval(p, θ, t, resolved, h) = _val(_step_tagged(p, θ, t, resolved, h))
+
+"""
+    step_eval(component, t::Integer; kwargs...)
+    step_eval(prior::StatePrior; kwargs...)
+
+Evaluate the parameters of a model component at timestep `t` and return a `NamedTuple` of
+plain (unwrapped) values. Keyword arguments are treated as the resolved-controls
+`NamedTuple`. Used by non-gradient algorithm paths; gradient paths go through
+[`step_params`](@ref) directly.
+
+Only valid for components whose parameters do not depend on θ (Fixed/TimeVarying).
+"""
+function step_eval(component, t::Integer; kwargs...)
+    hoist = hoist_static(component, nothing, (;))
+    resolved = NamedTuple(kwargs)
+    return map(_val, step_params(component, nothing, t, resolved, hoist))
+end
+
+function step_eval(prior::StatePrior; kwargs...)
+    hoist = hoist_static(prior, nothing, (;))
+    resolved = NamedTuple(kwargs)
+    return map(_val, step_params(prior, nothing, resolved, hoist))
+end

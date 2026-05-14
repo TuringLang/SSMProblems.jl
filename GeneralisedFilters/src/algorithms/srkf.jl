@@ -41,8 +41,8 @@ SRKF() = SRKalmanFilter()
 function initialise(
     rng::AbstractRNG, prior::GaussianPrior, filter::SRKalmanFilter; kwargs...
 )
-    μ0, Σ0 = calc_initial(prior; kwargs...)
-    return MvNormal(μ0, Σ0)
+    p = step_eval(prior; kwargs...)
+    return MvNormal(p.μ0, p.Σ0)
 end
 
 function predict(
@@ -54,8 +54,8 @@ function predict(
     observation=nothing;
     kwargs...,
 )
-    dyn_params = calc_params(dyn, iter; kwargs...)
-    return srkf_predict(state, dyn_params)
+    p = step_eval(dyn, iter; kwargs...)
+    return srkf_predict(state, (p.A, p.b, p.Q))
 end
 
 function update(
@@ -66,8 +66,8 @@ function update(
     observation::AbstractVector;
     kwargs...,
 )
-    obs_params = calc_params(obs, iter; kwargs...)
-    state, ll = srkf_update(state, obs_params, observation, algo.jitter)
+    p = step_eval(obs, iter; kwargs...)
+    state, ll = srkf_update(state, (p.H, p.c, p.R), observation, algo.jitter)
     return state, ll
 end
 

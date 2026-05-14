@@ -16,16 +16,16 @@ struct OptimalProposal{
 end
 
 function SSMProblems.distribution(prop::OptimalProposal, step::Integer, x, y; kwargs...)
-    # Get parameters
-    dyn_params = calc_params(prop.dyn, step; kwargs...)
-    obs_params = calc_params(prop.obs, step; kwargs...)
-    A, b, Q = dyn_params
+    dyn_p = GeneralisedFilters.step_eval(prop.dyn, step; kwargs...)
+    obs_p = GeneralisedFilters.step_eval(prop.obs, step; kwargs...)
 
     # Predicted state: p(x_t | x_{t-1})
-    state = MvNormal(A * x + b, Q)
+    state = MvNormal(dyn_p.A * x + dyn_p.b, dyn_p.Q)
 
     # Update with observation: p(x_t | x_{t-1}, y_t)
-    state, _ = GeneralisedFilters.kalman_update(state, obs_params, y, nothing) # no jitter
+    state, _ = GeneralisedFilters.kalman_update(
+        state, (obs_p.H, obs_p.c, obs_p.R), y, nothing
+    )
 
     return state
 end
@@ -43,8 +43,6 @@ end
 function SSMProblems.distribution(
     prop::OverdispersedProposal, step::Integer, x, y; kwargs...
 )
-    A, b, Q = calc_params(prop.dyn, step; kwargs...)
-    Q = prop.k * Q  # overdisperse
-    μ = A * x + b
-    return MvNormal(μ, Q)
+    p = GeneralisedFilters.step_eval(prop.dyn, step; kwargs...)
+    return MvNormal(p.A * x + p.b, prop.k * p.Q)
 end

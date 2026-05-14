@@ -76,8 +76,8 @@ function update_with_cache(
     observation::AbstractVector;
     kwargs...,
 )
-    H, c, R = calc_params(obs, iter; kwargs...)
-    return _kalman_update_cached(state, H, c, R, observation, algo.jitter)
+    p = step_eval(obs, iter; kwargs...)
+    return _kalman_update_cached(state, p.H, p.c, p.R, observation, algo.jitter)
 end
 
 ## BACKWARD GRADIENT PROPAGATION ##############################################################
