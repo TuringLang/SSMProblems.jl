@@ -17,8 +17,8 @@
 
     μs = [0.0, 1.0, 2.0]
 
-    prior = HomogeneousDiscretePrior(α0)
-    dyn = HomogeneousDiscreteLatentDynamics(P)
+    prior = DiscretePrior(α0)
+    dyn = DiscreteLatentDynamics(P)
     obs = MixtureObservation(μs)
     model = StateSpaceModel(prior, dyn, obs)
 
@@ -73,7 +73,7 @@ end
     # Run backward predictor
     algo = BackwardDiscretePredictor()
     rng = Random.default_rng()
-    dyn = HomogeneousDiscreteLatentDynamics(P)
+    dyn = DiscreteLatentDynamics(P)
 
     # Initialize at time T and run backward pass
     β = (
@@ -133,8 +133,8 @@ end
     μs = [0.0, 2.0, 4.0]
     obs = MixtureObservation(μs)
 
-    prior = HomogeneousDiscretePrior(α0)
-    dyn = HomogeneousDiscreteLatentDynamics(P)
+    prior = DiscretePrior(α0)
+    dyn = DiscreteLatentDynamics(P)
     model = StateSpaceModel(prior, dyn, obs)
 
     observations = [0.5, 1.8, 3.5, 2.1]
@@ -196,8 +196,8 @@ end
     μs = [0.0, 2.0, 4.0]
     obs = MixtureObservation(μs)
 
-    prior = HomogeneousDiscretePrior(α0)
-    dyn = HomogeneousDiscreteLatentDynamics(P)
+    prior = DiscretePrior(α0)
+    dyn = DiscreteLatentDynamics(P)
     model = StateSpaceModel(prior, dyn, obs)
 
     observations = [0.5, 1.8, 3.5, 2.1]

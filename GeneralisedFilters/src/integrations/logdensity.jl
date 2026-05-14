@@ -176,7 +176,7 @@ A parameterised state-space model that maps parameter vectors to concrete SSMs.
 ```julia
 function build_model(θ, fixed)
     b = θ[1:2]
-    dyn = HomogeneousLinearGaussianLatentDynamics(fixed.A, b, fixed.Q)
+    dyn = LinearGaussianLatentDynamics(fixed.A, b, fixed.Q)
     return StateSpaceModel(fixed.prior, dyn, fixed.obs)
 end
 

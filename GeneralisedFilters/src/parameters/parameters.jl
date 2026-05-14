@@ -85,7 +85,9 @@ Calling `_val` on any other [`AbstractModelParameter`](@ref) is a programming er
 parameters that reach the primitive must already have been resolved by `_step_tagged`.
 """
 _val(x::Fixed) = x.value
-_val(x::AbstractModelParameter) = error(
-    "_val called on an unresolved $(typeof(x)); parameters must be resolved via _step_tagged before reaching the primitive",
-)
+function _val(x::AbstractModelParameter)
+    return error(
+        "_val called on an unresolved $(typeof(x)); parameters must be resolved via _step_tagged before reaching the primitive",
+    )
+end
 _val(x) = x

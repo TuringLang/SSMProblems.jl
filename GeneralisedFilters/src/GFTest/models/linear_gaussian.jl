@@ -39,54 +39,6 @@ end
 
 ## NON-HOMOGENEOUS LINEAR GAUSSIAN MODEL FOR TESTING ####
 
-struct NonHomogeneousLinearGaussianLatentDynamics{
-    AT<:AbstractVector,bT<:AbstractVector,QT<:AbstractVector
-} <: GeneralisedFilters.LinearGaussianLatentDynamics
-    As::AT
-    bs::bT
-    Qs::QT
-end
-
-function GeneralisedFilters.calc_A(
-    dyn::NonHomogeneousLinearGaussianLatentDynamics, step::Integer; kwargs...
-)
-    return dyn.As[step]
-end
-function GeneralisedFilters.calc_b(
-    dyn::NonHomogeneousLinearGaussianLatentDynamics, step::Integer; kwargs...
-)
-    return dyn.bs[step]
-end
-function GeneralisedFilters.calc_Q(
-    dyn::NonHomogeneousLinearGaussianLatentDynamics, step::Integer; kwargs...
-)
-    return dyn.Qs[step]
-end
-
-struct NonHomogeneousLinearGaussianObservationProcess{
-    HT<:AbstractVector,cT<:AbstractVector,RT<:AbstractVector
-} <: GeneralisedFilters.LinearGaussianObservationProcess
-    Hs::HT
-    cs::cT
-    Rs::RT
-end
-
-function GeneralisedFilters.calc_H(
-    obs::NonHomogeneousLinearGaussianObservationProcess, step::Integer; kwargs...
-)
-    return obs.Hs[step]
-end
-function GeneralisedFilters.calc_c(
-    obs::NonHomogeneousLinearGaussianObservationProcess, step::Integer; kwargs...
-)
-    return obs.cs[step]
-end
-function GeneralisedFilters.calc_R(
-    obs::NonHomogeneousLinearGaussianObservationProcess, step::Integer; kwargs...
-)
-    return obs.Rs[step]
-end
-
 function create_nonhomogeneous_linear_gaussian_model(
     rng::AbstractRNG,
     Dx::Integer,
@@ -98,17 +50,25 @@ function create_nonhomogeneous_linear_gaussian_model(
 ) where {T<:Real}
     μ0 = rand(rng, T, Dx)
     Σ0 = rand_cov(rng, T, Dx)
-    prior = GeneralisedFilters.HomogeneousGaussianPrior(μ0, PDMat(Σ0))
+    prior = GaussianPrior(μ0, PDMat(Σ0))
 
     As = [rand(rng, T, Dx, Dx) for _ in 1:T_max]
     bs = [rand(rng, T, Dx) for _ in 1:T_max]
     Qs = [PDMat(rand_cov(rng, T, Dx; scale=process_noise_scale)) for _ in 1:T_max]
-    dyn = NonHomogeneousLinearGaussianLatentDynamics(As, bs, Qs)
+    dyn = LinearGaussianLatentDynamics(
+        TimeVarying((t, _) -> As[t]),
+        TimeVarying((t, _) -> bs[t]),
+        TimeVarying((t, _) -> Qs[t]),
+    )
 
     Hs = [rand(rng, T, Dy, Dx) for _ in 1:T_max]
     cs = [rand(rng, T, Dy) for _ in 1:T_max]
     Rs = [PDMat(rand_cov(rng, T, Dy; scale=obs_noise_scale)) for _ in 1:T_max]
-    obs = NonHomogeneousLinearGaussianObservationProcess(Hs, cs, Rs)
+    obs = LinearGaussianObservationProcess(
+        TimeVarying((t, _) -> Hs[t]),
+        TimeVarying((t, _) -> cs[t]),
+        TimeVarying((t, _) -> Rs[t]),
+    )
 
     return SSMProblems.StateSpaceModel(prior, dyn, obs)
 end
@@ -169,9 +129,15 @@ function _compute_joint_nonhomogeneous(model, T::Integer)
 end
 
 function _compute_joint(model, T::Integer)
-    (; μ0, Σ0) = model.prior
-    (; A, b, Q) = model.dyn
-    (; H, c, R) = model.obs
+    # _compute_joint assumes a fully homogeneous model — all parameters are Fixed.
+    μ0 = GeneralisedFilters._val(model.prior.μ0)
+    Σ0 = GeneralisedFilters._val(model.prior.Σ0)
+    A = GeneralisedFilters._val(model.dyn.A)
+    b = GeneralisedFilters._val(model.dyn.b)
+    Q = GeneralisedFilters._val(model.dyn.Q)
+    H = GeneralisedFilters._val(model.obs.H)
+    c = GeneralisedFilters._val(model.obs.c)
+    R = GeneralisedFilters._val(model.obs.R)
     Dy, Dx = size(H)
 
     # Let Z = [X0, X1, ..., XT, Y1, ..., YT] be the joint state vector

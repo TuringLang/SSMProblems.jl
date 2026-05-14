@@ -14,36 +14,21 @@
     dynamics, this model can be used in Rao-Blackwellised settings.
 """
 
-export InnerDynamics, create_dummy_linear_gaussian_model, with_inner_drift
+export InnerDriftFn, create_dummy_linear_gaussian_model, with_inner_drift
 
 """
-    Inner dynamics of the dummy linear Gaussian model.
+    InnerDriftFn(b, C)
 
-    Linear Gaussian dynamics conditonal on the (previous) outer state (u_t), defined by:
-    x_{t+1} = A x_t + b + C u_t + w_t
+Callable used as a [`TimeVarying`](@ref) parameter for the inner-dynamics drift
+`b + C * c.prev_outer`. Exposes `b` and `C` as fields so that helpers like
+[`with_inner_drift`](@ref) can rebuild the model with a different drift while preserving
+`C`.
 """
-struct InnerDynamics{
-    AT<:AbstractMatrix,bT<:AbstractVector,CT<:AbstractMatrix,QT<:AbstractMatrix
-} <: LinearGaussianLatentDynamics
-    A::AT
-    b::bT
+struct InnerDriftFn{T<:AbstractVector,CT<:AbstractMatrix}
+    b::T
     C::CT
-    Q::QT
 end
-
-struct InnerPrior{XT<:AbstractVector,ΣT<:AbstractMatrix} <: GaussianPrior
-    μ0::XT
-    Σ0::ΣT
-end
-
-# CPU methods
-GeneralisedFilters.calc_μ0(prior::InnerPrior; kwargs...) = prior.μ0
-GeneralisedFilters.calc_Σ0(prior::InnerPrior; kwargs...) = prior.Σ0
-GeneralisedFilters.calc_A(dyn::InnerDynamics, ::Integer; kwargs...) = dyn.A
-function GeneralisedFilters.calc_b(dyn::InnerDynamics, ::Integer; prev_outer, kwargs...)
-    return dyn.b + dyn.C * prev_outer
-end
-GeneralisedFilters.calc_Q(dyn::InnerDynamics, ::Integer; kwargs...) = dyn.Q
+(f::InnerDriftFn)(t, c) = f.b + f.C * c.prev_outer
 
 function create_dummy_linear_gaussian_model(
     rng::AbstractRNG,
@@ -76,10 +61,6 @@ function create_dummy_linear_gaussian_model(
     c = rand(rng, T, Dy)
     R = rand_cov(rng, T, Dy; scale=obs_noise_scale)
 
-    # Create full model
-    # full_model = create_homogeneous_linear_gaussian_model(
-    #     μ0, PDMat(Σ0), A, b, PDMat(Q), H, c, PDMat(R)
-    # )
     full_model = if static_arrays
         create_homogeneous_linear_gaussian_model(
             SVector{D_outer + D_inner,T}(μ0),
@@ -96,57 +77,58 @@ function create_dummy_linear_gaussian_model(
     end
 
     outer_prior, outer_dyn = if static_arrays
-        prior = HomogeneousGaussianPrior(
+        prior = GaussianPrior(
             SVector{D_outer,T}(μ0[1:D_outer]),
             PDMat(SMatrix{D_outer,D_outer,T}(Σ0[1:D_outer, 1:D_outer])),
         )
-        dyn = HomogeneousLinearGaussianLatentDynamics(
+        dyn = LinearGaussianLatentDynamics(
             SMatrix{D_outer,D_outer,T}(A[1:D_outer, 1:D_outer]),
             SVector{D_outer,T}(b[1:D_outer]),
             PDMat(SMatrix{D_outer,D_outer,T}(Q[1:D_outer, 1:D_outer])),
         )
         prior, dyn
     else
-        prior = HomogeneousGaussianPrior(μ0[1:D_outer], PDMat(Σ0[1:D_outer, 1:D_outer]))
-        dyn = HomogeneousLinearGaussianLatentDynamics(
+        prior = GaussianPrior(μ0[1:D_outer], PDMat(Σ0[1:D_outer, 1:D_outer]))
+        dyn = LinearGaussianLatentDynamics(
             A[1:D_outer, 1:D_outer], b[1:D_outer], PDMat(Q[1:D_outer, 1:D_outer])
         )
         prior, dyn
     end
 
     inner_prior, inner_dyn = if static_arrays
-        prior = InnerPrior(
-            SVector{D_inner,T}(μ0[(D_outer + 1):end]),
-            PDMat(SMatrix{D_inner,D_inner,T}(Σ0[(D_outer + 1):end, (D_outer + 1):end])),
-        )
-        dyn = InnerDynamics(
-            SMatrix{D_inner,D_inner,T}(A[(D_outer + 1):end, (D_outer + 1):end]),
-            SVector{D_inner,T}(b[(D_outer + 1):end]),
-            SMatrix{D_inner,D_outer,T}(A[(D_outer + 1):end, 1:D_outer]),
-            PDMat(SMatrix{D_inner,D_inner,T}(Q[(D_outer + 1):end, (D_outer + 1):end])),
+        A_in = SMatrix{D_inner,D_inner,T}(A[(D_outer + 1):end, (D_outer + 1):end])
+        b_in = SVector{D_inner,T}(b[(D_outer + 1):end])
+        C_in = SMatrix{D_inner,D_outer,T}(A[(D_outer + 1):end, 1:D_outer])
+        Q_in = PDMat(SMatrix{D_inner,D_inner,T}(Q[(D_outer + 1):end, (D_outer + 1):end]))
+        μ0_in = SVector{D_inner,T}(μ0[(D_outer + 1):end])
+        Σ0_in = PDMat(SMatrix{D_inner,D_inner,T}(Σ0[(D_outer + 1):end, (D_outer + 1):end]))
+        prior = GaussianPrior(μ0_in, Σ0_in)
+        dyn = LinearGaussianLatentDynamics(
+            A_in, TimeVarying(InnerDriftFn(b_in, C_in)), Q_in
         )
         prior, dyn
     else
-        prior = InnerPrior(
+        A_in = A[(D_outer + 1):end, (D_outer + 1):end]
+        b_in = b[(D_outer + 1):end]
+        C_in = A[(D_outer + 1):end, 1:D_outer]
+        Q_in = PDMat(Q[(D_outer + 1):end, (D_outer + 1):end])
+        prior = GaussianPrior(
             μ0[(D_outer + 1):end], PDMat(Σ0[(D_outer + 1):end, (D_outer + 1):end])
         )
-        dyn = InnerDynamics(
-            A[(D_outer + 1):end, (D_outer + 1):end],
-            b[(D_outer + 1):end],
-            A[(D_outer + 1):end, 1:D_outer],
-            PDMat(Q[(D_outer + 1):end, (D_outer + 1):end]),
+        dyn = LinearGaussianLatentDynamics(
+            A_in, TimeVarying(InnerDriftFn(b_in, C_in)), Q_in
         )
         prior, dyn
     end
 
     obs = if static_arrays
-        HomogeneousLinearGaussianObservationProcess(
+        LinearGaussianObservationProcess(
             SMatrix{Dy,D_inner,T}(H[:, (D_outer + 1):end]),
             SVector{Dy,T}(c),
             PDMat(SMatrix{Dy,Dy,T}(R)),
         )
     else
-        HomogeneousLinearGaussianObservationProcess(H[:, (D_outer + 1):end], c, PDMat(R))
+        LinearGaussianObservationProcess(H[:, (D_outer + 1):end], c, PDMat(R))
     end
     hier_model = HierarchicalSSM(outer_prior, outer_dyn, inner_prior, inner_dyn, obs)
 
@@ -156,13 +138,17 @@ end
 """
     with_inner_drift(model::HierarchicalSSM, b)
 
-Return a copy of a dummy linear Gaussian `HierarchicalSSM` with inner drift replaced by `b`.
-The helper preserves the existing inner drift container type (e.g. `Vector`/`SVector`).
+Return a copy of a dummy linear Gaussian `HierarchicalSSM` with the inner-dynamics drift
+constant replaced by `b`. Preserves the original `C` matrix from [`InnerDriftFn`](@ref).
 """
 function with_inner_drift(model::HierarchicalSSM, b::AbstractVector)
     inner_dyn = model.inner_model.dyn
-    b_typed = _convert_like(b, inner_dyn.b)
-    new_inner_dyn = InnerDynamics(inner_dyn.A, b_typed, inner_dyn.C, inner_dyn.Q)
+    drift = inner_dyn.b.f
+    b_typed = _convert_like(b, drift.b)
+    new_drift = InnerDriftFn(b_typed, drift.C)
+    new_inner_dyn = LinearGaussianLatentDynamics(
+        inner_dyn.A, TimeVarying(new_drift), inner_dyn.Q
+    )
     return HierarchicalSSM(
         model.outer_prior,
         model.outer_dyn,

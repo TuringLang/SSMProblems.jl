@@ -14,20 +14,7 @@
     with K_outer * K_inner states.
 """
 
-export InnerDiscreteDynamics, DiscreteGaussianObservation, create_dummy_discrete_model
-
-"""
-    InnerDiscreteDynamics
-
-Discrete dynamics for the inner state of a hierarchical model.
-The transition matrix P_inner[i,j] = p(z_t = j | z_{t-1} = i).
-Currently independent of the outer state.
-"""
-struct InnerDiscreteDynamics{PT<:AbstractMatrix} <: DiscreteLatentDynamics
-    P::PT
-end
-
-GeneralisedFilters.calc_P(dyn::InnerDiscreteDynamics, ::Integer; kwargs...) = dyn.P
+export DiscreteGaussianObservation, create_dummy_discrete_model
 
 """
     DiscreteGaussianObservation
@@ -115,10 +102,10 @@ function create_dummy_discrete_model(
     σ²_obs = fill(obs_noise^2, K_inner)
 
     # Create hierarchical model
-    outer_prior = HomogeneousDiscretePrior(α0_outer)
-    outer_dyn = HomogeneousDiscreteLatentDynamics(P_outer)
-    inner_prior = HomogeneousDiscretePrior(α0_inner)
-    inner_dyn = InnerDiscreteDynamics(P_inner)
+    outer_prior = DiscretePrior(α0_outer)
+    outer_dyn = DiscreteLatentDynamics(P_outer)
+    inner_prior = DiscretePrior(α0_inner)
+    inner_dyn = DiscreteLatentDynamics(P_inner)
     obs = DiscreteGaussianObservation(μ_obs, σ²_obs)
 
     hier_model = HierarchicalSSM(outer_prior, outer_dyn, inner_prior, inner_dyn, obs)
@@ -143,8 +130,8 @@ function create_dummy_discrete_model(
         end
     end
 
-    joint_prior = HomogeneousDiscretePrior(α0_joint)
-    joint_dyn = HomogeneousDiscreteLatentDynamics(P_joint)
+    joint_prior = DiscretePrior(α0_joint)
+    joint_dyn = DiscreteLatentDynamics(P_joint)
     joint_obs = JointDiscreteObservation(μ_obs, σ²_obs, K_inner)
 
     joint_model = StateSpaceModel(joint_prior, joint_dyn, joint_obs)
