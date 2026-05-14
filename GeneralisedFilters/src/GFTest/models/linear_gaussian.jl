@@ -333,12 +333,12 @@ function setup_gradient_test(rng::AbstractRNG; D::Int=2, T::Int=3)
 end
 
 """
-    make_nll_func(model, ys, param::Symbol)
+    make_ll_func(model, ys, param::Symbol)
 
-Create a function that computes NLL with one parameter varied.
-Returns a function taking a vector and returning scalar NLL.
+Create a function that computes the log-likelihood with one parameter varied.
+Returns a function taking a vector and returning scalar log-likelihood.
 """
-function make_nll_func(model, ys, param::Symbol)
+function make_ll_func(model, ys, param::Symbol)
     pr = SSMProblems.prior(model)
     dy = SSMProblems.dyn(model)
     ob = SSMProblems.obs(model)
@@ -369,7 +369,7 @@ function make_nll_func(model, ys, param::Symbol)
                 μ0, Σ0, A, b, Q_new, H, c, R
             )
             _, ll = GeneralisedFilters.filter(m, GeneralisedFilters.KF(), ys)
-            return -ll
+            return ll
         end
     elseif param == :R
         return function (x)
@@ -378,7 +378,7 @@ function make_nll_func(model, ys, param::Symbol)
                 μ0, Σ0, A, b, Q, H, c, R_new
             )
             _, ll = GeneralisedFilters.filter(m, GeneralisedFilters.KF(), ys)
-            return -ll
+            return ll
         end
     elseif param == :A
         return function (x)
@@ -387,7 +387,7 @@ function make_nll_func(model, ys, param::Symbol)
                 μ0, Σ0, A_new, b, Q, H, c, R
             )
             _, ll = GeneralisedFilters.filter(m, GeneralisedFilters.KF(), ys)
-            return -ll
+            return ll
         end
     elseif param == :b
         return function (x)
@@ -395,7 +395,7 @@ function make_nll_func(model, ys, param::Symbol)
                 μ0, Σ0, A, x, Q, H, c, R
             )
             _, ll = GeneralisedFilters.filter(m, GeneralisedFilters.KF(), ys)
-            return -ll
+            return ll
         end
     elseif param == :H
         return function (x)
@@ -404,7 +404,7 @@ function make_nll_func(model, ys, param::Symbol)
                 μ0, Σ0, A, b, Q, H_new, c, R
             )
             _, ll = GeneralisedFilters.filter(m, GeneralisedFilters.KF(), ys)
-            return -ll
+            return ll
         end
     elseif param == :c
         return function (x)
@@ -412,7 +412,7 @@ function make_nll_func(model, ys, param::Symbol)
                 μ0, Σ0, A, b, Q, H, x, R
             )
             _, ll = GeneralisedFilters.filter(m, GeneralisedFilters.KF(), ys)
-            return -ll
+            return ll
         end
     elseif param == :μ0
         return function (x)
@@ -420,7 +420,7 @@ function make_nll_func(model, ys, param::Symbol)
                 x, Σ0, A, b, Q, H, c, R
             )
             _, ll = GeneralisedFilters.filter(m, GeneralisedFilters.KF(), ys)
-            return -ll
+            return ll
         end
     elseif param == :Σ0
         return function (x)
@@ -429,7 +429,7 @@ function make_nll_func(model, ys, param::Symbol)
                 μ0, Σ0_new, A, b, Q, H, c, R
             )
             _, ll = GeneralisedFilters.filter(m, GeneralisedFilters.KF(), ys)
-            return -ll
+            return ll
         end
     else
         error("Unknown parameter: $param")

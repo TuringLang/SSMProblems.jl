@@ -234,12 +234,11 @@ function Mooncake.rrule!!(
 
         for t in n:-1:1
             cache = caches[t]
-            s = -Δll  # Convert from LL gradient to NLL gradient convention
 
-            # Observation parameter gradients (as full matrices)
-            grad_c = s * gradient_c(∂μ, cache)
-            grad_H = s * gradient_H(∂μ, ∂Σ, cache, cache.Σ_pred, Hs_p[t])
-            grad_R = s * gradient_R(∂μ, ∂Σ, cache)
+            # Observation parameter gradients (∂ℓ/∂·, scaled by Δll)
+            grad_c = Δll * gradient_c(∂μ, cache)
+            grad_H = Δll * gradient_H(∂μ, ∂Σ, cache, cache.Σ_pred, Hs_p[t])
+            grad_R = Δll * gradient_R(∂μ, ∂Σ, cache)
 
             _update_vector_tangent!(t_cs, t, grad_c, cs_p[t])
             _update_vector_tangent!(t_Hs, t, grad_H, Hs_p[t])
@@ -248,10 +247,10 @@ function Mooncake.rrule!!(
             # Propagate through update step
             ∂μ_pred, ∂Σ_pred = backward_gradient_update(∂μ, ∂Σ, cache, Hs_p[t], Rs_p[t])
 
-            # Dynamics parameter gradients
-            grad_b = s * gradient_b(∂μ_pred)
-            grad_A = s * gradient_A(∂μ_pred, ∂Σ_pred, μ_prevs[t], Σ_prevs[t], As_p[t])
-            grad_Q = s * gradient_Q(∂Σ_pred)
+            # Dynamics parameter gradients (∂ℓ/∂·, scaled by Δll)
+            grad_b = Δll * gradient_b(∂μ_pred)
+            grad_A = Δll * gradient_A(∂μ_pred, ∂Σ_pred, μ_prevs[t], Σ_prevs[t], As_p[t])
+            grad_Q = Δll * gradient_Q(∂Σ_pred)
 
             _update_vector_tangent!(t_bs, t, grad_b, bs_p[t])
             _update_vector_tangent!(t_As, t, grad_A, As_p[t])
@@ -261,9 +260,9 @@ function Mooncake.rrule!!(
             ∂μ, ∂Σ = backward_gradient_predict(∂μ_pred, ∂Σ_pred, As_p[t])
         end
 
-        # Initial state gradients (scaled by -Δll for LL convention)
-        grad_μ0 = -Δll * ∂μ
-        grad_Σ0 = -Δll * ∂Σ
+        # Initial state gradients (∂ℓ/∂·, scaled by Δll)
+        grad_μ0 = Δll * ∂μ
+        grad_Σ0 = Δll * ∂Σ
 
         # Handle μ0: check if mutable or immutable
         rdata_μ0 = if t_μ0 isa NoFData

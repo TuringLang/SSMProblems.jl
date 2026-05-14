@@ -50,7 +50,7 @@ function ChainRulesCore.rrule(
     end
 
     function kf_loglikelihood_pullback(Δll)
-        # Backward pass: compute NLL gradients, then negate and scale by Δll
+        # Backward pass: accumulate log-likelihood gradients, then scale by Δll
         ∂μ = zero(μ0)
         ∂Σ = zero(As[1])
 
@@ -65,7 +65,7 @@ function ChainRulesCore.rrule(
             H, R = Hs[t], Rs[t]
             cache = caches[t]
 
-            # Obs parameter gradients (NLL convention)
+            # Obs parameter gradients (∂ℓ/∂·)
             ∂cs[t] = gradient_c(∂μ, cache)
             ∂Hs[t] = gradient_H(∂μ, ∂Σ, cache, cache.Σ_pred, Hs[t])
             ∂Rs[t] = gradient_R(∂μ, ∂Σ, cache)
@@ -73,7 +73,7 @@ function ChainRulesCore.rrule(
             # Propagate through update step
             ∂μ_pred, ∂Σ_pred = backward_gradient_update(∂μ, ∂Σ, cache, H, R)
 
-            # Dynamics parameter gradients (NLL convention)
+            # Dynamics parameter gradients (∂ℓ/∂·)
             ∂bs[t] = gradient_b(∂μ_pred)
             ∂As[t] = gradient_A(∂μ_pred, ∂Σ_pred, μ_prevs[t], Σ_prevs[t], As[t])
             ∂Qs[t] = gradient_Q(∂Σ_pred)
@@ -82,16 +82,11 @@ function ChainRulesCore.rrule(
             ∂μ, ∂Σ = backward_gradient_predict(∂μ_pred, ∂Σ_pred, As[t])
         end
 
-        # Initial state gradients
-        ∂μ0_nll = ∂μ
-        ∂Σ0_nll = ∂Σ
-
-        # Convert NLL gradients → LL gradients and scale by Δll
-        s = -Δll
+        s = Δll
         return (
             NoTangent(),
-            s * ∂μ0_nll,
-            s * ∂Σ0_nll,
+            s * ∂μ,
+            s * ∂Σ,
             s .* ∂As,
             s .* ∂bs,
             s .* ∂Qs,

@@ -90,34 +90,36 @@ Propagate gradients backward through the Kalman update step (filtered → predic
 This implements equations 8-9 from Parellier et al., computing the gradients with respect
 to the predicted state from the gradients with respect to the filtered state.
 
+Inputs and outputs are log-likelihood gradients (∂ℓ/∂·).
+
 # Arguments
-- `∂μ_filt`: Gradient of loss w.r.t. filtered mean ∂L/∂x̂_{n|n}
-- `∂Σ_filt`: Gradient of loss w.r.t. filtered covariance ∂L/∂P_{n|n}
+- `∂μ_filt`: Gradient of log-likelihood w.r.t. filtered mean ∂ℓ/∂x̂_{n|n}
+- `∂Σ_filt`: Gradient of log-likelihood w.r.t. filtered covariance ∂ℓ/∂P_{n|n}
 - `cache`: `KalmanGradientCache` from the forward pass
 - `H`: Observation matrix at this time step
 - `R`: Observation noise covariance at this time step
 
 # Returns
-A tuple `(∂μ_pred, ∂Σ_pred)` containing gradients w.r.t. the predicted state.
+A tuple `(∂μ_pred, ∂Σ_pred)` containing log-likelihood gradients w.r.t. the predicted state.
 """
 function backward_gradient_update(
     ∂μ_filt::AbstractVector, ∂Σ_filt::AbstractMatrix, cache::KalmanGradientCache, H, R
 )
     z, S, I_KH = cache.z, cache.S, cache.I_KH
 
-    # NLL local derivatives (standard convention with 1/2 factor)
+    # Local log-likelihood derivatives (standard 1/2 factor)
     S_inv_z = S \ z
-    ∂l_∂μ_pred = -H' * S_inv_z
-    ∂l_∂Σ_pred = 0.5 * (H' * (S \ H) - H' * (S_inv_z * S_inv_z') * H)
+    ∂ℓ_∂μ_pred = H' * S_inv_z
+    ∂ℓ_∂Σ_pred = -0.5 * (H' * (S \ H) - H' * (S_inv_z * S_inv_z') * H)
 
-    # Equation 8: ∂L/∂μ_pred = (I-KH)' * ∂L/∂μ_filt + ∂l/∂μ_pred
-    ∂μ_pred = I_KH' * ∂μ_filt + ∂l_∂μ_pred
+    # Equation 8: ∂ℓ/∂μ_pred = (I-KH)' * ∂ℓ/∂μ_filt + local term
+    ∂μ_pred = I_KH' * ∂μ_filt + ∂ℓ_∂μ_pred
 
-    # Equation 9: ∂L/∂Σ_pred = (I-KH)' * [∂L/∂Σ_filt + cross_term] * (I-KH) + ∂l/∂Σ_pred
+    # Equation 9: ∂ℓ/∂Σ_pred = (I-KH)' * [∂ℓ/∂Σ_filt + cross_term] * (I-KH) + local term
     R_inv_z = R \ z
     cross_term = 0.5 * (∂μ_filt * (R_inv_z' * H) + (H' * R_inv_z) * ∂μ_filt')
     inner = ∂Σ_filt + cross_term
-    ∂Σ_pred = I_KH' * inner * I_KH + ∂l_∂Σ_pred
+    ∂Σ_pred = I_KH' * inner * I_KH + ∂ℓ_∂Σ_pred
 
     return ∂μ_pred, ∂Σ_pred
 end
@@ -130,12 +132,12 @@ Propagate gradients backward through the Kalman predict step (predicted → prev
 This implements equations 10-11 from Parellier et al.
 
 # Arguments
-- `∂μ_pred`: Gradient of loss w.r.t. predicted mean ∂L/∂x̂_{n|n-1}
-- `∂Σ_pred`: Gradient of loss w.r.t. predicted covariance ∂L/∂P_{n|n-1}
+- `∂μ_pred`: Gradient of log-likelihood w.r.t. predicted mean ∂ℓ/∂x̂_{n|n-1}
+- `∂Σ_pred`: Gradient of log-likelihood w.r.t. predicted covariance ∂ℓ/∂P_{n|n-1}
 - `A`: Dynamics matrix at this time step
 
 # Returns
-A tuple `(∂μ_filt_prev, ∂Σ_filt_prev)` containing gradients w.r.t. the previous filtered state.
+A tuple `(∂μ_filt_prev, ∂Σ_filt_prev)` containing log-likelihood gradients w.r.t. the previous filtered state.
 """
 function backward_gradient_predict(∂μ_pred::AbstractVector, ∂Σ_pred::AbstractMatrix, A)
     ∂μ_filt_prev = A' * ∂μ_pred       # Equation 10
@@ -148,9 +150,9 @@ end
 """
     gradient_Q(∂Σ_pred)
 
-Compute gradient of NLL w.r.t. process noise covariance Q.
+Compute gradient of log-likelihood w.r.t. process noise covariance Q.
 
-Implements equation 13 from Parellier et al.: ∂L/∂Q = ∂L/∂P_{n|n-1}
+Implements equation 13 from Parellier et al.: ∂ℓ/∂Q = ∂ℓ/∂P_{n|n-1}
 """
 function gradient_Q(∂Σ_pred::AbstractMatrix)
     return ∂Σ_pred
@@ -159,7 +161,7 @@ end
 """
     gradient_R(∂μ_filt, ∂Σ_filt, cache)
 
-Compute gradient of NLL w.r.t. observation noise covariance R.
+Compute gradient of log-likelihood w.r.t. observation noise covariance R.
 
 Implements equation 14 from Parellier et al.
 """
@@ -169,31 +171,31 @@ function gradient_R(
     z, S, K = cache.z, cache.S, cache.K
     S_inv_z = S \ z
 
-    # Local NLL derivative: ∂l/∂R = 0.5 * (S⁻¹ - S⁻¹zz'S⁻¹)
-    ∂l_∂R = 0.5 * (inv(S) - S_inv_z * S_inv_z')
+    # Local log-likelihood derivative: ∂ℓ/∂R = -0.5 * (S⁻¹ - S⁻¹zz'S⁻¹)
+    ∂ℓ_∂R = -0.5 * (inv(S) - S_inv_z * S_inv_z')
 
-    # Equation 14: ∂L/∂R = K'*∂L/∂Σ_filt*K - cross_term + ∂l/∂R
+    # Equation 14: ∂ℓ/∂R = K'*∂ℓ/∂Σ_filt*K - cross_term + local term
     cross_term = 0.5 * (K' * ∂μ_filt * S_inv_z' + S_inv_z * ∂μ_filt' * K)
-    return K' * ∂Σ_filt * K - cross_term + ∂l_∂R
+    return K' * ∂Σ_filt * K - cross_term + ∂ℓ_∂R
 end
 
 """
     gradient_y(∂μ_filt, cache)
 
-Compute gradient of NLL w.r.t. observation y.
+Compute gradient of log-likelihood w.r.t. observation y.
 
-Implements equation 12 from Parellier et al.: ∂L/∂y = K'*∂L/∂μ_filt + ∂l/∂y
+Implements equation 12 from Parellier et al.: ∂ℓ/∂y = K'*∂ℓ/∂μ_filt + local term
 """
 function gradient_y(∂μ_filt::AbstractVector, cache::KalmanGradientCache)
     z, S, K = cache.z, cache.S, cache.K
-    ∂l_∂y = S \ z
-    return K' * ∂μ_filt + ∂l_∂y
+    ∂ℓ_∂y = -(S \ z)
+    return K' * ∂μ_filt + ∂ℓ_∂y
 end
 
 """
     gradient_A(∂μ_pred, ∂Σ_pred, μ_prev, Σ_prev, A)
 
-Compute gradient of NLL w.r.t. dynamics matrix A.
+Compute gradient of log-likelihood w.r.t. dynamics matrix A.
 
 Derived via chain rule through μ_pred = A*μ_prev + b and Σ_pred = A*Σ_prev*A' + Q.
 """
@@ -207,7 +209,7 @@ end
 """
     gradient_b(∂μ_pred)
 
-Compute gradient of NLL w.r.t. dynamics offset b.
+Compute gradient of log-likelihood w.r.t. dynamics offset b.
 
 Derived via chain rule through μ_pred = A*μ_prev + b.
 """
@@ -218,11 +220,11 @@ end
 """
     gradient_H(∂μ_filt, ∂Σ_filt, cache, Σ_pred, H)
 
-Compute gradient of NLL w.r.t. observation matrix H.
+Compute gradient of log-likelihood w.r.t. observation matrix H.
 
 Derived via chain rule using the information form P_filt⁻¹ = P_pred⁻¹ + H'R⁻¹H to decouple
 P_filt from K, then tracing H's effect through:
-- NLL local term (via z and S)
+- log-likelihood local term (via z and S)
 - Filtered mean (via z = y - Hμ_pred - c, and K = P_filt H' R⁻¹)
 - Filtered covariance (via the information form)
 """
@@ -236,8 +238,8 @@ function gradient_H(
     S_inv = inv(S)
     P_filt = I_KH * Σ_pred
 
-    # Local NLL derivative: l = 0.5*(log|S| + z'S⁻¹z)
-    ∂l_∂H = S_inv * H * Σ_pred - S_inv_z * μ_pred' - (S_inv_z * S_inv_z') * H * Σ_pred
+    # Local log-likelihood derivative: ℓ = -0.5*(log|S| + z'S⁻¹z)
+    ∂ℓ_∂H = -(S_inv * H * Σ_pred - S_inv_z * μ_pred' - (S_inv_z * S_inv_z') * H * Σ_pred)
 
     # Contribution through filtered mean:
     # δμ_filt = P_filt*δH'*S⁻¹*z - K*δH*μ_filt
@@ -246,18 +248,18 @@ function gradient_H(
     # Contribution through filtered covariance (information form)
     ∂via_Σ = -2 * K' * ∂Σ_filt * P_filt
 
-    return ∂l_∂H + ∂via_μ + ∂via_Σ
+    return ∂ℓ_∂H + ∂via_μ + ∂via_Σ
 end
 
 """
     gradient_c(∂μ_filt, cache)
 
-Compute gradient of NLL w.r.t. observation offset c.
+Compute gradient of log-likelihood w.r.t. observation offset c.
 
 Derived via chain rule through z = y - H*μ_pred - c.
 """
 function gradient_c(∂μ_filt::AbstractVector, cache::KalmanGradientCache)
     z, S, K = cache.z, cache.S, cache.K
-    ∂l_∂c = -(S \ z)  # ∂l/∂z * ∂z/∂c = -∂l/∂z
-    return ∂l_∂c - K' * ∂μ_filt
+    ∂ℓ_∂c = S \ z  # ∂z/∂c = -1, ∂ℓ/∂z = -(S\z), so ∂ℓ/∂c = S\z
+    return ∂ℓ_∂c - K' * ∂μ_filt
 end
