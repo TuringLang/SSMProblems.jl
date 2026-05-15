@@ -1,5 +1,6 @@
 using LogDensityProblems: LogDensityProblems
 import Distributions: logpdf
+import PDMats: AbstractPDMat, PDMat
 
 export trajectory_logdensity, inner_loglikelihood, kf_loglikelihood
 export ParameterisedSSM, SSMParameterLogDensity
@@ -126,37 +127,20 @@ end
     kf_loglikelihood(μ0, Σ0, As, bs, Qs, Hs, cs, Rs, ys)
 
 Compute the marginal log-likelihood of observations under a linear-Gaussian model via the
-Kalman filter forward pass.
-
-Accepts PDMat natively for `Σ0`, `Qs`, `Rs`. A `ChainRulesCore.rrule` is registered for this
-function to enable efficient reverse-mode AD gradients using the analytical backward recursion
-from `kalman_gradient.jl`.
-
-# Arguments
-- `μ0`: Initial mean vector
-- `Σ0`: Initial covariance (AbstractPDMat or AbstractMatrix)
-- `As`: Vector of transition matrices, one per timestep
-- `bs`: Vector of transition offsets, one per timestep
-- `Qs`: Vector of process noise covariances, one per timestep
-- `Hs`: Vector of observation matrices, one per timestep
-- `cs`: Vector of observation offsets, one per timestep
-- `Rs`: Vector of observation noise covariances, one per timestep
-- `ys`: Vector of observations
-
-# Returns
-Total log-likelihood: log p(y₁:T) = Σ_t log p(yₜ | y₁:ₜ₋₁)
+Kalman filter forward pass. Plain Julia — Mooncake reverse-mode AD traces through the loop
+and uses the rrule!! registered on `_kalman_step` for the per-step analytical gradients.
 """
 function kf_loglikelihood(μ0, Σ0, As, bs, Qs, Hs, cs, Rs, ys, jitter=nothing)
     T = length(ys)
-    state = MvNormal(μ0, Σ0)
+    μ = μ0
+    Σ = Σ0 isa AbstractPDMat ? Σ0 : PDMat(Σ0)
     ll = zero(eltype(μ0))
-
     for t in 1:T
-        state = kalman_predict(state, (As[t], bs[t], Qs[t]))
-        state, ll_inc, _ = _kalman_update_cached(state, Hs[t], cs[t], Rs[t], ys[t], jitter)
+        μ, Σ, ll_inc = _kalman_step(
+            μ, Σ, As[t], bs[t], Qs[t], Hs[t], cs[t], Rs[t], ys[t], jitter
+        )
         ll += ll_inc
     end
-
     return ll
 end
 

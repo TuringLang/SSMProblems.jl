@@ -1,5 +1,5 @@
 import PDMats: PDMat, X_A_Xt, Xt_A_X, X_invA_Xt, Xt_invA_X
-import LinearAlgebra: Symmetric
+import LinearAlgebra: Symmetric, dot, logdet
 
 export KalmanFilter, KF, KalmanSmoother, KS
 export BackwardInformationPredictor
@@ -77,19 +77,44 @@ function update(
     return state, ll
 end
 
-"""
-    _kalman_step(state, A, b, Q, H, c, R, y, jitter) -> (state_filt, ll)
+function kalman_update(state::MvNormal, obs_params, y, jitter)
+    μ_pred, Σ_pred = params(state)
+    H, c, R = obs_params
+    z = _compute_innovation(μ_pred, H, c, y)
+    S = _compute_innovation_cov(Σ_pred, H, R)
+    K = _compute_kalman_gain(Σ_pred, H, S)
+    I_KH, Σ_filt_raw = _compute_joseph_update(Σ_pred, K, H, R)
+    μ_filt = μ_pred + K * z
+    Σ_filt = _apply_jitter_and_wrap(Σ_filt_raw, jitter)
+    ll = logpdf(MvNormal(z, S), zero(z))
+    return MvNormal(μ_filt, Σ_filt), ll
+end
 
-Single Kalman filter step (predict + update) on pre-resolved matrix arguments. Each of
-`A, b, Q, H, c, R` may be a [`Fixed`](@ref) wrapper or a plain value; `_val` unwraps both.
+"""
+    _kalman_step(μ, Σ, A, b, Q, H, c, R, y, jitter) -> (μ_filt, Σ_filt, ll)
+
+Single Kalman filter step (predict + update) on pre-resolved matrix arguments. `Σ` is a
+`PDMat`; `Q` and `R` may be `PDMat` or plain matrices. Each of `A, b, Q, H, c, R` may
+also be a [`Fixed`](@ref) wrapper, which `_val` unwraps.
+
 This is the boundary at which the Mooncake rrule!! fires.
 """
-function _kalman_step(state::MvNormal, A, b, Q, H, c, R, y, jitter)
+function _kalman_step(μ, Σ, A, b, Q, H, c, R, y, jitter)
     A_v, b_v, Q_v = _val(A), _val(b), _val(Q)
     H_v, c_v, R_v = _val(H), _val(c), _val(R)
-    state_pred = kalman_predict(state, (A_v, b_v, Q_v))
-    state_filt, ll, _ = _kalman_update_cached(state_pred, H_v, c_v, R_v, y, jitter)
-    return state_filt, ll
+
+    μ_pred = A_v * μ + b_v
+    Σ_pred = PDMat(Symmetric(X_A_Xt(Σ, A_v) + Q_v))
+
+    z = _compute_innovation(μ_pred, H_v, c_v, y)
+    S = _compute_innovation_cov(Σ_pred, H_v, R_v)
+    K = _compute_kalman_gain(Σ_pred, H_v, S)
+    I_KH, Σ_filt_raw = _compute_joseph_update(Σ_pred, K, H_v, R_v)
+    μ_filt = μ_pred + K * z
+    Σ_filt = _apply_jitter_and_wrap(Σ_filt_raw, jitter)
+    ll = logpdf(MvNormal(z, S), zero(z))
+
+    return μ_filt, Σ_filt, ll
 end
 
 ## KALMAN SMOOTHER #########################################################################

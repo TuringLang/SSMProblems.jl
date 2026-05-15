@@ -1,125 +1,36 @@
 import PDMats: AbstractPDMat
 
-export KalmanGradientCache
-export update_with_cache
 export backward_gradient_update, backward_gradient_predict
-export gradient_Q, gradient_R, gradient_A, gradient_b, gradient_H, gradient_c, gradient_y
+export gradient_Q, gradient_R, gradient_A, gradient_b, gradient_H, gradient_c
 
-## CORE UPDATE WITH CACHE ######################################################################
-
-# Raw-parameter update step that all higher-level update functions delegate to.
-# Returns the filtered state, log-likelihood increment, and gradient cache.
-function _kalman_update_cached(state::MvNormal, H, c, R, y, jitter)
-    μ_pred, Σ_pred = params(state)
-    z = _compute_innovation(μ_pred, H, c, y)
-    S = _compute_innovation_cov(Σ_pred, H, R)
-    K = _compute_kalman_gain(Σ_pred, H, S)
-    I_KH, Σ_filt_raw = _compute_joseph_update(Σ_pred, K, H, R)
-    μ_filt = μ_pred + K * z
-    Σ_filt = _apply_jitter_and_wrap(Σ_filt_raw, jitter)
-    ll = logpdf(MvNormal(z, S), zero(z))
-    cache = KalmanGradientCache(μ_pred, Σ_pred, μ_filt, Σ_filt, S, K, z, I_KH)
-    return MvNormal(μ_filt, Σ_filt), ll, cache
-end
-
-function kalman_update(state, obs_params, observation, jitter)
-    H, c, R = obs_params
-    state, ll, _ = _kalman_update_cached(state, H, c, R, observation, jitter)
-    return state, ll
-end
-
-"""
-    KalmanGradientCache
-
-Cache of intermediate values from a Kalman filter update step for gradient computation.
-
-# Fields
-- `μ_pred`: Predicted mean x̂_{n|n-1}
-- `Σ_pred`: Predicted covariance P_{n|n-1}
-- `μ_filt`: Filtered mean x̂_{n|n}
-- `Σ_filt`: Filtered covariance P_{n|n}
-- `S`: Innovation covariance
-- `K`: Kalman gain
-- `z`: Innovation (y - H*μ_pred - c)
-- `I_KH`: I - K*H
-"""
-struct KalmanGradientCache{μpT,ΣpT,μfT,ΣfT,ST,KT,zT,IKT}
-    μ_pred::μpT
-    Σ_pred::ΣpT
-    μ_filt::μfT
-    Σ_filt::ΣfT
-    S::ST
-    K::KT
-    z::zT
-    I_KH::IKT
-end
-
-"""
-    update_with_cache(obs, algo, iter, state, observation; kwargs...)
-
-Perform Kalman update and return cache for gradient computation.
-
-This extends the standard update step to also return a `KalmanGradientCache` containing
-intermediate values needed for efficient backward gradient propagation.
-
-# Returns
-A tuple `(filtered_state, log_likelihood, cache)` where:
-- `filtered_state`: The posterior state as `MvNormal`
-- `log_likelihood`: The log-likelihood increment
-- `cache`: A `KalmanGradientCache` for use in backward gradient computation
-"""
-function update_with_cache(
-    obs::LinearGaussianObservationProcess,
-    algo::KalmanFilter,
-    iter::Integer,
-    state::MvNormal,
-    observation::AbstractVector;
-    kwargs...,
-)
-    p = step_eval(obs, iter; kwargs...)
-    return _kalman_update_cached(state, p.H, p.c, p.R, observation, algo.jitter)
-end
+# Each gradient helper computes the per-step contribution from THIS step's ll, scaled by
+# `Δll` (the cotangent of the step's log-likelihood output), plus the propagation
+# contribution from downstream cotangents of (μ_filt, Σ_filt). Parameters that enter
+# only the state update (A, b, Q) have no `Δll`-scaled term; their gradient comes from
+# the propagated cotangents alone, via `backward_gradient_update`.
 
 ## BACKWARD GRADIENT PROPAGATION ##############################################################
 
 """
-    backward_gradient_update(∂μ_filt, ∂Σ_filt, cache, H, R)
+    backward_gradient_update(∂μ_filt, ∂Σ_filt, Δll, z, S, I_KH, H, R)
 
-Propagate gradients backward through the Kalman update step (filtered → predicted).
-
-This implements equations 8-9 from Parellier et al., computing the gradients with respect
-to the predicted state from the gradients with respect to the filtered state.
-
-Inputs and outputs are log-likelihood gradients (∂ℓ/∂·).
-
-# Arguments
-- `∂μ_filt`: Gradient of log-likelihood w.r.t. filtered mean ∂ℓ/∂x̂_{n|n}
-- `∂Σ_filt`: Gradient of log-likelihood w.r.t. filtered covariance ∂ℓ/∂P_{n|n}
-- `cache`: `KalmanGradientCache` from the forward pass
-- `H`: Observation matrix at this time step
-- `R`: Observation noise covariance at this time step
-
-# Returns
-A tuple `(∂μ_pred, ∂Σ_pred)` containing log-likelihood gradients w.r.t. the predicted state.
+Propagate cotangents backward through the Kalman update step (filtered → predicted).
+The `Δll`-scaled local ∂ℓ/∂μ_pred and ∂ℓ/∂Σ_pred terms are added to the propagated
+contributions from `∂μ_filt`, `∂Σ_filt`.
 """
 function backward_gradient_update(
-    ∂μ_filt::AbstractVector, ∂Σ_filt::AbstractMatrix, cache::KalmanGradientCache, H, R
+    ∂μ_filt::AbstractVector, ∂Σ_filt::AbstractMatrix, Δll, z, S, I_KH, H, R
 )
-    z, S, I_KH = cache.z, cache.S, cache.I_KH
-
-    # Local log-likelihood derivatives (standard 1/2 factor)
     S_inv_z = S \ z
     ∂ℓ_∂μ_pred = H' * S_inv_z
     ∂ℓ_∂Σ_pred = -0.5 * (H' * (S \ H) - H' * (S_inv_z * S_inv_z') * H)
 
-    # Equation 8: ∂ℓ/∂μ_pred = (I-KH)' * ∂ℓ/∂μ_filt + local term
-    ∂μ_pred = I_KH' * ∂μ_filt + ∂ℓ_∂μ_pred
+    ∂μ_pred = I_KH' * ∂μ_filt + Δll * ∂ℓ_∂μ_pred
 
-    # Equation 9: ∂ℓ/∂Σ_pred = (I-KH)' * [∂ℓ/∂Σ_filt + cross_term] * (I-KH) + local term
     R_inv_z = R \ z
     cross_term = 0.5 * (∂μ_filt * (R_inv_z' * H) + (H' * R_inv_z) * ∂μ_filt')
     inner = ∂Σ_filt + cross_term
-    ∂Σ_pred = I_KH' * inner * I_KH + ∂ℓ_∂Σ_pred
+    ∂Σ_pred = I_KH' * inner * I_KH + Δll * ∂ℓ_∂Σ_pred
 
     return ∂μ_pred, ∂Σ_pred
 end
@@ -127,22 +38,10 @@ end
 """
     backward_gradient_predict(∂μ_pred, ∂Σ_pred, A)
 
-Propagate gradients backward through the Kalman predict step (predicted → previous filtered).
-
-This implements equations 10-11 from Parellier et al.
-
-# Arguments
-- `∂μ_pred`: Gradient of log-likelihood w.r.t. predicted mean ∂ℓ/∂x̂_{n|n-1}
-- `∂Σ_pred`: Gradient of log-likelihood w.r.t. predicted covariance ∂ℓ/∂P_{n|n-1}
-- `A`: Dynamics matrix at this time step
-
-# Returns
-A tuple `(∂μ_filt_prev, ∂Σ_filt_prev)` containing log-likelihood gradients w.r.t. the previous filtered state.
+Propagate cotangents backward through the predict step (predicted → previous filtered).
 """
 function backward_gradient_predict(∂μ_pred::AbstractVector, ∂Σ_pred::AbstractMatrix, A)
-    ∂μ_filt_prev = A' * ∂μ_pred       # Equation 10
-    ∂Σ_filt_prev = A' * ∂Σ_pred * A   # Equation 11
-    return ∂μ_filt_prev, ∂Σ_filt_prev
+    return A' * ∂μ_pred, A' * ∂Σ_pred * A
 end
 
 ## PARAMETER GRADIENTS ########################################################################
@@ -150,116 +49,75 @@ end
 """
     gradient_Q(∂Σ_pred)
 
-Compute gradient of log-likelihood w.r.t. process noise covariance Q.
-
-Implements equation 13 from Parellier et al.: ∂ℓ/∂Q = ∂ℓ/∂P_{n|n-1}
+`Q` enters only `Σ_pred` (additively); its cotangent is `∂Σ_pred`.
 """
-function gradient_Q(∂Σ_pred::AbstractMatrix)
-    return ∂Σ_pred
-end
-
-"""
-    gradient_R(∂μ_filt, ∂Σ_filt, cache)
-
-Compute gradient of log-likelihood w.r.t. observation noise covariance R.
-
-Implements equation 14 from Parellier et al.
-"""
-function gradient_R(
-    ∂μ_filt::AbstractVector, ∂Σ_filt::AbstractMatrix, cache::KalmanGradientCache
-)
-    z, S, K = cache.z, cache.S, cache.K
-    S_inv_z = S \ z
-
-    # Local log-likelihood derivative: ∂ℓ/∂R = -0.5 * (S⁻¹ - S⁻¹zz'S⁻¹)
-    ∂ℓ_∂R = -0.5 * (inv(S) - S_inv_z * S_inv_z')
-
-    # Equation 14: ∂ℓ/∂R = K'*∂ℓ/∂Σ_filt*K - cross_term + local term
-    cross_term = 0.5 * (K' * ∂μ_filt * S_inv_z' + S_inv_z * ∂μ_filt' * K)
-    return K' * ∂Σ_filt * K - cross_term + ∂ℓ_∂R
-end
-
-"""
-    gradient_y(∂μ_filt, cache)
-
-Compute gradient of log-likelihood w.r.t. observation y.
-
-Implements equation 12 from Parellier et al.: ∂ℓ/∂y = K'*∂ℓ/∂μ_filt + local term
-"""
-function gradient_y(∂μ_filt::AbstractVector, cache::KalmanGradientCache)
-    z, S, K = cache.z, cache.S, cache.K
-    ∂ℓ_∂y = -(S \ z)
-    return K' * ∂μ_filt + ∂ℓ_∂y
-end
-
-"""
-    gradient_A(∂μ_pred, ∂Σ_pred, μ_prev, Σ_prev, A)
-
-Compute gradient of log-likelihood w.r.t. dynamics matrix A.
-
-Derived via chain rule through μ_pred = A*μ_prev + b and Σ_pred = A*Σ_prev*A' + Q.
-"""
-function gradient_A(
-    ∂μ_pred::AbstractVector, ∂Σ_pred::AbstractMatrix, μ_prev::AbstractVector, Σ_prev, A
-)
-    # ∂L/∂A = ∂L/∂μ_pred * μ_prev' + 2 * ∂L/∂Σ_pred * A * Σ_prev
-    return ∂μ_pred * μ_prev' + 2 * ∂Σ_pred * A * Σ_prev
-end
+gradient_Q(∂Σ_pred::AbstractMatrix) = ∂Σ_pred
 
 """
     gradient_b(∂μ_pred)
 
-Compute gradient of log-likelihood w.r.t. dynamics offset b.
-
-Derived via chain rule through μ_pred = A*μ_prev + b.
+`b` enters only `μ_pred` (additively); its cotangent is `∂μ_pred`.
 """
-function gradient_b(∂μ_pred::AbstractVector)
-    return ∂μ_pred
+gradient_b(∂μ_pred::AbstractVector) = ∂μ_pred
+
+"""
+    gradient_A(∂μ_pred, ∂Σ_pred, μ_prev, Σ_prev, A)
+
+Chain rule through `μ_pred = A*μ_prev + b` and `Σ_pred = A*Σ_prev*A' + Q`.
+"""
+function gradient_A(
+    ∂μ_pred::AbstractVector, ∂Σ_pred::AbstractMatrix, μ_prev::AbstractVector, Σ_prev, A
+)
+    return ∂μ_pred * μ_prev' + 2 * ∂Σ_pred * A * Σ_prev
 end
 
 """
-    gradient_H(∂μ_filt, ∂Σ_filt, cache, Σ_pred, H)
+    gradient_c(∂μ_filt, Δll, z, S, K)
 
-Compute gradient of log-likelihood w.r.t. observation matrix H.
+`c` enters `μ_filt = μ_pred + K*z` (via `z`) and the log-likelihood (via `z`).
+"""
+function gradient_c(∂μ_filt::AbstractVector, Δll, z, S, K)
+    return Δll * (S \ z) - K' * ∂μ_filt
+end
 
-Derived via chain rule using the information form P_filt⁻¹ = P_pred⁻¹ + H'R⁻¹H to decouple
-P_filt from K, then tracing H's effect through:
-- log-likelihood local term (via z and S)
-- Filtered mean (via z = y - Hμ_pred - c, and K = P_filt H' R⁻¹)
-- Filtered covariance (via the information form)
+"""
+    gradient_R(∂μ_filt, ∂Σ_filt, Δll, z, S, K)
+
+`R` enters `Σ_filt` (via the Joseph form `K*R*K'`), the Kalman gain (cross term),
+and the log-likelihood (via `S`).
+"""
+function gradient_R(∂μ_filt::AbstractVector, ∂Σ_filt::AbstractMatrix, Δll, z, S, K)
+    S_inv_z = S \ z
+    ∂ℓ_∂R = -0.5 * (inv(S) - S_inv_z * S_inv_z')
+    cross_term = 0.5 * (K' * ∂μ_filt * S_inv_z' + S_inv_z * ∂μ_filt' * K)
+    return K' * ∂Σ_filt * K - cross_term + Δll * ∂ℓ_∂R
+end
+
+"""
+    gradient_H(∂μ_filt, ∂Σ_filt, Δll, μ_pred, μ_filt, z, S, K, I_KH, Σ_pred, H)
+
+Chain rule through the innovation, Kalman gain, and information-form covariance update.
 """
 function gradient_H(
-    ∂μ_filt::AbstractVector, ∂Σ_filt::AbstractMatrix, cache::KalmanGradientCache, Σ_pred, H
+    ∂μ_filt::AbstractVector,
+    ∂Σ_filt::AbstractMatrix,
+    Δll,
+    μ_pred,
+    μ_filt,
+    z,
+    S,
+    K,
+    I_KH,
+    Σ_pred,
+    H,
 )
-    μ_pred, μ_filt, z, S, K, I_KH = cache.μ_pred,
-    cache.μ_filt, cache.z, cache.S, cache.K,
-    cache.I_KH
     S_inv_z = S \ z
     S_inv = inv(S)
     P_filt = I_KH * Σ_pred
 
-    # Local log-likelihood derivative: ℓ = -0.5*(log|S| + z'S⁻¹z)
     ∂ℓ_∂H = -(S_inv * H * Σ_pred - S_inv_z * μ_pred' - (S_inv_z * S_inv_z') * H * Σ_pred)
-
-    # Contribution through filtered mean:
-    # δμ_filt = P_filt*δH'*S⁻¹*z - K*δH*μ_filt
     ∂via_μ = S_inv_z * ∂μ_filt' * P_filt - K' * ∂μ_filt * μ_filt'
-
-    # Contribution through filtered covariance (information form)
     ∂via_Σ = -2 * K' * ∂Σ_filt * P_filt
 
-    return ∂ℓ_∂H + ∂via_μ + ∂via_Σ
-end
-
-"""
-    gradient_c(∂μ_filt, cache)
-
-Compute gradient of log-likelihood w.r.t. observation offset c.
-
-Derived via chain rule through z = y - H*μ_pred - c.
-"""
-function gradient_c(∂μ_filt::AbstractVector, cache::KalmanGradientCache)
-    z, S, K = cache.z, cache.S, cache.K
-    ∂ℓ_∂c = S \ z  # ∂z/∂c = -1, ∂ℓ/∂z = -(S\z), so ∂ℓ/∂c = S\z
-    return ∂ℓ_∂c - K' * ∂μ_filt
+    return Δll * ∂ℓ_∂H + ∂via_μ + ∂via_Σ
 end

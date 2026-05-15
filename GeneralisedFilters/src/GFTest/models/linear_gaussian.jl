@@ -1,4 +1,6 @@
 using StaticArrays
+using LinearAlgebra: Symmetric, I
+using PDMats: PDMats
 import PDMats: PDMat
 
 export augment_drift_model, augmented_kf_drift_posterior
@@ -74,7 +76,8 @@ function create_nonhomogeneous_linear_gaussian_model(
 end
 
 function _compute_joint_nonhomogeneous(model, T::Integer)
-    (; μ0, Σ0) = model.prior
+    μ0 = GeneralisedFilters._val(model.prior.μ0)
+    Σ0 = GeneralisedFilters._val(model.prior.Σ0)
     dyn = model.dyn
     obs = model.obs
     Dy, Dx = size(calc_H(obs, 1))
@@ -219,31 +222,52 @@ function setup_gradient_test(rng::AbstractRNG; D::Int=2, T::Int=3)
     model = create_linear_gaussian_model(rng, D, D, Float64, 0.1, 1.0; static_arrays=true)
     _, _, ys = SSMProblems.sample(rng, model, T)
 
-    A = GeneralisedFilters.calc_A(SSMProblems.dyn(model), 1)
-    b = GeneralisedFilters.calc_b(SSMProblems.dyn(model), 1)
-    Q = GeneralisedFilters.calc_Q(SSMProblems.dyn(model), 1)
-    H, c, R = GeneralisedFilters.calc_params(SSMProblems.obs(model), 1)
-    μ0 = GeneralisedFilters.calc_μ0(SSMProblems.prior(model))
-    Σ0 = GeneralisedFilters.calc_Σ0(SSMProblems.prior(model))
+    A = GeneralisedFilters._val(SSMProblems.dyn(model).A)
+    b = GeneralisedFilters._val(SSMProblems.dyn(model).b)
+    Q = GeneralisedFilters._val(SSMProblems.dyn(model).Q)
+    H = GeneralisedFilters._val(SSMProblems.obs(model).H)
+    c = GeneralisedFilters._val(SSMProblems.obs(model).c)
+    R = GeneralisedFilters._val(SSMProblems.obs(model).R)
+    μ0 = GeneralisedFilters._val(SSMProblems.prior(model).μ0)
+    Σ0 = GeneralisedFilters._val(SSMProblems.prior(model).Σ0)
 
-    state = GeneralisedFilters.initialise(
-        rng, SSMProblems.prior(model), GeneralisedFilters.KF()
-    )
-    caches = Vector{GeneralisedFilters.KalmanGradientCache}(undef, T)
-    μ_prevs = Vector{typeof(state.μ)}(undef, T)
-    Σ_prevs = Vector{typeof(state.Σ)}(undef, T)
+    # Forward pass — store per-step intermediates for the backward gradient pass
+    μ_prevs = Vector{typeof(μ0)}(undef, T)
+    Σ_prevs = Vector{typeof(Σ0)}(undef, T)
+    μ_preds = similar(μ_prevs)
+    Σ_preds = similar(Σ_prevs)
+    μ_filts = similar(μ_prevs)
+    zs = Vector{typeof(c)}(undef, T)
+    Ss = similar(Σ_prevs)
+    Ks = Vector{Any}(undef, T)
+    I_KHs = Vector{Any}(undef, T)
 
+    μ, Σ = μ0, Σ0
     for t in 1:T
-        μ_prevs[t] = state.μ
-        Σ_prevs[t] = state.Σ
-        pred = GeneralisedFilters.predict(
-            rng, SSMProblems.dyn(model), GeneralisedFilters.KF(), t, state, ys[t]
-        )
-        state, _, caches[t] = GeneralisedFilters.update_with_cache(
-            SSMProblems.obs(model), GeneralisedFilters.KF(), t, pred, ys[t]
-        )
+        μ_prevs[t] = μ
+        Σ_prevs[t] = Σ
+        μ_pred = A * μ + b
+        Σ_pred = PDMat(Symmetric(PDMats.X_A_Xt(Σ, A) + Q))
+        z = ys[t] - H * μ_pred - c
+        S = PDMat(PDMats.X_A_Xt(Σ_pred, H) + R)
+        K = Σ_pred * H' / S
+        I_KH = I - K * H
+        Σ_filt_raw = PDMats.X_A_Xt(Σ_pred, I_KH) + PDMats.X_A_Xt(R, K)
+        Σ_filt = PDMat(Symmetric(Σ_filt_raw))
+        μ_filt = μ_pred + K * z
+
+        μ_preds[t] = μ_pred
+        Σ_preds[t] = Σ_pred
+        μ_filts[t] = μ_filt
+        zs[t] = z
+        Ss[t] = S
+        Ks[t] = K
+        I_KHs[t] = I_KH
+
+        μ, Σ = μ_filt, Σ_filt
     end
 
+    # Backward pass — Δll = 1 since we're testing gradients of the total log-likelihood
     ∂μ = @SVector zeros(D)
     ∂Σ = @SMatrix zeros(D, D)
     ∂Q_total = @SMatrix zeros(D, D)
@@ -255,16 +279,28 @@ function setup_gradient_test(rng::AbstractRNG; D::Int=2, T::Int=3)
 
     for t in T:-1:1
         ∂μ_pred, ∂Σ_pred = GeneralisedFilters.backward_gradient_update(
-            ∂μ, ∂Σ, caches[t], H, R
+            ∂μ, ∂Σ, 1.0, zs[t], Ss[t], I_KHs[t], H, R
         )
         ∂Q_total += GeneralisedFilters.gradient_Q(∂Σ_pred)
-        ∂R_total += GeneralisedFilters.gradient_R(∂μ, ∂Σ, caches[t])
+        ∂R_total += GeneralisedFilters.gradient_R(∂μ, ∂Σ, 1.0, zs[t], Ss[t], Ks[t])
         ∂A_total += GeneralisedFilters.gradient_A(
             ∂μ_pred, ∂Σ_pred, μ_prevs[t], Σ_prevs[t], A
         )
         ∂b_total += GeneralisedFilters.gradient_b(∂μ_pred)
-        ∂H_total += GeneralisedFilters.gradient_H(∂μ, ∂Σ, caches[t], caches[t].Σ_pred, H)
-        ∂c_total += GeneralisedFilters.gradient_c(∂μ, caches[t])
+        ∂H_total += GeneralisedFilters.gradient_H(
+            ∂μ,
+            ∂Σ,
+            1.0,
+            μ_preds[t],
+            μ_filts[t],
+            zs[t],
+            Ss[t],
+            Ks[t],
+            I_KHs[t],
+            Σ_preds[t],
+            H,
+        )
+        ∂c_total += GeneralisedFilters.gradient_c(∂μ, 1.0, zs[t], Ss[t], Ks[t])
         ∂μ, ∂Σ = GeneralisedFilters.backward_gradient_predict(∂μ_pred, ∂Σ_pred, A)
     end
 
@@ -284,9 +320,6 @@ function setup_gradient_test(rng::AbstractRNG; D::Int=2, T::Int=3)
         R,
         μ0,
         Σ0,
-        caches,
-        μ_prevs,
-        Σ_prevs,
         ∂Q_total,
         ∂R_total,
         ∂A_total,

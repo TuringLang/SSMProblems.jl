@@ -1,318 +1,214 @@
 """
 Mooncake.jl extension for GeneralisedFilters.
 
-This extension provides a native Mooncake rrule!! for `kf_loglikelihood` using the
-analytical gradient formulas from `kalman_gradient.jl`.
+Provides a native Mooncake `rrule!!` for `_kalman_step` using the analytical gradient
+formulas in `kalman_gradient.jl`. The rrule's pullback re-runs the forward arithmetic
+inline so that all intermediate values are captured as closure locals — no separate
+cache struct.
 
-The implementation properly handles both mutable (Vector, Matrix) and immutable
-(SVector, SMatrix) array types by respecting Mooncake's fdata/rdata separation:
-- Mutable inputs: gradients accumulated in fdata, pullback returns NoRData
-- Immutable inputs: pullback returns RData containing the gradient
+Parameter wrappers `Fixed` and `TimeVarying` carry no differentiable state; their
+`tangent_type` is declared as `NoTangent` so that Mooncake skips gradient tracking
+through them. Active parameters (`FixedParametric`, `TimeVaryingParametric`) reach the
+primitive as plain values, and the rrule's `_maybe_grad_X` helpers dispatch on the
+primal type to skip the matrix arithmetic for inactive arguments at compile time.
+
+Tangent plumbing for PDMat-family covariances mirrors the previous `kf_loglikelihood`
+rrule. The rrule is restricted to immutable static-array primals; mutable
+`Vector`/`Matrix` variants are not yet supported.
 """
 module MooncakeExt
 
 using GeneralisedFilters:
     GeneralisedFilters,
-    kf_loglikelihood,
-    kalman_predict,
-    _kalman_update_cached,
-    gradient_c,
-    gradient_H,
-    gradient_R,
-    gradient_b,
-    gradient_A,
-    gradient_Q,
+    _kalman_step,
+    _val,
+    Fixed,
+    TimeVarying,
+    _compute_innovation,
+    _compute_innovation_cov,
+    _compute_kalman_gain,
+    _compute_joseph_update,
+    _apply_jitter_and_wrap,
     backward_gradient_update,
-    backward_gradient_predict
+    backward_gradient_predict,
+    gradient_A,
+    gradient_b,
+    gradient_Q,
+    gradient_H,
+    gradient_c,
+    gradient_R
 
-using Distributions: MvNormal, params
-using PDMats: AbstractPDMat, PDMat, PDiagMat
-using LinearAlgebra: diag
+using Distributions: MvNormal, logpdf
+using PDMats: AbstractPDMat, PDMat, PDiagMat, X_A_Xt
+using LinearAlgebra: Symmetric, diag, Diagonal
+using StaticArrays: SArray
 
-using Mooncake: Mooncake, @is_primitive, CoDual, primal, tangent
-using Mooncake: NoFData, NoRData, RData, Tangent, FData
-using Mooncake: zero_tangent, rdata, primal_to_tangent!!, increment!!
+using Mooncake: Mooncake, @is_primitive, CoDual, primal
+using Mooncake: NoFData, NoRData, Tangent, RData, NoTangent
+using Mooncake: zero_tangent, rdata, primal_to_tangent!!
 
-## GRADIENT PROJECTION LAYER ###################################################################
+## TANGENT DECLARATIONS ########################################################################
+
+Mooncake.tangent_type(::Type{<:Fixed}) = NoTangent
+Mooncake.tangent_type(::Type{<:TimeVarying}) = NoTangent
+
+## PDMAT TANGENT PLUMBING (input direction) ####################################################
 #
-# These functions project matrix gradients to parameter gradients. They are AD-framework
-# agnostic and could eventually move to PDMats.jl as ChainRulesCore.ProjectTo implementations.
+# `_to_rdata` builds the Mooncake rdata for an input cotangent, given the input's
+# primal and a "primal-shaped" gradient (a plain matrix or vector returned by the
+# analytical gradient functions). Adapted from the previous `kf_loglikelihood` rrule.
 
-"""
-    _project_to_param(grad_matrix, primal)
-
-Project a gradient w.r.t. the full matrix representation to a gradient w.r.t. the
-parameter representation.
-
-For most types, this is identity. For structured covariance types like PDiagMat,
-this extracts the relevant components (e.g., diagonal).
-"""
-_project_to_param(grad, primal) = grad
+_project_to_param(grad, _) = grad
 _project_to_param(grad::AbstractMatrix, ::PDMat) = grad
 _project_to_param(grad::AbstractMatrix, ::PDiagMat) = diag(grad)
 
-# TODO: Add ScalMat support if needed:
-# _project_to_param(grad::AbstractMatrix, ::ScalMat) = sum(diag(grad))
+_inner_primal(p::PDMat) = p.mat
+_inner_primal(p::PDiagMat) = p.diag
 
-## MOONCAKE TANGENT FIELD ACCESS ###############################################################
+function _wrap_pdmat_tangent(t_new, inner_tangent, ::PDMat)
+    return Tangent((mat=inner_tangent, chol=t_new.fields.chol))
+end
+_wrap_pdmat_tangent(t_new, inner_tangent, ::PDiagMat) = Tangent((diag=inner_tangent,))
+
+_to_rdata(::Any, ::NoTangent) = NoRData()
+
+function _to_rdata(primal, grad)
+    return rdata(primal_to_tangent!!(zero_tangent(primal), grad))
+end
+
+function _to_rdata(primal::AbstractPDMat, grad::AbstractMatrix)
+    grad_param = _project_to_param(grad, primal)
+    inner_primal = _inner_primal(primal)
+    t_new = zero_tangent(primal)
+    inner_t = primal_to_tangent!!(zero_tangent(inner_primal), grad_param)
+    full_t = _wrap_pdmat_tangent(t_new, inner_t, primal)
+    return rdata(full_t)
+end
+
+## RDATA -> PRIMAL-SHAPED GRADIENT EXTRACTION (output direction) ###############################
 #
-# These helpers encapsulate the tangent field structure for each PDMat type.
-# Dispatch is on primal type, keeping tangent structure knowledge in one place.
+# `_from_rdata(rdata, primal)` converts the Mooncake rdata of an output cotangent back
+# into a primal-shaped value (a plain matrix or vector). Implementation drills through
+# the rdata's NamedTuple structure based on the primal's field layout. SArrays have a
+# single `:data` field holding an `NTuple`; PDMats have `(:mat, :chol)` and delegate
+# the inner `.mat` extraction recursively.
 
-"""
-    _get_param_value(primal)
+_from_rdata(t, _) = t
+_from_rdata(t::RData, primal::SArray) = typeof(primal)(t.data.data)
+_from_rdata(t::RData, primal::PDMat) = _from_rdata(t.data.mat, primal.mat)
+_from_rdata(t::RData, primal::PDiagMat) = Diagonal(_from_rdata(t.data.diag, primal.diag))
 
-Return the underlying differentiable parameter for a PDMat type.
-"""
-_get_param_value(p::PDMat) = p.mat
-_get_param_value(p::PDiagMat) = p.diag
+## MAYBE-GRAD DISPATCH #########################################################################
 
-"""
-    _param_tangent(tangent, primal)
-
-Extract the tangent for the differentiable parameter field from a PDMat tangent.
-"""
-_param_tangent(t::Tangent, ::PDMat) = t.fields.mat
-_param_tangent(t::Tangent, ::PDiagMat) = t.fields.diag
-_param_tangent(t::FData, ::PDMat) = t.data.mat
-_param_tangent(t::FData, ::PDiagMat) = t.data.diag
-
-"""
-    _with_param_tangent(old_tangent, new_param_tangent, primal)
-
-Reconstruct a PDMat tangent with an updated parameter field.
-"""
-function _with_param_tangent(t::Tangent, new_param, ::PDMat)
-    return Tangent((mat=new_param, chol=t.fields.chol))
-end
-function _with_param_tangent(t::Tangent, new_param, ::PDiagMat)
-    return Tangent((diag=new_param,))
+_maybe_grad_A(::Fixed, _, _, _, _, _) = NoTangent()
+function _maybe_grad_A(_, ∂μ_pred, ∂Σ_pred, μ_prev, Σ_prev, A)
+    return gradient_A(∂μ_pred, ∂Σ_pred, μ_prev, Σ_prev, A)
 end
 
-## MOONCAKE TANGENT UPDATE #####################################################################
+_maybe_grad_b(::Fixed, _) = NoTangent()
+_maybe_grad_b(_, ∂μ_pred) = gradient_b(∂μ_pred)
 
-"""
-    _update_vector_tangent!(fdata, idx, grad_matrix, primal_value)
+_maybe_grad_Q(::Fixed, _) = NoTangent()
+_maybe_grad_Q(_, ∂Σ_pred) = gradient_Q(∂Σ_pred)
 
-Accumulate the gradient into the tangent at index `idx` in the fdata vector.
-The gradient is first projected to parameter space, then converted to Mooncake
-tangent format and accumulated.
-"""
-function _update_vector_tangent!(
-    fdata::AbstractVector, idx::Integer, grad_matrix, primal_value
-)
-    grad_param = _project_to_param(grad_matrix, primal_value)
-    grad_tangent = primal_to_tangent!!(zero_tangent(primal_value), grad_param)
-    fdata[idx] = increment!!(fdata[idx], grad_tangent)
-    return nothing
+_maybe_grad_H(::Fixed, _, _, _, _, _, _, _, _, _, _, _) = NoTangent()
+function _maybe_grad_H(_, ∂μ_filt, ∂Σ_filt, Δll, μ_pred, μ_filt, z, S, K, I_KH, Σ_pred, H)
+    return gradient_H(∂μ_filt, ∂Σ_filt, Δll, μ_pred, μ_filt, z, S, K, I_KH, Σ_pred, H)
 end
 
-# Specialization for AbstractPDMat: update only the parameter field
-function _update_vector_tangent!(
-    fdata::AbstractVector, idx::Integer, grad_matrix, primal_value::AbstractPDMat
-)
-    grad_param = _project_to_param(grad_matrix, primal_value)
-    param_value = _get_param_value(primal_value)
+_maybe_grad_c(::Fixed, _, _, _, _, _) = NoTangent()
+_maybe_grad_c(_, ∂μ_filt, Δll, z, S, K) = gradient_c(∂μ_filt, Δll, z, S, K)
 
-    old_tangent = fdata[idx]
-    old_param_tangent = _param_tangent(old_tangent, primal_value)
-
-    grad_tangent = primal_to_tangent!!(zero_tangent(param_value), grad_param)
-    new_param_tangent = increment!!(old_param_tangent, grad_tangent)
-
-    fdata[idx] = _with_param_tangent(old_tangent, new_param_tangent, primal_value)
-    return nothing
+_maybe_grad_R(::Fixed, _, _, _, _, _, _) = NoTangent()
+function _maybe_grad_R(_, ∂μ_filt, ∂Σ_filt, Δll, z, S, K)
+    return gradient_R(∂μ_filt, ∂Σ_filt, Δll, z, S, K)
 end
 
-## RDATA COMPUTATION ###########################################################################
+## RRULE!! #####################################################################################
 
-"""
-    _compute_rdata(grad_matrix, primal_value)
-
-Compute the RData for an immutable input given its gradient (in matrix form).
-Projects to parameter space, creates a tangent, and extracts the rdata portion.
-"""
-function _compute_rdata(grad_matrix, primal_value)
-    grad_param = _project_to_param(grad_matrix, primal_value)
-    t = primal_to_tangent!!(zero_tangent(primal_value), grad_param)
-    return rdata(t)
-end
-
-# For AbstractPDMat: build tangent with only the parameter field set
-function _compute_rdata(grad_matrix, primal_value::AbstractPDMat)
-    grad_param = _project_to_param(grad_matrix, primal_value)
-    param_value = _get_param_value(primal_value)
-
-    t_new = zero_tangent(primal_value)
-    t_param = primal_to_tangent!!(zero_tangent(param_value), grad_param)
-    new_tangent = _with_param_tangent(t_new, t_param, primal_value)
-    return rdata(new_tangent)
-end
-
-## FDATA UPDATE ################################################################################
-
-"""
-    _update_fdata!(fdata, grad_matrix, primal_value)
-
-Update mutable fdata in-place with the gradient. Used for standalone (non-vector) args.
-"""
-function _update_fdata!(fdata::FData, grad_matrix, primal_value::AbstractPDMat)
-    grad_param = _project_to_param(grad_matrix, primal_value)
-    param_fdata = _param_tangent(fdata, primal_value)
-    primal_to_tangent!!(param_fdata, grad_param)
-    return nothing
-end
-
-## MOONCAKE RRULE!! ############################################################################
-
-"""
-    Mooncake.rrule!!(::CoDual{typeof(kf_loglikelihood)}, ...)
-
-Native Mooncake reverse-mode AD rule for the Kalman filter log-likelihood.
-The forward pass runs the KF with gradient caching; the pullback computes
-analytical gradients using the backward recursion from `kalman_gradient.jl`.
-
-Supports both mutable (Vector, Matrix, PDMat{Matrix}) and immutable
-(SVector, SMatrix, PDMat{SMatrix}) array types, as well as diagonal
-covariance types (PDiagMat).
-"""
-function Mooncake.rrule!!(
-    ::CoDual{typeof(kf_loglikelihood)},
-    μ0::CoDual{<:AbstractVector{T}},
-    Σ0::CoDual,
-    As::CoDual{<:AbstractVector},
-    bs::CoDual{<:AbstractVector},
-    Qs::CoDual{<:AbstractVector},
-    Hs::CoDual{<:AbstractVector},
-    cs::CoDual{<:AbstractVector},
-    Rs::CoDual{<:AbstractVector},
-    ys::CoDual{<:AbstractVector},
-    jitter::CoDual{<:Union{Nothing,Real}},
-) where {T<:Real}
-    # Extract primals
-    μ0_p, Σ0_p = primal(μ0), primal(Σ0)
-    As_p, bs_p, Qs_p = primal(As), primal(bs), primal(Qs)
-    Hs_p, cs_p, Rs_p = primal(Hs), primal(cs), primal(Rs)
-    ys_p = primal(ys)
-    jitter_p = primal(jitter)
-
-    # Extract tangent storage (fdata for mutable, NoFData for immutable)
-    t_μ0, t_Σ0 = tangent(μ0), tangent(Σ0)
-    t_As, t_bs, t_Qs = tangent(As), tangent(bs), tangent(Qs)
-    t_Hs, t_cs, t_Rs = tangent(Hs), tangent(cs), tangent(Rs)
-
-    n = length(ys_p)
-
-    # Forward pass with caching
-    state = MvNormal(μ0_p, Σ0_p)
-    μ_prevs = Vector{typeof(μ0_p)}(undef, n)
-    Σ_prevs = Vector{typeof(Σ0_p)}(undef, n)
-    ll = zero(eltype(μ0_p))
-
-    # First step to get concrete cache type
-    μ_prevs[1], Σ_prevs[1] = params(state)
-    state = kalman_predict(state, (As_p[1], bs_p[1], Qs_p[1]))
-    state, ll_inc, first_cache = _kalman_update_cached(
-        state, Hs_p[1], cs_p[1], Rs_p[1], ys_p[1], jitter_p
-    )
-    ll += ll_inc
-    caches = Vector{typeof(first_cache)}(undef, n)
-    caches[1] = first_cache
-
-    for t in 2:n
-        μ_prevs[t], Σ_prevs[t] = params(state)
-        state = kalman_predict(state, (As_p[t], bs_p[t], Qs_p[t]))
-        state, ll_inc, caches[t] = _kalman_update_cached(
-            state, Hs_p[t], cs_p[t], Rs_p[t], ys_p[t], jitter_p
-        )
-        ll += ll_inc
-    end
-
-    # Reverse pass closure
-    function kf_loglikelihood_mooncake_pb(Δll)
-        ∂μ, ∂Σ = zero(μ0_p), zero(As_p[1])
-
-        for t in n:-1:1
-            cache = caches[t]
-
-            # Observation parameter gradients (∂ℓ/∂·, scaled by Δll)
-            grad_c = Δll * gradient_c(∂μ, cache)
-            grad_H = Δll * gradient_H(∂μ, ∂Σ, cache, cache.Σ_pred, Hs_p[t])
-            grad_R = Δll * gradient_R(∂μ, ∂Σ, cache)
-
-            _update_vector_tangent!(t_cs, t, grad_c, cs_p[t])
-            _update_vector_tangent!(t_Hs, t, grad_H, Hs_p[t])
-            _update_vector_tangent!(t_Rs, t, grad_R, Rs_p[t])
-
-            # Propagate through update step
-            ∂μ_pred, ∂Σ_pred = backward_gradient_update(∂μ, ∂Σ, cache, Hs_p[t], Rs_p[t])
-
-            # Dynamics parameter gradients (∂ℓ/∂·, scaled by Δll)
-            grad_b = Δll * gradient_b(∂μ_pred)
-            grad_A = Δll * gradient_A(∂μ_pred, ∂Σ_pred, μ_prevs[t], Σ_prevs[t], As_p[t])
-            grad_Q = Δll * gradient_Q(∂Σ_pred)
-
-            _update_vector_tangent!(t_bs, t, grad_b, bs_p[t])
-            _update_vector_tangent!(t_As, t, grad_A, As_p[t])
-            _update_vector_tangent!(t_Qs, t, grad_Q, Qs_p[t])
-
-            # Propagate through predict step
-            ∂μ, ∂Σ = backward_gradient_predict(∂μ_pred, ∂Σ_pred, As_p[t])
-        end
-
-        # Initial state gradients (∂ℓ/∂·, scaled by Δll)
-        grad_μ0 = Δll * ∂μ
-        grad_Σ0 = Δll * ∂Σ
-
-        # Handle μ0: check if mutable or immutable
-        rdata_μ0 = if t_μ0 isa NoFData
-            _compute_rdata(grad_μ0, μ0_p)
-        else
-            primal_to_tangent!!(t_μ0, grad_μ0)
-            NoRData()
-        end
-
-        # Handle Σ0: check if mutable or immutable
-        rdata_Σ0 = if t_Σ0 isa NoFData
-            _compute_rdata(grad_Σ0, Σ0_p)
-        else
-            _update_fdata!(t_Σ0, grad_Σ0, Σ0_p)
-            NoRData()
-        end
-
-        # Vector arguments: always mutable containers, return NoRData
-        # (the individual element tangents were updated in place above)
-        return (
-            NoRData(),   # function
-            rdata_μ0,    # μ0
-            rdata_Σ0,    # Σ0
-            NoRData(),   # As
-            NoRData(),   # bs
-            NoRData(),   # Qs
-            NoRData(),   # Hs
-            NoRData(),   # cs
-            NoRData(),   # Rs
-            NoRData(),   # ys
-            NoRData(),   # jitter (non-differentiable constant)
-        )
-    end
-
-    return CoDual(ll, NoFData()), kf_loglikelihood_mooncake_pb
-end
-
-# Declare kf_loglikelihood as primitive for Mooncake
 @is_primitive Mooncake.DefaultCtx Tuple{
-    typeof(kf_loglikelihood),
+    typeof(_kalman_step),
     AbstractVector{<:Real},
+    AbstractPDMat{<:Real},
     Any,
-    AbstractVector,
-    AbstractVector,
-    AbstractVector,
-    AbstractVector,
-    AbstractVector,
-    AbstractVector,
-    AbstractVector,
+    Any,
+    Any,
+    Any,
+    Any,
+    Any,
+    AbstractVector{<:Real},
     Union{Nothing,Real},
 }
+
+function Mooncake.rrule!!(
+    ::CoDual{typeof(_kalman_step)},
+    μ_cd::CoDual{<:AbstractVector{T}},
+    Σ_cd::CoDual{<:AbstractPDMat{T}},
+    A_cd::CoDual,
+    b_cd::CoDual,
+    Q_cd::CoDual,
+    H_cd::CoDual,
+    c_cd::CoDual,
+    R_cd::CoDual,
+    y_cd::CoDual{<:AbstractVector{T}},
+    jitter_cd::CoDual,
+) where {T<:Real}
+    μ_prev = primal(μ_cd)
+    Σ_prev = primal(Σ_cd)
+    A_p, b_p, Q_p = primal(A_cd), primal(b_cd), primal(Q_cd)
+    H_p, c_p, R_p = primal(H_cd), primal(c_cd), primal(R_cd)
+    y = primal(y_cd)
+    jitter = primal(jitter_cd)
+
+    A_v, b_v, Q_v = _val(A_p), _val(b_p), _val(Q_p)
+    H_v, c_v, R_v = _val(H_p), _val(c_p), _val(R_p)
+
+    # Forward pass — locals captured by the pullback closure
+    μ_pred = A_v * μ_prev + b_v
+    Σ_pred = PDMat(Symmetric(X_A_Xt(Σ_prev, A_v) + Q_v))
+    z = _compute_innovation(μ_pred, H_v, c_v, y)
+    S = _compute_innovation_cov(Σ_pred, H_v, R_v)
+    K = _compute_kalman_gain(Σ_pred, H_v, S)
+    I_KH, Σ_filt_raw = _compute_joseph_update(Σ_pred, K, H_v, R_v)
+    μ_filt = μ_pred + K * z
+    Σ_filt = _apply_jitter_and_wrap(Σ_filt_raw, jitter)
+    ll = logpdf(MvNormal(z, S), zero(z))
+
+    function _kalman_step_pb(∂out)
+        ∂μ_filt = _from_rdata(∂out[1], μ_filt)
+        ∂Σ_filt = _from_rdata(∂out[2], Σ_filt)
+        Δll = ∂out[3]
+
+        ∂μ_pred, ∂Σ_pred = backward_gradient_update(
+            ∂μ_filt, ∂Σ_filt, Δll, z, S, I_KH, H_v, R_v
+        )
+        ∂μ_prev, ∂Σ_prev = backward_gradient_predict(∂μ_pred, ∂Σ_pred, A_v)
+
+        ∂A = _maybe_grad_A(A_p, ∂μ_pred, ∂Σ_pred, μ_prev, Σ_prev, A_v)
+        ∂b = _maybe_grad_b(b_p, ∂μ_pred)
+        ∂Q = _maybe_grad_Q(Q_p, ∂Σ_pred)
+        ∂H = _maybe_grad_H(
+            H_p, ∂μ_filt, ∂Σ_filt, Δll, μ_pred, μ_filt, z, S, K, I_KH, Σ_pred, H_v
+        )
+        ∂c = _maybe_grad_c(c_p, ∂μ_filt, Δll, z, S, K)
+        ∂R = _maybe_grad_R(R_p, ∂μ_filt, ∂Σ_filt, Δll, z, S, K)
+
+        return (
+            NoRData(),
+            _to_rdata(μ_prev, ∂μ_prev),
+            _to_rdata(Σ_prev, ∂Σ_prev),
+            _to_rdata(A_p, ∂A),
+            _to_rdata(b_p, ∂b),
+            _to_rdata(Q_p, ∂Q),
+            _to_rdata(H_p, ∂H),
+            _to_rdata(c_p, ∂c),
+            _to_rdata(R_p, ∂R),
+            NoRData(),
+            NoRData(),
+        )
+    end
+
+    return CoDual((μ_filt, Σ_filt, ll), NoFData()), _kalman_step_pb
+end
 
 end # module MooncakeExt

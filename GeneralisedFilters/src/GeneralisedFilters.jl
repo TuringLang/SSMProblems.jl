@@ -163,7 +163,6 @@ include("algorithms/csmc.jl")
 
 # Integrations (log-density interface for particle Gibbs)
 include("integrations/logdensity.jl")
-include("integrations/kalman_rrule.jl")
 include("integrations/particle_gibbs.jl")
 include("integrations/ssm_trajectory.jl")
 
