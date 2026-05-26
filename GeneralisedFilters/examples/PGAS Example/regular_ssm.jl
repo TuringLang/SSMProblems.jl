@@ -10,7 +10,6 @@ using Random
 using Statistics
 using SSMProblems
 using StaticArrays
-using Zygote
 
 rng = MersenneTwister(1234)
 

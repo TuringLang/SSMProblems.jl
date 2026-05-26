@@ -1,4 +1,5 @@
 using GeneralisedFilters
+using GeneralisedFilters: TimeVarying
 using AbstractMCMC: AbstractMCMC
 using AdvancedHMC
 using ADTypes: ADTypes
@@ -11,7 +12,6 @@ using Random
 using Statistics
 using SSMProblems
 using StaticArrays
-using Zygote
 using Mooncake
 
 rng = MersenneTwister(1234)
@@ -37,20 +37,22 @@ N_adapts = 500
 # b-dependent InnerDynamics. All captured values have concrete static types,
 # which keeps the closure type stable.
 function make_ssm_builder(; a, q², c_val, r², σ₀²)
-    outer_prior = HomogeneousGaussianPrior(SVector{1}(0.0), PDMat(SMatrix{1,1}(σ₀²)))
-    outer_dyn = HomogeneousLinearGaussianLatentDynamics(
+    outer_prior = GaussianPrior(SVector{1}(0.0), PDMat(SMatrix{1,1}(σ₀²)))
+    outer_dyn = LinearGaussianLatentDynamics(
         SMatrix{1,1}(a), SVector{1}(0.0), PDMat(SMatrix{1,1}(q²))
     )
-    inner_prior = HomogeneousGaussianPrior(SVector{1}(0.0), PDMat(SMatrix{1,1}(σ₀²)))
+    inner_prior = GaussianPrior(SVector{1}(0.0), PDMat(SMatrix{1,1}(σ₀²)))
     A_inner = SMatrix{1,1}(a)
     C = SMatrix{1,1}(c_val)
     Q_inner = PDMat(SMatrix{1,1}(q²))
-    inner_obs = HomogeneousLinearGaussianObservationProcess(
+    inner_obs = LinearGaussianObservationProcess(
         SMatrix{1,1}(1.0), SVector{1}(0.0), PDMat(SMatrix{1,1}(r²))
     )
     return function (b::AbstractVector{BT}) where {BT<:Real}
-        inner_dyn = GeneralisedFilters.GFTest.InnerDynamics(
-            A_inner, SVector{1,BT}(b), C, Q_inner
+        inner_dyn = LinearGaussianLatentDynamics(
+            A_inner,
+            TimeVarying(GeneralisedFilters.GFTest.InnerDriftFn(SVector{1,BT}(b), C)),
+            Q_inner,
         )
         return HierarchicalSSM(outer_prior, outer_dyn, inner_prior, inner_dyn, inner_obs)
     end
