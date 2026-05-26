@@ -2,7 +2,7 @@ using LogDensityProblems: LogDensityProblems
 import Distributions: logpdf
 import PDMats: AbstractPDMat, PDMat
 
-export ssm_loglikelihood, trajectory_logdensity, inner_loglikelihood, kf_loglikelihood
+export ssm_loglikelihood, trajectory_logdensity, kf_loglikelihood
 export ParameterisedSSM, SSMParameterLogDensity
 
 ## SSM LOG-LIKELIHOOD ##########################################################################
@@ -92,7 +92,8 @@ Compute the joint log-density of an outer trajectory and observations under a hi
     log p(u₀) + Σ_t log p(uₜ | uₜ₋₁) + log p(y₁:T | u₀:T)
 
 The last term is the marginal log-likelihood of the inner model conditioned on the outer
-trajectory, computed by `inner_loglikelihood` using the analytical filter `af`.
+trajectory, computed by [`ssm_loglikelihood`](@ref) with `prev_outer` / `new_outer`
+[`TimeVarying`](@ref) controls carrying the outer states.
 
 The `outer_trajectory` should be a [`ReferenceTrajectory`](@ref) indexed from 0.
 """
@@ -104,7 +105,6 @@ function trajectory_logdensity(
 )
     T = length(observations)
 
-    # Outer prior + transitions
     ll = logpdf(SSMProblems.distribution(model.outer_prior), outer_trajectory[0])
     for t in 1:T
         ll += SSMProblems.logdensity(
@@ -112,68 +112,13 @@ function trajectory_logdensity(
         )
     end
 
-    # Inner marginal log-likelihood via analytical filter
-    ll += inner_loglikelihood(af, model.inner_model, outer_trajectory, observations)
+    controls = (
+        prev_outer=TimeVarying(t -> outer_trajectory[t - 1]),
+        new_outer=TimeVarying(t -> outer_trajectory[t]),
+    )
+    ll += ssm_loglikelihood(af, model.inner_model, nothing, observations; controls=controls)
 
     return ll
-end
-
-## INNER LOG-LIKELIHOOD ########################################################################
-
-"""
-    inner_loglikelihood(af::AbstractFilter, inner_model, outer_trajectory, observations)
-
-Compute the marginal log-likelihood log p(y₁:T | u₀:T) of the inner model conditioned on
-the outer trajectory, using the analytical filter `af`.
-
-Dispatches on the filter type to select the appropriate algorithm.
-"""
-function inner_loglikelihood end
-
-"""
-    inner_loglikelihood(af::KalmanFilter, inner_model, states, observations)
-
-KalmanFilter specialization: extracts linear-Gaussian parameters at each timestep and
-delegates to `kf_loglikelihood`.
-
-`states` is a 1-indexed vector with `states[1] = u₀` and `states[t+1] = uₜ`.
-For [`ReferenceTrajectory`](@ref) trajectories (0-indexed), a converting wrapper is provided.
-"""
-function inner_loglikelihood(
-    af::KalmanFilter,
-    inner_model::StateSpaceModel,
-    states::AbstractVector,
-    observations::AbstractVector,
-)
-    T = length(observations)
-    inner_dyn = inner_model.dyn
-    inner_obs = inner_model.obs
-    inner_pr = inner_model.prior
-
-    μ0 = calc_μ0(inner_pr; new_outer=states[1])
-    Σ0 = calc_Σ0(inner_pr; new_outer=states[1])
-
-    As = map(t -> calc_A(inner_dyn, t; prev_outer=states[t], new_outer=states[t + 1]), 1:T)
-    bs = map(t -> calc_b(inner_dyn, t; prev_outer=states[t], new_outer=states[t + 1]), 1:T)
-    Qs = map(t -> calc_Q(inner_dyn, t; prev_outer=states[t], new_outer=states[t + 1]), 1:T)
-    Hs = map(t -> calc_H(inner_obs, t; new_outer=states[t + 1]), 1:T)
-    cs = map(t -> calc_c(inner_obs, t; new_outer=states[t + 1]), 1:T)
-    Rs = map(t -> calc_R(inner_obs, t; new_outer=states[t + 1]), 1:T)
-
-    return kf_loglikelihood(μ0, Σ0, As, bs, Qs, Hs, cs, Rs, observations, af.jitter)
-end
-
-# Wrapper for 0-indexed ReferenceTrajectory inputs, used by trajectory_logdensity.
-function inner_loglikelihood(
-    af::KalmanFilter,
-    inner_model::StateSpaceModel,
-    outer_trajectory::ReferenceTrajectory,
-    observations::AbstractVector,
-)
-    T = length(observations)
-    return inner_loglikelihood(
-        af, inner_model, [outer_trajectory[t] for t in 0:T], observations
-    )
 end
 
 ## KF LOG-LIKELIHOOD ###########################################################################

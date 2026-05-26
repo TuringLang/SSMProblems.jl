@@ -132,7 +132,13 @@ function _logpdf(d::SSMTrajectory{<:HierarchicalSSM}, x_flat::AbstractVector{<:R
         ll += SSMProblems.logdensity(m.outer_dyn, t, states[t], states[t + 1])
     end
 
-    ll += inner_loglikelihood(d.af, m.inner_model, states, d.observations)
+    controls = (
+        prev_outer=TimeVarying(t -> states[t]),
+        new_outer=TimeVarying(t -> states[t + 1]),
+    )
+    ll += ssm_loglikelihood(
+        d.af, m.inner_model, nothing, d.observations; controls=controls
+    )
     return ll
 end
 
