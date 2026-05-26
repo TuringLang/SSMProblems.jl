@@ -41,9 +41,6 @@ using GeneralisedFilters:
     resolve_controls,
     step_params,
     KalmanFilter,
-    GaussianPrior,
-    LinearGaussianLatentDynamics,
-    LinearGaussianObservationProcess,
     LinearGaussianStateSpaceModel
 using SSMProblems: prior, dyn, obs
 
@@ -132,10 +129,15 @@ function _fp_finish_pullback!(f, ∂val, θ_cd, hoisted_controls)
 end
 
 ## ROUTING #####################################################################################
+#
+# Component walkers are generic over the component's NamedTuple-of-parameter-fields layout.
+# `@generated` unrolls the field loop at compile time so the dispatch on each wrapper's
+# trait (`_route_param!` / `_route_param_prior!`) stays type-stable per concrete component
+# type. Adding a new model component (any struct of `AbstractModelParameter` fields)
+# requires no MooncakeExt changes.
 
-# Per-field step routing. Dispatches on the parameter wrapper's trait.
-_route_param!(_, ∂θ_rd, ::Fixed, _, _, _, _) = ∂θ_rd
-_route_param!(_, ∂θ_rd, ::TimeVarying, _, _, _, _) = ∂θ_rd
+# Per-field step trait dispatch (used by dyn / obs).
+_route_param!(_, ∂θ_rd, ::Union{Fixed,TimeVarying}, _, _, _, _) = ∂θ_rd
 function _route_param!(buf, ∂θ_rd, ::FixedParametric, ∂val, _, _, _)
     _acc_fp!(buf, ∂val)
     return ∂θ_rd
@@ -144,48 +146,19 @@ function _route_param!(_, ∂θ_rd, p::TimeVaryingParametric, ∂val, θ_cd, t, 
     return _add_rdata(∂θ_rd, _tvp_step_pullback!(p.f, ∂val, θ_cd, t, resolved))
 end
 
-function _route_dyn_step!(
-    bufs, ∂θ_rd, dyn::LinearGaussianLatentDynamics, ∂vals, θ_cd, t, resolved
-)
-    ∂θ_rd = _route_param!(bufs.A, ∂θ_rd, dyn.A, ∂vals.A, θ_cd, t, resolved)
-    ∂θ_rd = _route_param!(bufs.b, ∂θ_rd, dyn.b, ∂vals.b, θ_cd, t, resolved)
-    ∂θ_rd = _route_param!(bufs.Q, ∂θ_rd, dyn.Q, ∂vals.Q, θ_cd, t, resolved)
-    return ∂θ_rd
-end
-
-function _route_obs_step!(
-    bufs, ∂θ_rd, obs::LinearGaussianObservationProcess, ∂vals, θ_cd, t, resolved
-)
-    ∂θ_rd = _route_param!(bufs.H, ∂θ_rd, obs.H, ∂vals.H, θ_cd, t, resolved)
-    ∂θ_rd = _route_param!(bufs.c, ∂θ_rd, obs.c, ∂vals.c, θ_cd, t, resolved)
-    ∂θ_rd = _route_param!(bufs.R, ∂θ_rd, obs.R, ∂vals.R, θ_cd, t, resolved)
-    return ∂θ_rd
-end
-
-# Prior routing (no time index; only FixedParametric makes sense).
-_route_prior_field!(_, ∂θ_rd, ::Fixed, _, _, _) = ∂θ_rd
-_route_prior_field!(_, ∂θ_rd, ::TimeVarying, _, _, _) = ∂θ_rd
-function _route_prior_field!(buf, ∂θ_rd, ::FixedParametric, ∂val, _, _)
+# Per-field prior trait dispatch (no time index; TVP forbidden).
+_route_param_prior!(_, ∂θ_rd, ::Union{Fixed,TimeVarying}, _) = ∂θ_rd
+function _route_param_prior!(buf, ∂θ_rd, ::FixedParametric, ∂val)
     _acc_fp!(buf, ∂val)
     return ∂θ_rd
 end
-function _route_prior_field!(_, _, ::TimeVaryingParametric, _, _, _)
+function _route_param_prior!(_, _, ::TimeVaryingParametric, _)
     return error(
         "TimeVaryingParametric is not valid for prior parameters; use FixedParametric"
     )
 end
 
-function _route_prior!(bufs, ∂θ_rd, prior::GaussianPrior, ∂vals, θ_cd, hoisted_controls)
-    ∂θ_rd = _route_prior_field!(
-        bufs.μ0, ∂θ_rd, prior.μ0, ∂vals.μ0, θ_cd, hoisted_controls
-    )
-    ∂θ_rd = _route_prior_field!(
-        bufs.Σ0, ∂θ_rd, prior.Σ0, ∂vals.Σ0, θ_cd, hoisted_controls
-    )
-    return ∂θ_rd
-end
-
-# End-of-loop FixedParametric pullback per field.
+# End-of-loop FixedParametric pullback per field (shared across step / prior).
 _finish_fp_field!(∂θ_rd, _, ::Nothing, _, _) = ∂θ_rd
 function _finish_fp_field!(
     ∂θ_rd, p::FixedParametric, buf::Base.RefValue{Any}, θ_cd, hoisted_controls
@@ -194,28 +167,77 @@ function _finish_fp_field!(
     return _add_rdata(∂θ_rd, _fp_finish_pullback!(p.f, buf[], θ_cd, hoisted_controls))
 end
 
-function _finish_dyn_fp!(
-    ∂θ_rd, dyn::LinearGaussianLatentDynamics, bufs, θ_cd, hoisted_controls
-)
-    ∂θ_rd = _finish_fp_field!(∂θ_rd, dyn.A, bufs.A, θ_cd, hoisted_controls)
-    ∂θ_rd = _finish_fp_field!(∂θ_rd, dyn.b, bufs.b, θ_cd, hoisted_controls)
-    ∂θ_rd = _finish_fp_field!(∂θ_rd, dyn.Q, bufs.Q, θ_cd, hoisted_controls)
-    return ∂θ_rd
+# Per-component buffer NamedTuple, keyed by the component's field names.
+@generated function _make_fp_buffers(component)
+    pairs = [
+        :($(QuoteNode(k)) = _make_fp_buffer(getfield(component, $(QuoteNode(k))))) for
+        k in fieldnames(component)
+    ]
+    return Expr(:tuple, pairs...)
 end
 
-function _finish_obs_fp!(
-    ∂θ_rd, obs::LinearGaussianObservationProcess, bufs, θ_cd, hoisted_controls
-)
-    ∂θ_rd = _finish_fp_field!(∂θ_rd, obs.H, bufs.H, θ_cd, hoisted_controls)
-    ∂θ_rd = _finish_fp_field!(∂θ_rd, obs.c, bufs.c, θ_cd, hoisted_controls)
-    ∂θ_rd = _finish_fp_field!(∂θ_rd, obs.R, bufs.R, θ_cd, hoisted_controls)
-    return ∂θ_rd
+# Step routing: walk a component's fields, dispatching each via _route_param!.
+@generated function _route_component_step!(
+    bufs::NamedTuple{N}, ∂θ_rd, component, ∂vals::NamedTuple{N}, θ_cd, t, resolved
+) where {N}
+    exprs = Expr[]
+    for k in N
+        sym = QuoteNode(k)
+        push!(
+            exprs,
+            :(∂θ_rd = _route_param!(
+                getfield(bufs, $sym),
+                ∂θ_rd,
+                getfield(component, $sym),
+                getfield(∂vals, $sym),
+                θ_cd,
+                t,
+                resolved,
+            )),
+        )
+    end
+    return Expr(:block, exprs..., :(return ∂θ_rd))
 end
 
-function _finish_prior_fp!(∂θ_rd, prior::GaussianPrior, bufs, θ_cd, hoisted_controls)
-    ∂θ_rd = _finish_fp_field!(∂θ_rd, prior.μ0, bufs.μ0, θ_cd, hoisted_controls)
-    ∂θ_rd = _finish_fp_field!(∂θ_rd, prior.Σ0, bufs.Σ0, θ_cd, hoisted_controls)
-    return ∂θ_rd
+# Prior routing: walk a prior's fields, dispatching each via _route_param_prior!.
+@generated function _route_prior_component!(
+    bufs::NamedTuple{N}, ∂θ_rd, prior, ∂vals::NamedTuple{N}
+) where {N}
+    exprs = Expr[]
+    for k in N
+        sym = QuoteNode(k)
+        push!(
+            exprs,
+            :(∂θ_rd = _route_param_prior!(
+                getfield(bufs, $sym),
+                ∂θ_rd,
+                getfield(prior, $sym),
+                getfield(∂vals, $sym),
+            )),
+        )
+    end
+    return Expr(:block, exprs..., :(return ∂θ_rd))
+end
+
+# End-of-loop FP finishing: shared across dyn / obs / prior.
+@generated function _finish_fp_component!(
+    ∂θ_rd, component, bufs::NamedTuple{N}, θ_cd, hoisted_controls
+) where {N}
+    exprs = Expr[]
+    for k in N
+        sym = QuoteNode(k)
+        push!(
+            exprs,
+            :(∂θ_rd = _finish_fp_field!(
+                ∂θ_rd,
+                getfield(component, $sym),
+                getfield(bufs, $sym),
+                θ_cd,
+                hoisted_controls,
+            )),
+        )
+    end
+    return Expr(:block, exprs..., :(return ∂θ_rd))
 end
 
 ## RRULE!! #####################################################################################
@@ -277,42 +299,31 @@ function Mooncake.rrule!!(
         ∂state = _zero_state_cotangent(filter, states[T + 1])
         ∂θ_rd = Mooncake.zero_rdata(θ)
 
-        dyn_bufs = (
-            A=_make_fp_buffer(dyn(model).A),
-            b=_make_fp_buffer(dyn(model).b),
-            Q=_make_fp_buffer(dyn(model).Q),
-        )
-        obs_bufs = (
-            H=_make_fp_buffer(obs(model).H),
-            c=_make_fp_buffer(obs(model).c),
-            R=_make_fp_buffer(obs(model).R),
-        )
-        prior_bufs = (
-            μ0=_make_fp_buffer(prior(model).μ0),
-            Σ0=_make_fp_buffer(prior(model).Σ0),
-        )
+        dyn_bufs = _make_fp_buffers(dyn(model))
+        obs_bufs = _make_fp_buffers(obs(model))
+        prior_bufs = _make_fp_buffers(prior(model))
 
         for t in T:-1:1
             ∂state, ∂dyn_p, ∂obs_p = _step_pullback(
                 filter, ∂state, Δll, caches[t], dyn(model), obs(model)
             )
             resolved = resolved_per_step[t]
-            ∂θ_rd = _route_dyn_step!(
+            ∂θ_rd = _route_component_step!(
                 dyn_bufs, ∂θ_rd, dyn(model), ∂dyn_p, θ_cd, t, resolved
             )
-            ∂θ_rd = _route_obs_step!(
+            ∂θ_rd = _route_component_step!(
                 obs_bufs, ∂θ_rd, obs(model), ∂obs_p, θ_cd, t, resolved
             )
         end
 
         ∂prior_p = _initial_pullback(filter, ∂state, prior(model))
-        ∂θ_rd = _route_prior!(
-            prior_bufs, ∂θ_rd, prior(model), ∂prior_p, θ_cd, hoisted_controls
-        )
+        ∂θ_rd = _route_prior_component!(prior_bufs, ∂θ_rd, prior(model), ∂prior_p)
 
-        ∂θ_rd = _finish_dyn_fp!(∂θ_rd, dyn(model), dyn_bufs, θ_cd, hoisted_controls)
-        ∂θ_rd = _finish_obs_fp!(∂θ_rd, obs(model), obs_bufs, θ_cd, hoisted_controls)
-        ∂θ_rd = _finish_prior_fp!(∂θ_rd, prior(model), prior_bufs, θ_cd, hoisted_controls)
+        ∂θ_rd = _finish_fp_component!(∂θ_rd, dyn(model), dyn_bufs, θ_cd, hoisted_controls)
+        ∂θ_rd = _finish_fp_component!(∂θ_rd, obs(model), obs_bufs, θ_cd, hoisted_controls)
+        ∂θ_rd = _finish_fp_component!(
+            ∂θ_rd, prior(model), prior_bufs, θ_cd, hoisted_controls
+        )
 
         return (NoRData(), NoRData(), NoRData(), ∂θ_rd, NoRData(), NoRData())
     end
