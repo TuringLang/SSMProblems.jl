@@ -2,6 +2,7 @@ module GeneralisedFilters
 
 using AbstractMCMC: AbstractMCMC, AbstractSampler
 using ADTypes: ADTypes
+using ChainRulesCore: NoTangent
 import Distributions: MvNormal, params
 import Random: AbstractRNG, default_rng, rand
 import SSMProblems: prior, dyn, obs

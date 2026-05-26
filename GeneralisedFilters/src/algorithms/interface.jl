@@ -78,6 +78,54 @@ function predict(model, algo, step, filtered, observation; kwargs...)
     return predict(default_rng(), model, algo, step, filtered, observation; kwargs...)
 end
 
+## STEP INTERFACE ###########################################################################
+#
+# Lower-level filter interface used by `ssm_loglikelihood` and its rrule. Each filter
+# implements `_step_initial`, `_step_forward`, `_step_pullback`, and `_initial_pullback`
+# on already-resolved parameter NamedTuples. The rrule does parameter resolution and
+# the user-function AD generically; the analytical math and the trait-driven
+# gradient-skipping live behind the step interface.
+
+"""
+    _step_initial(filter, prior_params::NamedTuple) -> state
+
+Construct the initial filtered state from resolved prior parameters. Filter-specific.
+"""
+function _step_initial end
+
+"""
+    _step_forward(filter, state, dyn_params::NamedTuple, obs_params::NamedTuple, y)
+        -> (new_state, ll_inc, cache)
+
+One filter step (predict + update) with already-resolved parameter NamedTuples. Returns
+the new state, log-likelihood increment, and a cache of intermediates sufficient for
+[`_step_pullback`](@ref) to re-derive everything it needs without rerunning the forward
+arithmetic.
+"""
+function _step_forward end
+
+"""
+    _step_pullback(filter, ∂state_out, Δll, cache, dyn_component, obs_component)
+        -> (∂state_in, ∂dyn_params, ∂obs_params)
+
+Reverse-mode chain through one filter step. Returns the cotangent on the input state and
+NamedTuples of cotangents for the dynamics and observation parameter values.
+
+The model components are passed (rather than only their resolved values) so the
+implementation can dispatch on each field's trait at compile time and emit `NoTangent`
+for non-θ-dependent (`Fixed` / `TimeVarying`) parameters — the corresponding gradient
+arithmetic is elided.
+"""
+function _step_pullback end
+
+"""
+    _initial_pullback(filter, ∂state, prior_component) -> ∂prior_params
+
+Reverse-mode chain through [`_step_initial`](@ref). Same trait-driven dispatch as
+[`_step_pullback`](@ref).
+"""
+function _initial_pullback end
+
 ## SMOOTHING INTERFACE #####################################################################
 
 export smooth, backward_smooth, two_filter_smooth
