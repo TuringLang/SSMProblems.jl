@@ -1,4 +1,4 @@
-"""Tests for the log-density interface (trajectory_logdensity, kf_loglikelihood, rrule)."""
+"""Tests for the log-density interface (trajectory_logdensity, ssm_loglikelihood)."""
 
 ## Regular SSM trajectory_logdensity ###########################################################
 
@@ -86,49 +86,6 @@ end
 
         @test ll ≈ ll_manual
     end
-end
-
-## kf_loglikelihood value ######################################################################
-
-@testitem "kf_loglikelihood value" begin
-    using GeneralisedFilters
-    using SSMProblems
-    using StableRNGs
-    using PDMats
-
-    rng = StableRNG(1234)
-    Dx, Dy, T = 2, 2, 5
-    model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
-    _, _, ys = SSMProblems.sample(rng, model, T)
-
-    # Extract parameters
-    pr = SSMProblems.prior(model)
-    dy = SSMProblems.dyn(model)
-    ob = SSMProblems.obs(model)
-
-    μ0 = GeneralisedFilters.calc_μ0(pr)
-    Σ0 = GeneralisedFilters.calc_Σ0(pr)
-    A = GeneralisedFilters.calc_A(dy, 1)
-    b = GeneralisedFilters.calc_b(dy, 1)
-    Q = GeneralisedFilters.calc_Q(dy, 1)
-    H = GeneralisedFilters.calc_H(ob, 1)
-    c = GeneralisedFilters.calc_c(ob, 1)
-    R = GeneralisedFilters.calc_R(ob, 1)
-
-    # Homogeneous: same params at each timestep
-    As = fill(A, T)
-    bs = fill(b, T)
-    Qs = fill(Q, T)
-    Hs = fill(H, T)
-    cs = fill(c, T)
-    Rs = fill(R, T)
-
-    ll_kf = kf_loglikelihood(μ0, Σ0, As, bs, Qs, Hs, cs, Rs, ys)
-
-    # Compare against filter()
-    _, ll_filter = GeneralisedFilters.filter(model, KF(), ys)
-
-    @test ll_kf ≈ ll_filter
 end
 
 ## SSMParameterLogDensity ######################################################################

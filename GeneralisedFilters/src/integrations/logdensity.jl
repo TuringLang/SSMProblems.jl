@@ -1,8 +1,7 @@
 using LogDensityProblems: LogDensityProblems
 import Distributions: logpdf
-import PDMats: AbstractPDMat, PDMat
 
-export ssm_loglikelihood, trajectory_logdensity, kf_loglikelihood
+export ssm_loglikelihood, trajectory_logdensity
 export ParameterisedSSM, SSMParameterLogDensity
 
 ## SSM LOG-LIKELIHOOD ##########################################################################
@@ -46,14 +45,14 @@ function _ssm_loglikelihood(filter, model, θ, ys, controls)
     dyn_hoist = hoist_static(dyn(model), θ, hoisted_controls)
     obs_hoist = hoist_static(obs(model), θ, hoisted_controls)
 
-    prior_params = map(_val, step_params(prior(model), θ, hoisted_controls, prior_hoist))
+    prior_params = step_params(prior(model), θ, hoisted_controls, prior_hoist)
     state = _step_initial(filter, prior_params)
 
     ll = zero(eltype(eltype(ys)))
     for t in eachindex(ys)
         resolved = resolve_controls(controls, hoisted_controls, θ, t)
-        dyn_params = map(_val, step_params(dyn(model), θ, t, resolved, dyn_hoist))
-        obs_params = map(_val, step_params(obs(model), θ, t, resolved, obs_hoist))
+        dyn_params = step_params(dyn(model), θ, t, resolved, dyn_hoist)
+        obs_params = step_params(obs(model), θ, t, resolved, obs_hoist)
         state, ll_inc, _ = _step_forward(filter, state, dyn_params, obs_params, ys[t])
         ll += ll_inc
     end
@@ -118,29 +117,6 @@ function trajectory_logdensity(
     )
     ll += ssm_loglikelihood(af, model.inner_model, nothing, observations; controls=controls)
 
-    return ll
-end
-
-## KF LOG-LIKELIHOOD ###########################################################################
-
-"""
-    kf_loglikelihood(μ0, Σ0, As, bs, Qs, Hs, cs, Rs, ys)
-
-Compute the marginal log-likelihood of observations under a linear-Gaussian model via the
-Kalman filter forward pass. Plain Julia — Mooncake reverse-mode AD traces through the loop
-and uses the rrule!! registered on `_kalman_step` for the per-step analytical gradients.
-"""
-function kf_loglikelihood(μ0, Σ0, As, bs, Qs, Hs, cs, Rs, ys, jitter=nothing)
-    T = length(ys)
-    μ = μ0
-    Σ = Σ0 isa AbstractPDMat ? Σ0 : PDMat(Σ0)
-    ll = zero(eltype(μ0))
-    for t in 1:T
-        μ, Σ, ll_inc = _kalman_step(
-            μ, Σ, As[t], bs[t], Qs[t], Hs[t], cs[t], Rs[t], ys[t], jitter
-        )
-        ll += ll_inc
-    end
     return ll
 end
 

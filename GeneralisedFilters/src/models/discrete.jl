@@ -42,7 +42,7 @@ function hoist_static(p::DiscretePrior, θ, hoisted_controls)
 end
 
 function step_params(p::DiscretePrior, θ, hoisted_controls, hoist)
-    return (α0=_step_tagged(p.α0, θ, 0, hoisted_controls, hoist.α0),)
+    return (α0=_step_eval(p.α0, θ, 0, hoisted_controls, hoist.α0),)
 end
 
 function hoist_static(c::DiscreteLatentDynamics, θ, hoisted_controls)
@@ -50,7 +50,7 @@ function hoist_static(c::DiscreteLatentDynamics, θ, hoisted_controls)
 end
 
 function step_params(c::DiscreteLatentDynamics, θ, t, resolved, hoist)
-    return (P=_step_tagged(c.P, θ, t, resolved, hoist.P),)
+    return (P=_step_eval(c.P, θ, t, resolved, hoist.P),)
 end
 
 ## CALC-* SHIMS ############################################################################

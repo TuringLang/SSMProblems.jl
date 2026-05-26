@@ -78,16 +78,16 @@ as_parameter(x) = Fixed(x)
     _val(x)
 
 Unwrap a [`Fixed`](@ref) tag to its underlying value. Pass-through for plain (non-
-parameter) values. Used inside `_kalman_step` and analogous primitives to obtain the
-raw matrix/vector arguments from possibly-tagged parameters.
+parameter) values. Used by callers that may receive either a `Fixed` wrapper or a
+raw value (e.g. legacy `calc_*` shims).
 
 Calling `_val` on any other [`AbstractModelParameter`](@ref) is a programming error —
-parameters that reach the primitive must already have been resolved by `_step_tagged`.
+parameters should be resolved via [`_step_eval`](@ref) before reaching the primitive.
 """
 _val(x::Fixed) = x.value
 function _val(x::AbstractModelParameter)
     return error(
-        "_val called on an unresolved $(typeof(x)); parameters must be resolved via _step_tagged before reaching the primitive",
+        "_val called on an unresolved $(typeof(x)); parameters must be resolved via _step_eval before reaching the primitive",
     )
 end
 _val(x) = x

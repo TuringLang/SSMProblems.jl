@@ -104,10 +104,9 @@ function _create_log_density_model(
         throw(
             ArgumentError(
                 "HierarchicalSSM models require a reverse-mode AD backend for gradient " *
-                "computation (the ChainRules rrule on kf_loglikelihood is not picked up " *
-                "by ForwardDiff). Specify `adtype=AutoZygote()` (or another reverse-mode " *
-                "backend) when constructing ParticleGibbs, and load the corresponding " *
-                "package (e.g., `using Zygote`).",
+                "computation (the analytical rrule on ssm_loglikelihood lives in the " *
+                "Mooncake extension). Specify `adtype=AutoMooncake()` when constructing " *
+                "ParticleGibbs and load `Mooncake`.",
             ),
         )
     end

@@ -387,7 +387,7 @@ end
 
 ## Joint NUTS: RB SSM with Mooncake ############################################################
 # Runs NUTS directly on (b, u₀:T) — no ParticleGibbs alternation. MooncakeExt provides a
-# native rrule!! for kf_loglikelihood that handles PDMat covariances correctly.
+# native rrule!! for ssm_loglikelihood that handles PDMat covariances correctly.
 
 @testitem "Joint NUTS: RB SSM with Mooncake" tags = [:mooncake] begin
     using GeneralisedFilters

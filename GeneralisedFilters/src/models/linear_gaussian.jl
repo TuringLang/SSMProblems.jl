@@ -99,8 +99,8 @@ end
 
 function step_params(p::GaussianPrior, θ, hoisted_controls, hoist)
     return (
-        μ0=_step_tagged(p.μ0, θ, 0, hoisted_controls, hoist.μ0),
-        Σ0=_step_tagged(p.Σ0, θ, 0, hoisted_controls, hoist.Σ0),
+        μ0=_step_eval(p.μ0, θ, 0, hoisted_controls, hoist.μ0),
+        Σ0=_step_eval(p.Σ0, θ, 0, hoisted_controls, hoist.Σ0),
     )
 end
 
@@ -114,9 +114,9 @@ end
 
 function step_params(c::LinearGaussianLatentDynamics, θ, t, resolved, hoist)
     return (
-        A=_step_tagged(c.A, θ, t, resolved, hoist.A),
-        b=_step_tagged(c.b, θ, t, resolved, hoist.b),
-        Q=_step_tagged(c.Q, θ, t, resolved, hoist.Q),
+        A=_step_eval(c.A, θ, t, resolved, hoist.A),
+        b=_step_eval(c.b, θ, t, resolved, hoist.b),
+        Q=_step_eval(c.Q, θ, t, resolved, hoist.Q),
     )
 end
 
@@ -130,9 +130,9 @@ end
 
 function step_params(c::LinearGaussianObservationProcess, θ, t, resolved, hoist)
     return (
-        H=_step_tagged(c.H, θ, t, resolved, hoist.H),
-        c=_step_tagged(c.c, θ, t, resolved, hoist.c),
-        R=_step_tagged(c.R, θ, t, resolved, hoist.R),
+        H=_step_eval(c.H, θ, t, resolved, hoist.H),
+        c=_step_eval(c.c, θ, t, resolved, hoist.c),
+        R=_step_eval(c.R, θ, t, resolved, hoist.R),
     )
 end
 
