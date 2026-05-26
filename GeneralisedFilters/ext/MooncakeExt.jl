@@ -21,10 +21,11 @@ Architecture:
   FRESH `θ_inner_cd = zero_fcodual(θ)` with the inner fdata explicitly accumulated into
   the outer `θ_cd.dx` afterwards — sharing one `θ_cd` across multiple inner rule calls
   corrupts the fdata when the user closure involves array slicing (see design doc).
-
-Limitation: parametric parameters that read parametric controls (the "shared
-θ-dependent computation" pattern) are not yet supported — `∂hoisted_controls` and
-`∂resolved` contributions from parameter pullbacks are silently discarded.
+- Parametric controls are supported. Per step, ∂resolved contributions from all TVP
+  parameters are summed and routed by each control's trait: TVP controls fire a per-step
+  Mooncake pullback through `p.f(θ, t)`; FP controls accumulate into a control-side
+  buffer. End-of-loop, ∂hoisted contributions from FP parameters route into the same
+  FP-control buffers, then each FP control fires one Mooncake pullback through `p.f(θ)`.
 """
 module MooncakeExt
 
@@ -84,38 +85,72 @@ function _acc_fp!(buf::Base.RefValue{Any}, ∂val)
     return nothing
 end
 
-# Per-step Mooncake pullback through a TimeVaryingParametric closure `f(θ, t, resolved)`.
-# Uses a fresh inner θ CoDual per call (sharing the outer θ_cd's fdata across multiple
-# rule invocations triggers a Mooncake misbehaviour for closures involving array
-# slicing — each call doubles existing fdata). After the pullback, the inner fdata is
+# Per-step Mooncake pullback through a TimeVaryingParametric parameter closure
+# `f(θ, t, resolved) -> param_value`. Uses a fresh inner θ CoDual per call (sharing the
+# outer θ_cd's fdata across multiple rule invocations triggers a Mooncake misbehaviour
+# for closures involving array slicing). After the pullback, the inner fdata is
 # accumulated into the outer θ_cd's fdata explicitly.
+#
+# Returns `(∂θ_rd, ∂resolved_tan)` where `∂resolved_tan` is a NamedTuple of per-field
+# tangents on `resolved` (used for routing parametric-controls contributions).
 function _tvp_step_pullback!(f, ∂val, θ_cd, t, resolved)
     θ = primal(θ_cd)
     rule = build_rrule(Tuple{typeof(f),typeof(θ),typeof(t),typeof(resolved)})
     θ_inner = zero_fcodual(θ)
-    out_cd, pb = rule(
-        zero_fcodual(f), θ_inner, zero_fcodual(t), zero_fcodual(resolved)
-    )
+    resolved_inner = zero_fcodual(resolved)
+    out_cd, pb = rule(zero_fcodual(f), θ_inner, zero_fcodual(t), resolved_inner)
     out_primal = primal(out_cd)
     ∂val_tan = primal_to_tangent!!(zero_tangent(out_primal), ∂val)
     increment_internal!!(NoCache(), out_cd.dx, fdata(∂val_tan))
-    _, ∂θ_rd, _, _ = pb(rdata(∂val_tan))
+    _, ∂θ_rd, _, ∂resolved_rd = pb(rdata(∂val_tan))
     _accumulate_fdata!(θ_cd.dx, θ_inner.dx)
-    return ∂θ_rd
+    ∂resolved_tan = Mooncake.tangent(resolved_inner.dx, ∂resolved_rd)
+    return ∂θ_rd, ∂resolved_tan
 end
 
-# End-of-loop Mooncake pullback through a FixedParametric closure `f(θ, hoisted_controls)`.
-function _fp_finish_pullback!(f, ∂val, θ_cd, hoisted_controls)
+# Per-step Mooncake pullback through a TimeVaryingParametric *control* closure
+# `f(θ, t) -> control_value`. Same fresh-θ_inner pattern. Returns only ∂θ_rd.
+function _tvp_control_step_pullback!(f, ∂val, θ_cd, t)
     θ = primal(θ_cd)
-    rule = build_rrule(Tuple{typeof(f),typeof(θ),typeof(hoisted_controls)})
+    rule = build_rrule(Tuple{typeof(f),typeof(θ),typeof(t)})
     θ_inner = zero_fcodual(θ)
-    out_cd, pb = rule(
-        zero_fcodual(f), θ_inner, zero_fcodual(hoisted_controls)
-    )
+    out_cd, pb = rule(zero_fcodual(f), θ_inner, zero_fcodual(t))
     out_primal = primal(out_cd)
     ∂val_tan = primal_to_tangent!!(zero_tangent(out_primal), ∂val)
     increment_internal!!(NoCache(), out_cd.dx, fdata(∂val_tan))
     _, ∂θ_rd, _ = pb(rdata(∂val_tan))
+    _accumulate_fdata!(θ_cd.dx, θ_inner.dx)
+    return ∂θ_rd
+end
+
+# End-of-loop Mooncake pullback through a FixedParametric parameter closure
+# `f(θ, hoisted_controls) -> param_value`. Returns `(∂θ_rd, ∂hoisted_tan)`.
+function _fp_finish_pullback!(f, ∂val, θ_cd, hoisted_controls)
+    θ = primal(θ_cd)
+    rule = build_rrule(Tuple{typeof(f),typeof(θ),typeof(hoisted_controls)})
+    θ_inner = zero_fcodual(θ)
+    hoisted_inner = zero_fcodual(hoisted_controls)
+    out_cd, pb = rule(zero_fcodual(f), θ_inner, hoisted_inner)
+    out_primal = primal(out_cd)
+    ∂val_tan = primal_to_tangent!!(zero_tangent(out_primal), ∂val)
+    increment_internal!!(NoCache(), out_cd.dx, fdata(∂val_tan))
+    _, ∂θ_rd, ∂hoisted_rd = pb(rdata(∂val_tan))
+    _accumulate_fdata!(θ_cd.dx, θ_inner.dx)
+    ∂hoisted_tan = Mooncake.tangent(hoisted_inner.dx, ∂hoisted_rd)
+    return ∂θ_rd, ∂hoisted_tan
+end
+
+# End-of-loop Mooncake pullback through a FixedParametric *control* closure
+# `f(θ) -> control_value`. Returns only ∂θ_rd.
+function _fp_control_finish_pullback!(f, ∂val, θ_cd)
+    θ = primal(θ_cd)
+    rule = build_rrule(Tuple{typeof(f),typeof(θ)})
+    θ_inner = zero_fcodual(θ)
+    out_cd, pb = rule(zero_fcodual(f), θ_inner)
+    out_primal = primal(out_cd)
+    ∂val_tan = primal_to_tangent!!(zero_tangent(out_primal), ∂val)
+    increment_internal!!(NoCache(), out_cd.dx, fdata(∂val_tan))
+    _, ∂θ_rd = pb(rdata(∂val_tan))
     _accumulate_fdata!(θ_cd.dx, θ_inner.dx)
     return ∂θ_rd
 end
@@ -128,14 +163,17 @@ end
 # type. Adding a new model component (any struct of `AbstractModelParameter` fields)
 # requires no MooncakeExt changes.
 
-# Per-field step trait dispatch (used by dyn / obs).
-_route_param!(_, ∂θ_rd, ::Union{Fixed,TimeVarying}, _, _, _, _) = ∂θ_rd
+# Per-field step trait dispatch (used by dyn / obs). Returns `(∂θ_rd, ∂resolved_tan)`
+# where ∂resolved_tan is `nothing` for non-TVP fields and a NamedTuple of per-control
+# tangents for TVP fields (used to route parametric-controls contributions).
+_route_param!(_, ∂θ_rd, ::Union{Fixed,TimeVarying}, _, _, _, _) = (∂θ_rd, nothing)
 function _route_param!(buf, ∂θ_rd, ::FixedParametric, ∂val, _, _, _)
     _acc_fp!(buf, ∂val)
-    return ∂θ_rd
+    return (∂θ_rd, nothing)
 end
 function _route_param!(_, ∂θ_rd, p::TimeVaryingParametric, ∂val, θ_cd, t, resolved)
-    return _add_rdata(∂θ_rd, _tvp_step_pullback!(p.f, ∂val, θ_cd, t, resolved))
+    ∂θ_p, ∂resolved_tan = _tvp_step_pullback!(p.f, ∂val, θ_cd, t, resolved)
+    return (_add_rdata(∂θ_rd, ∂θ_p), ∂resolved_tan)
 end
 
 # Per-field prior trait dispatch (no time index; TVP forbidden).
@@ -150,45 +188,89 @@ function _route_param_prior!(_, _, ::TimeVaryingParametric, _)
     )
 end
 
-# End-of-loop FixedParametric pullback per field (shared across step / prior).
-_finish_fp_field!(∂θ_rd, _, ::Nothing, _, _) = ∂θ_rd
+# End-of-loop FixedParametric pullback per field. Returns `(∂θ_rd, ∂hoisted_tan)` where
+# ∂hoisted_tan is `nothing` when there's no FP contribution (buf empty), else a
+# NamedTuple of per-control tangents into `hoisted_controls`.
+_finish_fp_field!(∂θ_rd, _, ::Nothing, _, _) = (∂θ_rd, nothing)
 function _finish_fp_field!(
     ∂θ_rd, p::FixedParametric, buf::Base.RefValue{Any}, θ_cd, hoisted_controls
 )
+    buf[] === nothing && return (∂θ_rd, nothing)
+    ∂θ_p, ∂hoisted_tan = _fp_finish_pullback!(p.f, buf[], θ_cd, hoisted_controls)
+    return (_add_rdata(∂θ_rd, ∂θ_p), ∂hoisted_tan)
+end
+
+# Per-control step trait dispatch. The `∂val` is the cotangent on the resolved control
+# value for one step.
+_route_control!(_, ∂θ_rd, ::Union{Fixed,TimeVarying}, _, _, _) = ∂θ_rd
+function _route_control!(buf, ∂θ_rd, ::FixedParametric, ∂val, _, _)
+    _acc_fp!(buf, ∂val)
+    return ∂θ_rd
+end
+function _route_control!(_, ∂θ_rd, p::TimeVaryingParametric, ∂val, θ_cd, t)
+    return _add_rdata(∂θ_rd, _tvp_control_step_pullback!(p.f, ∂val, θ_cd, t))
+end
+
+# Per-control end-of-loop FP-control trait dispatch. The `∂val` is the cotangent on
+# the (Fixed or FP) entry of `hoisted_controls`. TVP controls don't appear in
+# `hoisted_controls` (they're nothing in hoist), so their hoist-cotangent path is
+# never exercised.
+_route_hoisted_control!(_, ∂θ_rd, ::Union{Fixed,TimeVarying}, _) = ∂θ_rd
+function _route_hoisted_control!(buf, ∂θ_rd, ::FixedParametric, ∂val)
+    _acc_fp!(buf, ∂val)
+    return ∂θ_rd
+end
+function _route_hoisted_control!(_, ∂θ_rd, ::TimeVaryingParametric, _)
+    # Shouldn't fire — TVP entries in hoisted_controls are `nothing` and shouldn't
+    # carry a contributing cotangent. Defensive no-op rather than erroring.
+    return ∂θ_rd
+end
+
+# End-of-loop FP-control pullback per field. ∂val is the buffer's accumulated tangent.
+_finish_fp_control_field!(∂θ_rd, _, ::Nothing, _) = ∂θ_rd
+function _finish_fp_control_field!(
+    ∂θ_rd, p::FixedParametric, buf::Base.RefValue{Any}, θ_cd
+)
     buf[] === nothing && return ∂θ_rd
-    return _add_rdata(∂θ_rd, _fp_finish_pullback!(p.f, buf[], θ_cd, hoisted_controls))
+    return _add_rdata(∂θ_rd, _fp_control_finish_pullback!(p.f, buf[], θ_cd))
 end
 
 # Per-component buffer NamedTuple, keyed by the component's field names.
 @generated function _make_fp_buffers(component)
     pairs = [
-        :($(QuoteNode(k)) = _make_fp_buffer(getfield(component, $(QuoteNode(k))))) for
+        Expr(:(=), k, :(_make_fp_buffer(getfield(component, $(QuoteNode(k)))))) for
         k in fieldnames(component)
     ]
     return Expr(:tuple, pairs...)
 end
 
 # Step routing: walk a component's fields, dispatching each via _route_param!.
+# Returns `(∂θ_rd, ∂resolved_acc)` where ∂resolved_acc is `nothing` (no TVP fields in
+# this component) or a NamedTuple of per-control tangents summed across this component's
+# TVP fields.
 @generated function _route_component_step!(
     bufs::NamedTuple{N}, ∂θ_rd, component, ∂vals::NamedTuple{N}, θ_cd, t, resolved
 ) where {N}
-    exprs = Expr[]
+    exprs = Expr[:(∂resolved_acc = nothing)]
     for k in N
         sym = QuoteNode(k)
         push!(
             exprs,
-            :(∂θ_rd = _route_param!(
-                getfield(bufs, $sym),
-                ∂θ_rd,
-                getfield(component, $sym),
-                getfield(∂vals, $sym),
-                θ_cd,
-                t,
-                resolved,
-            )),
+            :(begin
+                ∂θ_rd, ∂res = _route_param!(
+                    getfield(bufs, $sym),
+                    ∂θ_rd,
+                    getfield(component, $sym),
+                    getfield(∂vals, $sym),
+                    θ_cd,
+                    t,
+                    resolved,
+                )
+                ∂resolved_acc = _sum_nt(∂resolved_acc, ∂res)
+            end),
         )
     end
-    return Expr(:block, exprs..., :(return ∂θ_rd))
+    return Expr(:block, exprs..., :(return (∂θ_rd, ∂resolved_acc)))
 end
 
 # Prior routing: walk a prior's fields, dispatching each via _route_param_prior!.
@@ -211,25 +293,122 @@ end
     return Expr(:block, exprs..., :(return ∂θ_rd))
 end
 
-# End-of-loop FP finishing: shared across dyn / obs / prior.
+# End-of-loop FP finishing for one component. Returns `(∂θ_rd, ∂hoisted_acc)` where
+# ∂hoisted_acc accumulates per-control tangents into hoisted_controls across all FP
+# fields of this component.
 @generated function _finish_fp_component!(
     ∂θ_rd, component, bufs::NamedTuple{N}, θ_cd, hoisted_controls
+) where {N}
+    exprs = Expr[:(∂hoisted_acc = nothing)]
+    for k in N
+        sym = QuoteNode(k)
+        push!(
+            exprs,
+            :(begin
+                ∂θ_rd, ∂hoist = _finish_fp_field!(
+                    ∂θ_rd,
+                    getfield(component, $sym),
+                    getfield(bufs, $sym),
+                    θ_cd,
+                    hoisted_controls,
+                )
+                ∂hoisted_acc = _sum_nt(∂hoisted_acc, ∂hoist)
+            end),
+        )
+    end
+    return Expr(:block, exprs..., :(return (∂θ_rd, ∂hoisted_acc)))
+end
+
+## CONTROL ROUTING #############################################################################
+
+# Field-wise NamedTuple sum that tolerates either side being `nothing`. Used to
+# accumulate ∂resolved_step and ∂hoisted_acc across components.
+_sum_nt(a, ::Nothing) = a
+_sum_nt(::Nothing, b) = b
+_sum_nt(::Nothing, ::Nothing) = nothing
+@inline _sum_nt(a::NamedTuple{N}, b::NamedTuple{N}) where {N} = map(_sum_field, a, b)
+# Field-level helper: drop NoTangent or otherwise-absent contributions.
+_sum_field(a, ::Mooncake.NoTangent) = a
+_sum_field(::Mooncake.NoTangent, b) = b
+_sum_field(::Mooncake.NoTangent, ::Mooncake.NoTangent) = Mooncake.NoTangent()
+_sum_field(a, b) = a + b
+
+# Per-step controls routing: walk the controls NamedTuple, dispatching each on the
+# control's trait. `∂resolved_tan` is a NamedTuple with the same keys as `controls`.
+@generated function _route_controls_step!(
+    fp_ctrl_bufs::NamedTuple{N},
+    ∂θ_rd,
+    controls::NamedTuple{N},
+    ∂resolved_tan::NamedTuple{N},
+    θ_cd,
+    t,
 ) where {N}
     exprs = Expr[]
     for k in N
         sym = QuoteNode(k)
         push!(
             exprs,
-            :(∂θ_rd = _finish_fp_field!(
+            :(∂θ_rd = _route_control!(
+                getfield(fp_ctrl_bufs, $sym),
                 ∂θ_rd,
-                getfield(component, $sym),
-                getfield(bufs, $sym),
+                getfield(controls, $sym),
+                getfield(∂resolved_tan, $sym),
                 θ_cd,
-                hoisted_controls,
+                t,
             )),
         )
     end
     return Expr(:block, exprs..., :(return ∂θ_rd))
+end
+
+# End-of-loop controls routing for the ∂hoisted accumulator. Fixed/FP entries route as
+# before; TVP entries are no-ops because TVP controls aren't in `hoisted_controls`.
+@generated function _route_hoisted_controls!(
+    fp_ctrl_bufs::NamedTuple{N},
+    ∂θ_rd,
+    controls::NamedTuple{N},
+    ∂hoisted_tan::NamedTuple{N},
+) where {N}
+    exprs = Expr[]
+    for k in N
+        sym = QuoteNode(k)
+        push!(
+            exprs,
+            :(∂θ_rd = _route_hoisted_control!(
+                getfield(fp_ctrl_bufs, $sym),
+                ∂θ_rd,
+                getfield(controls, $sym),
+                getfield(∂hoisted_tan, $sym),
+            )),
+        )
+    end
+    return Expr(:block, exprs..., :(return ∂θ_rd))
+end
+
+# Fire FP-control pullbacks at end of loop.
+@generated function _finish_fp_controls!(
+    ∂θ_rd, controls::NamedTuple{N}, fp_ctrl_bufs::NamedTuple{N}, θ_cd
+) where {N}
+    exprs = Expr[]
+    for k in N
+        sym = QuoteNode(k)
+        push!(
+            exprs,
+            :(∂θ_rd = _finish_fp_control_field!(
+                ∂θ_rd, getfield(controls, $sym), getfield(fp_ctrl_bufs, $sym), θ_cd
+            )),
+        )
+    end
+    return Expr(:block, exprs..., :(return ∂θ_rd))
+end
+
+# Per-control FP buffer construction. Returns a NamedTuple keyed by control names with
+# `Ref{Any}` for FP entries and `nothing` for the rest (matches the param buffer pattern).
+@generated function _make_fp_control_buffers(controls::NamedTuple{N}) where {N}
+    pairs = [
+        Expr(:(=), k, :(_make_fp_buffer(getfield(controls, $(QuoteNode(k)))))) for k in N
+    ]
+    return Expr(:tuple, pairs...)
 end
 
 ## RRULE!! #####################################################################################
@@ -294,28 +473,47 @@ function Mooncake.rrule!!(
         dyn_bufs = _make_fp_buffers(dyn(model))
         obs_bufs = _make_fp_buffers(obs(model))
         prior_bufs = _make_fp_buffers(prior(model))
+        fp_ctrl_bufs = _make_fp_control_buffers(controls)
 
         for t in T:-1:1
             ∂state, ∂dyn_p, ∂obs_p = _step_pullback(
                 filter, ∂state, Δll, caches[t], dyn(model), obs(model)
             )
             resolved = resolved_per_step[t]
-            ∂θ_rd = _route_component_step!(
+            ∂θ_rd, ∂res_dyn = _route_component_step!(
                 dyn_bufs, ∂θ_rd, dyn(model), ∂dyn_p, θ_cd, t, resolved
             )
-            ∂θ_rd = _route_component_step!(
+            ∂θ_rd, ∂res_obs = _route_component_step!(
                 obs_bufs, ∂θ_rd, obs(model), ∂obs_p, θ_cd, t, resolved
             )
+            ∂resolved_step = _sum_nt(∂res_dyn, ∂res_obs)
+            if ∂resolved_step !== nothing
+                ∂θ_rd = _route_controls_step!(
+                    fp_ctrl_bufs, ∂θ_rd, controls, ∂resolved_step, θ_cd, t
+                )
+            end
         end
 
         ∂prior_p = _initial_pullback(filter, ∂state, prior(model))
         ∂θ_rd = _route_prior_component!(prior_bufs, ∂θ_rd, prior(model), ∂prior_p)
 
-        ∂θ_rd = _finish_fp_component!(∂θ_rd, dyn(model), dyn_bufs, θ_cd, hoisted_controls)
-        ∂θ_rd = _finish_fp_component!(∂θ_rd, obs(model), obs_bufs, θ_cd, hoisted_controls)
-        ∂θ_rd = _finish_fp_component!(
+        ∂θ_rd, ∂hoist_dyn = _finish_fp_component!(
+            ∂θ_rd, dyn(model), dyn_bufs, θ_cd, hoisted_controls
+        )
+        ∂θ_rd, ∂hoist_obs = _finish_fp_component!(
+            ∂θ_rd, obs(model), obs_bufs, θ_cd, hoisted_controls
+        )
+        ∂θ_rd, ∂hoist_prior = _finish_fp_component!(
             ∂θ_rd, prior(model), prior_bufs, θ_cd, hoisted_controls
         )
+        ∂hoisted_acc = _sum_nt(_sum_nt(∂hoist_dyn, ∂hoist_obs), ∂hoist_prior)
+        if ∂hoisted_acc !== nothing
+            ∂θ_rd = _route_hoisted_controls!(
+                fp_ctrl_bufs, ∂θ_rd, controls, ∂hoisted_acc
+            )
+        end
+
+        ∂θ_rd = _finish_fp_controls!(∂θ_rd, controls, fp_ctrl_bufs, θ_cd)
 
         return (NoRData(), NoRData(), NoRData(), ∂θ_rd, NoRData(), NoRData())
     end
