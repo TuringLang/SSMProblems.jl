@@ -34,6 +34,12 @@ function ssm_loglikelihood(
     ys::AbstractVector;
     controls::NamedTuple=(;),
 )
+    return _ssm_loglikelihood(filter, model, θ, ys, controls)
+end
+
+# Positional helper that the Mooncake rrule!! is registered against (rrules are easier
+# to write against positional-only functions than over kwarg-lowered methods).
+function _ssm_loglikelihood(filter, model, θ, ys, controls)
     hoisted_controls = hoist_controls(controls, θ)
 
     prior_hoist = hoist_static(prior(model), θ, hoisted_controls)
