@@ -98,7 +98,7 @@ end
 # `_step_pullback` needs to re-derive without redoing the forward arithmetic, plus the
 # parameter values (A, H, R) that the analytical gradient formulas depend on.
 #
-# `_step_pullback` dispatches on each component field's trait via `_maybe_grad_X`:
+# `_step_pullback` dispatches on each component field's trait via `_maybe_grad`:
 # `Fixed` / `TimeVarying` fields return `NoTangent()` and the gradient_X arithmetic is
 # elided at compile time.
 
@@ -131,31 +131,6 @@ function _step_forward(
     return MvNormal(μ_filt, Σ_filt), ll, cache
 end
 
-# Trait dispatch: inactive fields elide the gradient computation at compile time.
-_maybe_grad_A(::Union{Fixed,TimeVarying}, _, _, _, _, _) = NoTangent()
-function _maybe_grad_A(_, ∂μ_pred, ∂Σ_pred, μ_prev, Σ_prev, A)
-    return gradient_A(∂μ_pred, ∂Σ_pred, μ_prev, Σ_prev, A)
-end
-
-_maybe_grad_b(::Union{Fixed,TimeVarying}, _) = NoTangent()
-_maybe_grad_b(_, ∂μ_pred) = gradient_b(∂μ_pred)
-
-_maybe_grad_Q(::Union{Fixed,TimeVarying}, _) = NoTangent()
-_maybe_grad_Q(_, ∂Σ_pred) = gradient_Q(∂Σ_pred)
-
-_maybe_grad_H(::Union{Fixed,TimeVarying}, _, _, _, _, _, _, _, _, _, _, _) = NoTangent()
-function _maybe_grad_H(_, ∂μ_filt, ∂Σ_filt, Δll, μ_pred, μ_filt, z, S, K, I_KH, Σ_pred, H)
-    return gradient_H(∂μ_filt, ∂Σ_filt, Δll, μ_pred, μ_filt, z, S, K, I_KH, Σ_pred, H)
-end
-
-_maybe_grad_c(::Union{Fixed,TimeVarying}, _, _, _, _, _) = NoTangent()
-_maybe_grad_c(_, ∂μ_filt, Δll, z, S, K) = gradient_c(∂μ_filt, Δll, z, S, K)
-
-_maybe_grad_R(::Union{Fixed,TimeVarying}, _, _, _, _, _, _) = NoTangent()
-function _maybe_grad_R(_, ∂μ_filt, ∂Σ_filt, Δll, z, S, K)
-    return gradient_R(∂μ_filt, ∂Σ_filt, Δll, z, S, K)
-end
-
 function _step_pullback(
     ::KalmanFilter,
     ∂state_out::Tuple,
@@ -172,28 +147,29 @@ function _step_pullback(
     ∂μ_prev, ∂Σ_prev = backward_gradient_predict(∂μ_pred, ∂Σ_pred, cache.A)
 
     ∂dyn = (
-        A=_maybe_grad_A(dyn.A, ∂μ_pred, ∂Σ_pred, cache.μ_prev, cache.Σ_prev, cache.A),
-        b=_maybe_grad_b(dyn.b, ∂μ_pred),
-        Q=_maybe_grad_Q(dyn.Q, ∂Σ_pred),
+        A=_maybe_grad(
+            dyn.A, gradient_A, ∂μ_pred, ∂Σ_pred, cache.μ_prev, cache.Σ_prev, cache.A
+        ),
+        b=_maybe_grad(dyn.b, gradient_b, ∂μ_pred),
+        Q=_maybe_grad(dyn.Q, gradient_Q, ∂Σ_pred),
     )
     ∂obs = (
-        H=_maybe_grad_H(
-            obs.H, ∂μ_filt, ∂Σ_filt, Δll,
+        H=_maybe_grad(
+            obs.H, gradient_H, ∂μ_filt, ∂Σ_filt, Δll,
             cache.μ_pred, cache.μ_filt, cache.z, cache.S, cache.K, cache.I_KH,
             cache.Σ_pred, cache.H,
         ),
-        c=_maybe_grad_c(obs.c, ∂μ_filt, Δll, cache.z, cache.S, cache.K),
-        R=_maybe_grad_R(obs.R, ∂μ_filt, ∂Σ_filt, Δll, cache.z, cache.S, cache.K),
+        c=_maybe_grad(obs.c, gradient_c, ∂μ_filt, Δll, cache.z, cache.S, cache.K),
+        R=_maybe_grad(
+            obs.R, gradient_R, ∂μ_filt, ∂Σ_filt, Δll, cache.z, cache.S, cache.K
+        ),
     )
     return (∂μ_prev, ∂Σ_prev), ∂dyn, ∂obs
 end
 
 function _initial_pullback(::KalmanFilter, ∂state::Tuple, prior::GaussianPrior)
     ∂μ, ∂Σ = ∂state
-    return (
-        μ0=(prior.μ0 isa Union{Fixed,TimeVarying} ? NoTangent() : ∂μ),
-        Σ0=(prior.Σ0 isa Union{Fixed,TimeVarying} ? NoTangent() : ∂Σ),
-    )
+    return (μ0=_maybe_grad(prior.μ0, identity, ∂μ), Σ0=_maybe_grad(prior.Σ0, identity, ∂Σ))
 end
 
 ## KALMAN SMOOTHER #########################################################################

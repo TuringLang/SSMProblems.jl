@@ -91,3 +91,16 @@ function _val(x::AbstractModelParameter)
     )
 end
 _val(x) = x
+
+"""
+    _maybe_grad(p::AbstractModelParameter, f, args...)
+
+Trait-gated gradient computation. Returns `NoTangent()` when `p` carries no θ-dependence
+([`Fixed`](@ref) / [`TimeVarying`](@ref)); otherwise calls `f(args...)`.
+
+Used by filter `_step_pullback` / `_initial_pullback` methods so that the analytical
+gradient body (the work `f` does) is elided at compile time for non-θ-dependent
+parameters. The dispatch is on `p`'s wrapper type, which is statically known.
+"""
+@inline _maybe_grad(::Union{Fixed,TimeVarying}, _, args::Vararg{Any}) = NoTangent()
+@inline _maybe_grad(_, f::F, args::Vararg{Any}) where {F} = f(args...)
