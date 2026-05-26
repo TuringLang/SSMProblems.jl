@@ -2,8 +2,57 @@ using LogDensityProblems: LogDensityProblems
 import Distributions: logpdf
 import PDMats: AbstractPDMat, PDMat
 
-export trajectory_logdensity, inner_loglikelihood, kf_loglikelihood
+export ssm_loglikelihood, trajectory_logdensity, inner_loglikelihood, kf_loglikelihood
 export ParameterisedSSM, SSMParameterLogDensity
+
+## SSM LOG-LIKELIHOOD ##########################################################################
+
+"""
+    ssm_loglikelihood(filter, model, θ, ys; controls=(;)) -> ll
+
+Marginal log-likelihood log p(y₁:T | θ) of a state-space model under the analytical filter
+`filter` (currently `KalmanFilter`). Parameter resolution is done once here: `FixedParametric`
+fields are evaluated before the time loop and the resulting primal is shared across all
+steps (Mooncake's tape sees a single primal with `T` consumers in the rrule path).
+
+Each step calls the filter's `_step_forward` on already-resolved parameter NamedTuples.
+
+# Arguments
+- `filter`: An analytical filter (e.g. [`KalmanFilter`](@ref)).
+- `model`: A state-space model whose components are parameter-wrapped.
+- `θ`: Inference parameters; passed to `FixedParametric` / `TimeVaryingParametric` closures.
+- `ys`: Observation sequence.
+
+# Keyword arguments
+- `controls`: A `NamedTuple` of [`AbstractModelParameter`](@ref)-typed control entries
+  (e.g. `prev_outer`, `new_outer` for hierarchical models; or shared θ-dependent helpers).
+"""
+function ssm_loglikelihood(
+    filter::AbstractFilter,
+    model::AbstractStateSpaceModel,
+    θ,
+    ys::AbstractVector;
+    controls::NamedTuple=(;),
+)
+    hoisted_controls = hoist_controls(controls, θ)
+
+    prior_hoist = hoist_static(prior(model), θ, hoisted_controls)
+    dyn_hoist = hoist_static(dyn(model), θ, hoisted_controls)
+    obs_hoist = hoist_static(obs(model), θ, hoisted_controls)
+
+    prior_params = map(_val, step_params(prior(model), θ, hoisted_controls, prior_hoist))
+    state = _step_initial(filter, prior_params)
+
+    ll = zero(eltype(eltype(ys)))
+    for t in eachindex(ys)
+        resolved = resolve_controls(controls, hoisted_controls, θ, t)
+        dyn_params = map(_val, step_params(dyn(model), θ, t, resolved, dyn_hoist))
+        obs_params = map(_val, step_params(obs(model), θ, t, resolved, obs_hoist))
+        state, ll_inc, _ = _step_forward(filter, state, dyn_params, obs_params, ys[t])
+        ll += ll_inc
+    end
+    return ll
+end
 
 ## TRAJECTORY LOG-DENSITY ######################################################################
 
