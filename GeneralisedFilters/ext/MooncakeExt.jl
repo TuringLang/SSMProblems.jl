@@ -2,7 +2,10 @@
 Mooncake.jl extension for GeneralisedFilters.
 
 Provides a native Mooncake `rrule!!` for `_ssm_loglikelihood` (the positional helper
-behind [`ssm_loglikelihood`](@ref)) on `LinearGaussianStateSpaceModel`.
+behind [`ssm_loglikelihood`](@ref)). Dispatches on any `AbstractFilter` whose step
+interface is implemented (`_step_initial` / `_step_forward` / `_step_pullback` /
+`_initial_pullback` / `_zero_state_cotangent`) and any model matching
+`ParameterisedSSM` (currently `LinearGaussianStateSpaceModel`).
 
 Architecture:
 - The forward pass mirrors `_ssm_loglikelihood`, caching per-step state caches and
@@ -32,6 +35,7 @@ using GeneralisedFilters:
     _step_pullback,
     _step_initial,
     _initial_pullback,
+    _zero_state_cotangent,
     Fixed,
     FixedParametric,
     TimeVarying,
@@ -40,13 +44,8 @@ using GeneralisedFilters:
     hoist_static,
     resolve_controls,
     step_params,
-    KalmanFilter,
-    LinearGaussianStateSpaceModel
+    ParameterisedSSM
 using SSMProblems: prior, dyn, obs
-
-using Distributions: MvNormal, params
-using PDMats: PDMat
-using LinearAlgebra: Symmetric
 
 using Mooncake: Mooncake, @is_primitive, CoDual, primal
 using Mooncake: NoFData, NoRData, NoTangent, NoCache
@@ -72,13 +71,6 @@ _add_rdata(a, b) = increment_internal!!(NoCache(), a, b)
 # is a no-op; for mutable types this is an in-place increment.
 _accumulate_fdata!(::NoFData, ::NoFData) = nothing
 _accumulate_fdata!(outer, inner) = (increment_internal!!(NoCache(), outer, inner); nothing)
-
-# Zero-cotangent for state at output. We differentiate ll, not the final state.
-function _zero_state_cotangent(::KalmanFilter, state::MvNormal)
-    μ, Σ = params(state)
-    Σ_inner = Σ isa PDMat ? Σ.mat : Matrix(Σ)
-    return (zero(μ), zero(Σ_inner))
-end
 
 # FixedParametric per-field accumulator buffer. `Ref{Any}` keeps init lazy so we don't
 # have to know the cotangent type up front (relevant for PDMat-typed params, whose
@@ -244,8 +236,8 @@ end
 
 @is_primitive Mooncake.DefaultCtx Tuple{
     typeof(_ssm_loglikelihood),
-    KalmanFilter,
-    LinearGaussianStateSpaceModel,
+    GeneralisedFilters.AbstractFilter,
+    ParameterisedSSM,
     Any,
     AbstractVector,
     NamedTuple,
@@ -253,8 +245,8 @@ end
 
 function Mooncake.rrule!!(
     ::CoDual{typeof(_ssm_loglikelihood)},
-    filter_cd::CoDual{<:KalmanFilter},
-    model_cd::CoDual{<:LinearGaussianStateSpaceModel},
+    filter_cd::CoDual{<:GeneralisedFilters.AbstractFilter},
+    model_cd::CoDual{<:ParameterisedSSM},
     θ_cd::CoDual,
     ys_cd::CoDual{<:AbstractVector},
     controls_cd::CoDual{<:NamedTuple},

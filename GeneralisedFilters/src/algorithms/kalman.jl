@@ -172,6 +172,12 @@ function _initial_pullback(::KalmanFilter, ∂state::Tuple, prior::GaussianPrior
     return (μ0=_maybe_grad(prior.μ0, identity, ∂μ), Σ0=_maybe_grad(prior.Σ0, identity, ∂Σ))
 end
 
+function _zero_state_cotangent(::KalmanFilter, state::MvNormal)
+    μ, Σ = params(state)
+    Σ_inner = Σ isa PDMat ? Σ.mat : Matrix(Σ)
+    return (zero(μ), zero(Σ_inner))
+end
+
 ## KALMAN SMOOTHER #########################################################################
 
 struct KalmanSmoother <: AbstractSmoother end

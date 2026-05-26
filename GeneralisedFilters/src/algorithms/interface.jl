@@ -126,6 +126,15 @@ Reverse-mode chain through [`_step_initial`](@ref). Same trait-driven dispatch a
 """
 function _initial_pullback end
 
+"""
+    _zero_state_cotangent(filter, state) -> ∂state
+
+Construct the cotangent for the final state at the end of the backward sweep. Since the
+rrule differentiates the scalar `ll` and not the state, this is simply a zero of the
+shape `_step_pullback` expects for `∂state_out`. Filter-specific.
+"""
+function _zero_state_cotangent end
+
 ## SMOOTHING INTERFACE #####################################################################
 
 export smooth, backward_smooth, two_filter_smooth

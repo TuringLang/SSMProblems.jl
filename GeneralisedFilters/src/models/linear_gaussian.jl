@@ -2,6 +2,7 @@ export GaussianPrior
 export LinearGaussianLatentDynamics
 export LinearGaussianObservationProcess
 export LinearGaussianStateSpaceModel
+export ParameterisedSSM
 export create_homogeneous_linear_gaussian_model
 export hoist_static, step_params
 
@@ -82,6 +83,19 @@ end
 const LinearGaussianStateSpaceModel = StateSpaceModel{
     <:GaussianPrior,<:LinearGaussianLatentDynamics,<:LinearGaussianObservationProcess
 }
+
+"""
+    ParameterisedSSM
+
+Type alias gating the Mooncake `rrule!!` on [`ssm_loglikelihood`](@ref). A `StateSpaceModel`
+matches when each of its components is a struct of [`AbstractModelParameter`](@ref) fields
+(i.e. the routing machinery in `MooncakeExt` can walk them generically).
+
+Currently equivalent to [`LinearGaussianStateSpaceModel`](@ref). When new fully-parameterised
+model variants gain a step interface (`_step_forward` / `_step_pullback` etc.), extend this
+alias to a `Union` covering them.
+"""
+const ParameterisedSSM = LinearGaussianStateSpaceModel
 
 function create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
     return SSMProblems.StateSpaceModel(
