@@ -2,7 +2,7 @@ using LogDensityProblems: LogDensityProblems
 import Distributions: logpdf
 
 export ssm_loglikelihood, trajectory_logdensity
-export ParameterisedSSM, SSMParameterLogDensity
+export TrajectoryParameterLogDensity
 
 ## SSM LOG-LIKELIHOOD ##########################################################################
 
@@ -101,6 +101,7 @@ function trajectory_logdensity(
     af::AbstractFilter,
     outer_trajectory,
     observations::AbstractVector,
+    θ=nothing,
 )
     T = length(observations)
 
@@ -115,88 +116,78 @@ function trajectory_logdensity(
         prev_outer=TimeVarying(t -> outer_trajectory[t - 1]),
         new_outer=TimeVarying(t -> outer_trajectory[t]),
     )
-    ll += ssm_loglikelihood(af, model.inner_model, nothing, observations; controls=controls)
+    ll += ssm_loglikelihood(af, model.inner_model, θ, observations; controls=controls)
 
     return ll
 end
 
-## PARAMETERISED SSM ###########################################################################
-
 """
-    ParameterisedSSM(build, observations)
+    trajectory_logdensity(model::StateSpaceModel, trajectory, observations, θ)
 
-A parameterised state-space model that maps parameter vectors to concrete SSMs.
-
-# Fields
-- `build`: A callable `θ -> AbstractStateSpaceModel` that constructs an SSM from parameters.
-  Fixed model components should be captured via closure.
-- `observations`: The observation sequence y₁:T.
-
-# Example
-```julia
-function build_model(θ, fixed)
-    b = θ[1:2]
-    dyn = LinearGaussianLatentDynamics(fixed.A, b, fixed.Q)
-    return StateSpaceModel(fixed.prior, dyn, fixed.obs)
+θ-aware variant for parametric regular SSMs. `θ` is baked into the model via
+[`fix`](@ref) and the resulting non-parametric model is evaluated through the standard
+SSMProblems dispatches. Mooncake's auto-AD traces θ through the closure captures inside
+the fixed model.
+"""
+function trajectory_logdensity(
+    model::StateSpaceModel, trajectory, observations::AbstractVector, θ
+)
+    return trajectory_logdensity(fix(model, θ), trajectory, observations)
 end
 
-pssm = ParameterisedSSM(θ -> build_model(θ, fixed), observations)
-model = pssm.build(θ)  # returns a concrete SSM
-```
-"""
-struct ParameterisedSSM{F,YT}
-    build::F
-    observations::YT
-end
-
-## SSM PARAMETER LOG-DENSITY ###################################################################
+## TRAJECTORY PARAMETER LOG-DENSITY ############################################################
 
 """
-    SSMParameterLogDensity(prior, param_model, af, trajectory)
-    SSMParameterLogDensity(prior, param_model, trajectory)
+    TrajectoryParameterLogDensity(prior, model, observations, trajectory)
+    TrajectoryParameterLogDensity(prior, model, af, observations, trajectory)
 
 Log-density for SSM parameters θ conditioned on a fixed trajectory:
 
     log p(θ | trajectory, y) ∝ log p(θ) + log p(trajectory, y | θ)
 
-Implements the `LogDensityProblems` interface.
+Implements the `LogDensityProblems` interface. The `model` is a single state-space model
+whose components may carry [`FixedParametric`](@ref) / [`TimeVaryingParametric`](@ref)
+parameters; θ is passed positionally to those closures at evaluation time.
 
 # Fields
-- `prior`: Prior distribution on θ (any Distributions.jl distribution)
-- `param_model`: A `ParameterisedSSM` mapping θ to an SSM
-- `af`: Inner analytical filter for HierarchicalSSM (e.g., `KalmanFilter()`), or `nothing`
-  for regular SSMs
-- `trajectory`: Current reference trajectory ([`ReferenceTrajectory`](@ref) indexed from 0)
+- `prior`: Prior distribution on θ (any Distributions.jl distribution).
+- `model`: A [`StateSpaceModel`](@ref) (regular SSM) or [`HierarchicalSSM`](@ref) with
+  parametric components.
+- `af`: Inner analytical filter for `HierarchicalSSM` (e.g. [`KalmanFilter`](@ref)); pass
+  `nothing` for regular SSMs.
+- `observations`: The observation sequence y₁:T.
+- `trajectory`: The reference trajectory ([`ReferenceTrajectory`](@ref) indexed from 0).
 """
-struct SSMParameterLogDensity{PT,MT<:ParameterisedSSM,AFT,TT}
+struct TrajectoryParameterLogDensity{PT,MT,AFT,YT,TT}
     prior::PT
-    param_model::MT
+    model::MT
     af::AFT
+    observations::YT
     trajectory::TT
 end
 
-function SSMParameterLogDensity(prior, param_model::ParameterisedSSM, trajectory)
-    return SSMParameterLogDensity(prior, param_model, nothing, trajectory)
+function TrajectoryParameterLogDensity(prior, model::StateSpaceModel, observations, trajectory)
+    return TrajectoryParameterLogDensity(prior, model, nothing, observations, trajectory)
 end
 
-function LogDensityProblems.capabilities(::Type{<:SSMParameterLogDensity})
+function LogDensityProblems.capabilities(::Type{<:TrajectoryParameterLogDensity})
     return LogDensityProblems.LogDensityOrder{0}()
 end
 
-function LogDensityProblems.dimension(ld::SSMParameterLogDensity)
+function LogDensityProblems.dimension(ld::TrajectoryParameterLogDensity)
     return length(ld.prior)
 end
 
-function LogDensityProblems.logdensity(ld::SSMParameterLogDensity{<:Any,<:Any,Nothing}, θ)
-    model = ld.param_model.build(θ)
+function LogDensityProblems.logdensity(
+    ld::TrajectoryParameterLogDensity{<:Any,<:StateSpaceModel,Nothing}, θ
+)
     return logpdf(ld.prior, θ) +
-           trajectory_logdensity(model, ld.trajectory, ld.param_model.observations)
+           trajectory_logdensity(ld.model, ld.trajectory, ld.observations, θ)
 end
 
 function LogDensityProblems.logdensity(
-    ld::SSMParameterLogDensity{<:Any,<:Any,<:AbstractFilter}, θ
+    ld::TrajectoryParameterLogDensity{<:Any,<:HierarchicalSSM,<:AbstractFilter}, θ
 )
-    model = ld.param_model.build(θ)
     return logpdf(ld.prior, θ) +
-           trajectory_logdensity(model, ld.af, ld.trajectory, ld.param_model.observations)
+           trajectory_logdensity(ld.model, ld.af, ld.trajectory, ld.observations, θ)
 end

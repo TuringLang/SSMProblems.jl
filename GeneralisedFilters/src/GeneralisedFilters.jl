@@ -16,6 +16,7 @@ const DI = DifferentiationInterface
 include("parameters/parameters.jl")
 include("parameters/controls.jl")
 include("parameters/hoist.jl")
+include("parameters/fix.jl")
 
 # Filtering utilities
 include("containers.jl")

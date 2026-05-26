@@ -267,7 +267,7 @@ end
     using LinearAlgebra
     using Statistics
     using SSMProblems
-    using Zygote
+    using Mooncake
 
     rng = StableRNG(42)
 
@@ -302,7 +302,7 @@ end
 
     m = drift_model_hier(ys)
     pg = ParticleGibbs(
-        ConditionalSMC(RBPF(BF(N_particles), KF())), NUTS(0.8); adtype=ADTypes.AutoZygote()
+        ConditionalSMC(RBPF(BF(N_particles), KF())), NUTS(0.8); adtype=ADTypes.AutoMooncake()
     )
 
     chain = AbstractMCMC.sample(

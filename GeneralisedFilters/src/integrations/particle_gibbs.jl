@@ -15,17 +15,16 @@ trajectory update (conditional SMC).
 - `csmc::CS`: Conditional SMC sampler for trajectory updates (e.g., `ConditionalSMC(RBPF(BF(200), KF()), AncestorSampling())`)
 - `param::PS`: Parameter sampler (e.g., `AdvancedHMC.NUTS(0.8)`)
 - `adtype::ADT`: AD backend (`ADTypes.AbstractADType`). `nothing` uses AdvancedHMC's default
-  (ForwardDiff). For HierarchicalSSM models, specify a reverse-mode backend that uses
-  ChainRules (e.g., `AutoZygote()`). Requires the corresponding package to be loaded.
+  (ForwardDiff). For `HierarchicalSSM` models, specify a reverse-mode backend with a
+  registered rrule on `ssm_loglikelihood` (currently `AutoMooncake()`).
 
 # Examples
 ```julia
-
 # Regular SSM
 ParticleGibbs(ConditionalSMC(BF(100), NoRefreshment()), NUTS(0.8))
 
-# Hierarchical SSM (needs reverse-mode AD for KF rrule)
-ParticleGibbs(ConditionalSMC(RBPF(BF(200), KF()), AncestorSampling()), NUTS(0.8); adtype=AutoZygote())
+# Hierarchical SSM (needs Mooncake for the ssm_loglikelihood rrule)
+ParticleGibbs(ConditionalSMC(RBPF(BF(200), KF()), AncestorSampling()), NUTS(0.8); adtype=AutoMooncake())
 ```
 """
 struct ParticleGibbs{CS<:ConditionalSMC,PS,ADT<:Union{Nothing,ADTypes.AbstractADType}} <:
@@ -40,23 +39,28 @@ function ParticleGibbs(csmc::ConditionalSMC, param; adtype=nothing)
 end
 
 """
-    ParticleGibbsModel{PT, MT} <: AbstractMCMC.AbstractModel
+    ParticleGibbsModel(prior, model, observations) <: AbstractMCMC.AbstractModel
 
-Model for particle Gibbs inference, combining a prior on parameters with a parameterised SSM.
+Model for particle Gibbs inference: a prior on θ paired with a single state-space model
+whose components carry `FixedParametric` / `TimeVaryingParametric` parameters dependent
+on θ, plus the observation sequence.
 
 # Fields
-- `prior::PT`: Prior distribution on θ (any Distributions.jl distribution)
-- `param_model::MT`: A `ParameterisedSSM` mapping θ to a concrete SSM
+- `prior::PT`: Prior distribution on θ (any Distributions.jl distribution).
+- `model::MT`: A parametric [`StateSpaceModel`](@ref) or [`HierarchicalSSM`](@ref).
+- `observations::YT`: The observation sequence y₁:T.
 
 # Examples
 ```julia
-pssm = ParameterisedSSM(θ -> build_model(θ, fixed), observations)
-model = ParticleGibbsModel(MvNormal(zeros(d), 4.0*I), pssm)
+dyn = LinearGaussianLatentDynamics(A, FixedParametric((θ, _) -> θ), Q)
+model = StateSpaceModel(prior_, dyn, obs)
+pg_model = ParticleGibbsModel(MvNormal(zeros(d), 4.0*I), model, ys)
 ```
 """
-struct ParticleGibbsModel{PT,MT<:ParameterisedSSM} <: AbstractMCMC.AbstractModel
+struct ParticleGibbsModel{PT,MT<:AbstractStateSpaceModel,YT} <: AbstractMCMC.AbstractModel
     prior::PT
-    param_model::MT
+    model::MT
+    observations::YT
 end
 
 """
@@ -97,8 +101,22 @@ _outer_trajectory(trajectory, ::AbstractFilter) = map(s -> s.x, trajectory)
 
 ## LOG-DENSITY MODEL CONSTRUCTION #############################################################
 
+function _make_ld(pg_model::ParticleGibbsModel{<:Any,<:StateSpaceModel}, ::Nothing, trajectory)
+    return TrajectoryParameterLogDensity(
+        pg_model.prior, pg_model.model, pg_model.observations, trajectory
+    )
+end
+
+function _make_ld(
+    pg_model::ParticleGibbsModel{<:Any,<:HierarchicalSSM}, af::AbstractFilter, trajectory
+)
+    return TrajectoryParameterLogDensity(
+        pg_model.prior, pg_model.model, af, pg_model.observations, trajectory
+    )
+end
+
 function _create_log_density_model(
-    model::ParticleGibbsModel, af, trajectory, adtype::Nothing
+    pg_model::ParticleGibbsModel, af, trajectory, adtype::Nothing
 )
     if !isnothing(af)
         throw(
@@ -110,18 +128,13 @@ function _create_log_density_model(
             ),
         )
     end
-    ld = SSMParameterLogDensity(model.prior, model.param_model, trajectory)
-    return AbstractMCMC.LogDensityModel(ld)
+    return AbstractMCMC.LogDensityModel(_make_ld(pg_model, af, trajectory))
 end
 
 function _create_log_density_model(
-    model::ParticleGibbsModel, af, trajectory, adtype::ADTypes.AbstractADType
+    pg_model::ParticleGibbsModel, af, trajectory, adtype::ADTypes.AbstractADType
 )
-    ld = if isnothing(af)
-        SSMParameterLogDensity(model.prior, model.param_model, trajectory)
-    else
-        SSMParameterLogDensity(model.prior, model.param_model, af, trajectory)
-    end
+    ld = _make_ld(pg_model, af, trajectory)
     ld_with_grad = LogDensityProblemsAD.ADgradient(adtype, ld)
     return AbstractMCMC.LogDensityModel(ld_with_grad)
 end
@@ -130,35 +143,35 @@ end
 
 function AbstractMCMC.step(
     rng::AbstractRNG,
-    model::ParticleGibbsModel,
+    pg_model::ParticleGibbsModel,
     pg::ParticleGibbs;
     initial_params=nothing,
     kwargs...,
 )
     # Sample initial θ
     θ = if isnothing(initial_params)
-        Vector(rand(rng, model.prior))
+        Vector(rand(rng, pg_model.prior))
     else
         Vector(initial_params)
     end
 
-    # Build SSM and run unconditional CSMC for initial trajectory
-    ssm = model.param_model.build(θ)
+    # Fix the model at θ for CSMC and run unconditional CSMC for initial trajectory
+    ssm = fix(pg_model.model, θ)
     af = _get_inner_filter(pg.csmc.pf)
-    trajectory, _ = _csmc_sample(rng, ssm, pg.csmc, model.param_model.observations, nothing)
+    trajectory, _ = _csmc_sample(rng, ssm, pg.csmc, pg_model.observations, nothing)
 
     # Create log-density model (uses outer-only trajectory for hierarchical models)
     outer_traj = _outer_trajectory(trajectory, af)
-    ld_model = _create_log_density_model(model, af, outer_traj, pg.adtype)
+    ld_model = _create_log_density_model(pg_model, af, outer_traj, pg.adtype)
 
     # Run initial parameter step
     _, param_state = AbstractMCMC.step(rng, ld_model, pg.param; initial_params=θ, kwargs...)
 
     # Extract new θ and run CSMC
     θ_new = AbstractMCMC.getparams(param_state)
-    ssm_new = model.param_model.build(θ_new)
+    ssm_new = fix(pg_model.model, θ_new)
     trajectory_new, _ = _csmc_sample(
-        rng, ssm_new, pg.csmc, model.param_model.observations, trajectory
+        rng, ssm_new, pg.csmc, pg_model.observations, trajectory
     )
 
     transition = ParticleGibbsTransition(θ_new, AbstractMCMC.getstats(param_state))
@@ -169,7 +182,7 @@ end
 
 function AbstractMCMC.step(
     rng::AbstractRNG,
-    model::ParticleGibbsModel,
+    pg_model::ParticleGibbsModel,
     pg::ParticleGibbs,
     state::ParticleGibbsState;
     kwargs...,
@@ -177,7 +190,7 @@ function AbstractMCMC.step(
     # Create fresh log-density model with current trajectory
     af = _get_inner_filter(pg.csmc.pf)
     outer_traj = _outer_trajectory(state.trajectory, af)
-    ld_model = _create_log_density_model(model, af, outer_traj, pg.adtype)
+    ld_model = _create_log_density_model(pg_model, af, outer_traj, pg.adtype)
 
     # Run parameter step (preserves adaptation via state.param_state)
     _, param_state = AbstractMCMC.step(
@@ -186,9 +199,9 @@ function AbstractMCMC.step(
 
     # Extract new θ and run CSMC (pass full trajectory for conditioning)
     θ_new = AbstractMCMC.getparams(param_state)
-    ssm_new = model.param_model.build(θ_new)
+    ssm_new = fix(pg_model.model, θ_new)
     trajectory_new, _ = _csmc_sample(
-        rng, ssm_new, pg.csmc, model.param_model.observations, state.trajectory
+        rng, ssm_new, pg.csmc, pg_model.observations, state.trajectory
     )
 
     transition = ParticleGibbsTransition(θ_new, AbstractMCMC.getstats(param_state))

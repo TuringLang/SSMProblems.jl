@@ -4,6 +4,7 @@
 
 @testitem "ParticleGibbs NUTS: smoke test" begin
     using GeneralisedFilters
+    using GeneralisedFilters: FixedParametric
     using AbstractMCMC: AbstractMCMC
     using AdvancedHMC: NUTS
     using MCMCChains: MCMCChains
@@ -16,31 +17,24 @@
 
     rng = StableRNG(1234)
 
-    # Simple 1D model: x_t = a*x_{t-1} + b + noise, y_t = x_t + noise
+    # Simple 1D model: x_t = a*x_{t-1} + b + noise, y_t = x_t + noise; θ controls b
     a = 0.8
     q² = 0.1
     r² = 0.5
     σ₀² = 1.0
 
-    function build_ssm(θ)
-        return create_homogeneous_linear_gaussian_model(
-            [0.0],
-            PDMat([σ₀²;;]),
-            [a;;],
-            [θ[1]],
-            PDMat([q²;;]),
-            [1.0;;],
-            [0.0],
-            PDMat([r²;;]),
-        )
-    end
+    prior_ssm = GaussianPrior([0.0], PDMat([σ₀²;;]))
+    dyn_ssm = LinearGaussianLatentDynamics(
+        [a;;], FixedParametric((θ, _) -> [θ[1]]), PDMat([q²;;])
+    )
+    obs_ssm = LinearGaussianObservationProcess([1.0;;], [0.0], PDMat([r²;;]))
+    parametric_ssm = SSMProblems.StateSpaceModel(prior_ssm, dyn_ssm, obs_ssm)
 
-    true_ssm = build_ssm([1.0])
+    true_ssm = GeneralisedFilters.fix(parametric_ssm, [1.0])
     _, _, ys = SSMProblems.sample(rng, true_ssm, 5)
 
     prior = MvNormal([0.0], [4.0;;])
-    pssm = ParameterisedSSM(build_ssm, ys)
-    model = ParticleGibbsModel(prior, pssm)
+    model = ParticleGibbsModel(prior, parametric_ssm, ys)
     pg = ParticleGibbs(ConditionalSMC(BF(10)), NUTS(0.8))
 
     # Initial step
@@ -83,6 +77,7 @@ end
 
 @testitem "ParticleGibbs MH: smoke test" begin
     using GeneralisedFilters
+    using GeneralisedFilters: FixedParametric
     using AbstractMCMC: AbstractMCMC
     using AdvancedMH: RWMH
     using MCMCChains: MCMCChains
@@ -99,25 +94,18 @@ end
     r² = 0.5
     σ₀² = 1.0
 
-    function build_ssm_mh(θ)
-        return create_homogeneous_linear_gaussian_model(
-            [0.0],
-            PDMat([σ₀²;;]),
-            [a;;],
-            [θ[1]],
-            PDMat([q²;;]),
-            [1.0;;],
-            [0.0],
-            PDMat([r²;;]),
-        )
-    end
+    prior_ssm = GaussianPrior([0.0], PDMat([σ₀²;;]))
+    dyn_ssm = LinearGaussianLatentDynamics(
+        [a;;], FixedParametric((θ, _) -> [θ[1]]), PDMat([q²;;])
+    )
+    obs_ssm = LinearGaussianObservationProcess([1.0;;], [0.0], PDMat([r²;;]))
+    parametric_ssm = SSMProblems.StateSpaceModel(prior_ssm, dyn_ssm, obs_ssm)
 
-    true_ssm = build_ssm_mh([1.0])
+    true_ssm = GeneralisedFilters.fix(parametric_ssm, [1.0])
     _, _, ys = SSMProblems.sample(rng, true_ssm, 5)
 
     prior = MvNormal([0.0], [4.0;;])
-    pssm = ParameterisedSSM(build_ssm_mh, ys)
-    model = ParticleGibbsModel(prior, pssm)
+    model = ParticleGibbsModel(prior, parametric_ssm, ys)
     pg = ParticleGibbs(ConditionalSMC(BF(10)), RWMH(MvNormal(zeros(1), 0.5 * I)))
 
     # Initial step
@@ -142,8 +130,9 @@ end
 
 ## NUTS: HierarchicalSSM against augmented KF ###################################################
 
-@testitem "ParticleGibbs NUTS: HierarchicalSSM" begin
+@testitem "ParticleGibbs NUTS: HierarchicalSSM" tags = [:mooncake] begin
     using GeneralisedFilters
+    using GeneralisedFilters: TimeVaryingParametric
     using AbstractMCMC: AbstractMCMC
     using AdvancedHMC: NUTS
     using MCMCChains: MCMCChains
@@ -154,7 +143,7 @@ end
     using LinearAlgebra
     using Statistics
     using SSMProblems
-    using Zygote
+    using Mooncake
 
     rng = StableRNG(42)
 
@@ -166,15 +155,26 @@ end
     N_adapts = 500
     σ²_b = 4.0
 
-    # Generate a random hierarchical model and fix everything except the inner drift b
+    # Generate a random hierarchical model; θ controls the inner-dynamics drift b
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, Dx, Dz, Dy; static_arrays=true
     )
     _, _, _, _, ys = SSMProblems.sample(rng, hier_model, T_len)
 
-    # Parameterise: θ controls inner dynamics drift b
-    fixed = hier_model
-    build_hier(θ) = GeneralisedFilters.GFTest.with_inner_drift(fixed, θ)
+    # Promote the inner drift to TimeVaryingParametric (θ takes the role of the constant b)
+    C_in = hier_model.inner_model.dyn.b.f.C
+    parametric_inner_dyn = LinearGaussianLatentDynamics(
+        hier_model.inner_model.dyn.A,
+        TimeVaryingParametric((θ, t, c) -> θ + C_in * c.prev_outer),
+        hier_model.inner_model.dyn.Q,
+    )
+    parametric_hier = HierarchicalSSM(
+        hier_model.outer_prior,
+        hier_model.outer_dyn,
+        hier_model.inner_model.prior,
+        parametric_inner_dyn,
+        hier_model.inner_model.obs,
+    )
 
     # Augmented KF ground truth using full linear Gaussian model with unknown inner drift
     drift_indices = (Dx + 1):(Dx + Dz)
@@ -186,10 +186,11 @@ end
 
     # Particle Gibbs with RBPF
     prior = MvNormal(zeros(Dz), σ²_b * I)
-    pssm = ParameterisedSSM(build_hier, ys)
-    model = ParticleGibbsModel(prior, pssm)
+    model = ParticleGibbsModel(prior, parametric_hier, ys)
     pg = ParticleGibbs(
-        ConditionalSMC(RBPF(BF(N_particles), KF())), NUTS(0.8); adtype=ADTypes.AutoZygote()
+        ConditionalSMC(RBPF(BF(N_particles), KF())),
+        NUTS(0.8);
+        adtype=ADTypes.AutoMooncake(; config=nothing),
     )
 
     chain = AbstractMCMC.sample(
@@ -213,6 +214,7 @@ end
 
 @testitem "ParticleGibbs NUTS: regular SSM" begin
     using GeneralisedFilters
+    using GeneralisedFilters: FixedParametric
     using AbstractMCMC: AbstractMCMC
     using AdvancedHMC: NUTS
     using MCMCChains: MCMCChains
@@ -226,7 +228,6 @@ end
 
     rng = StableRNG(42)
 
-    # Model parameters
     a = 0.8
     q² = 0.1
     r² = 0.5
@@ -237,26 +238,20 @@ end
     N_iter = 5000
     N_adapts = 500
 
-    function build_ssm(θ)
-        return create_homogeneous_linear_gaussian_model(
-            [0.0],
-            PDMat([σ₀²;;]),
-            [a;;],
-            [θ[1]],
-            PDMat([q²;;]),
-            [1.0;;],
-            [0.0],
-            PDMat([r²;;]),
-        )
-    end
+    prior_ssm = GaussianPrior([0.0], PDMat([σ₀²;;]))
+    dyn_ssm = LinearGaussianLatentDynamics(
+        [a;;], FixedParametric((θ, _) -> [θ[1]]), PDMat([q²;;])
+    )
+    obs_ssm = LinearGaussianObservationProcess([1.0;;], [0.0], PDMat([r²;;]))
+    parametric_ssm = SSMProblems.StateSpaceModel(prior_ssm, dyn_ssm, obs_ssm)
 
     # Generate data
     true_b = 1.5
-    true_ssm = build_ssm([true_b])
+    true_ssm = GeneralisedFilters.fix(parametric_ssm, [true_b])
     _, _, ys = SSMProblems.sample(rng, true_ssm, T_len)
 
     # Augmented KF ground truth
-    ref_model = build_ssm([0.0])
+    ref_model = GeneralisedFilters.fix(parametric_ssm, [0.0])
     kf_post = GeneralisedFilters.GFTest.augmented_kf_drift_posterior(
         ref_model, ys, 1; σ²_b=σ_b², ε=1e-12
     )
@@ -265,8 +260,7 @@ end
 
     # Particle Gibbs
     prior = MvNormal([0.0], [σ_b²;;])
-    pssm = ParameterisedSSM(build_ssm, ys)
-    model = ParticleGibbsModel(prior, pssm)
+    model = ParticleGibbsModel(prior, parametric_ssm, ys)
     pg = ParticleGibbs(ConditionalSMC(BF(N_particles)), NUTS(0.8))
 
     chain = AbstractMCMC.sample(

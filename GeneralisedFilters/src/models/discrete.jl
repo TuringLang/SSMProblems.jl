@@ -53,6 +53,11 @@ function step_params(c::DiscreteLatentDynamics, θ, t, resolved, hoist)
     return (P=_step_eval(c.P, θ, t, resolved, hoist.P),)
 end
 
+## FIX (bake θ into a non-parametric model) #################################################
+
+fix(p::DiscretePrior, θ) = DiscretePrior(fix(p.α0, θ))
+fix(c::DiscreteLatentDynamics, θ) = DiscreteLatentDynamics(fix(c.P, θ))
+
 ## CALC-* SHIMS ############################################################################
 
 calc_α0(p::DiscretePrior; kwargs...) = _eval_param(p.α0, 0, kwargs)

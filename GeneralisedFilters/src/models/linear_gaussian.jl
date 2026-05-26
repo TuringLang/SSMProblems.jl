@@ -136,6 +136,20 @@ function step_params(c::LinearGaussianObservationProcess, θ, t, resolved, hoist
     )
 end
 
+## FIX (bake θ into a non-parametric model) #################################################
+
+function fix(c::GaussianPrior, θ)
+    return GaussianPrior(fix(c.μ0, θ), fix(c.Σ0, θ))
+end
+
+function fix(c::LinearGaussianLatentDynamics, θ)
+    return LinearGaussianLatentDynamics(fix(c.A, θ), fix(c.b, θ), fix(c.Q, θ))
+end
+
+function fix(c::LinearGaussianObservationProcess, θ)
+    return LinearGaussianObservationProcess(fix(c.H, θ), fix(c.c, θ), fix(c.R, θ))
+end
+
 ## CALC-* SHIMS ############################################################################
 #
 # Transitional helpers used by non-gradient algorithm paths (predict, update, smoothers,

@@ -44,6 +44,15 @@ function HierarchicalSSM(
     return HierarchicalSSM(outer_prior, outer_dyn, inner_model)
 end
 
+function fix(m::HierarchicalSSM, θ)
+    inner_fixed = StateSpaceModel(
+        fix(m.inner_model.prior, θ),
+        fix(m.inner_model.dyn, θ),
+        fix(m.inner_model.obs, θ),
+    )
+    return HierarchicalSSM(fix(m.outer_prior, θ), fix(m.outer_dyn, θ), inner_fixed)
+end
+
 """
 A container for a sampled state from a hierarchical SSM, with separation between the outer
 and inner dimensions. Note this differs from a RBState in the the inner state is a sample

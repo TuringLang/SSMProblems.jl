@@ -88,73 +88,64 @@ end
     end
 end
 
-## SSMParameterLogDensity ######################################################################
+## TrajectoryParameterLogDensity ###############################################################
 
-@testitem "SSMParameterLogDensity: regular SSM" begin
+@testitem "TrajectoryParameterLogDensity: regular SSM" begin
     using GeneralisedFilters
+    using GeneralisedFilters: FixedParametric, ReferenceTrajectory
     using SSMProblems
     using LogDensityProblems
     using StableRNGs
     using Distributions
     using PDMats
     using LinearAlgebra
-    using GeneralisedFilters: ReferenceTrajectory
 
     rng = StableRNG(1234)
 
-    # Simple 1D model: x_t = a * x_{t-1} + b + noise, y_t = x_t + noise
-    # Unknown parameter: b (drift)
+    # Simple 1D model with parametric drift b
     a = 0.8
     q² = 0.1
     r² = 0.5
     σ₀² = 1.0
     T_len = 5
 
-    function build_ssm(θ)
-        return create_homogeneous_linear_gaussian_model(
-            [0.0],
-            PDMat([σ₀²;;]),
-            [a;;],
-            [θ[1]],
-            PDMat([q²;;]),
-            [1.0;;],
-            [0.0],
-            PDMat([r²;;]),
-        )
-    end
+    prior_ssm = GaussianPrior([0.0], PDMat([σ₀²;;]))
+    dyn_ssm = LinearGaussianLatentDynamics(
+        [a;;], FixedParametric((θ, _) -> [θ[1]]), PDMat([q²;;])
+    )
+    obs_ssm = LinearGaussianObservationProcess([1.0;;], [0.0], PDMat([r²;;]))
+    model = SSMProblems.StateSpaceModel(prior_ssm, dyn_ssm, obs_ssm)
 
-    true_b = 1.0
-    true_ssm = build_ssm([true_b])
-    _, _, ys = SSMProblems.sample(rng, true_ssm, T_len)
-
-    # Sample a trajectory
-    x0, xs, _ = SSMProblems.sample(rng, true_ssm, T_len)
+    # Sample observations and a trajectory using a fixed instance at θ = [1.0]
+    fixed_model = GeneralisedFilters.fix(model, [1.0])
+    _, _, ys = SSMProblems.sample(rng, fixed_model, T_len)
+    x0, xs, _ = SSMProblems.sample(rng, fixed_model, T_len)
     trajectory = ReferenceTrajectory(x0, xs)
 
     prior = MvNormal([0.0], [4.0;;])
-    pssm = ParameterisedSSM(build_ssm, ys)
-    ld = SSMParameterLogDensity(prior, pssm, trajectory)
+    ld = TrajectoryParameterLogDensity(prior, model, ys, trajectory)
 
     θ_test = [0.5]
     ll = LogDensityProblems.logdensity(ld, θ_test)
 
-    # Manual
-    model = build_ssm(θ_test)
-    ll_expected = logpdf(prior, θ_test) + trajectory_logdensity(model, trajectory, ys)
+    # Manual reference via fix
+    ll_expected =
+        logpdf(prior, θ_test) +
+        trajectory_logdensity(GeneralisedFilters.fix(model, θ_test), trajectory, ys)
 
     @test ll ≈ ll_expected
     @test LogDensityProblems.dimension(ld) == 1
 end
 
-@testitem "SSMParameterLogDensity: HierarchicalSSM" begin
+@testitem "TrajectoryParameterLogDensity: HierarchicalSSM" begin
     using GeneralisedFilters
+    using GeneralisedFilters: TimeVaryingParametric, ReferenceTrajectory
     using SSMProblems
     using LogDensityProblems
     using StableRNGs
     using Distributions
     using PDMats
     using LinearAlgebra
-    using GeneralisedFilters: ReferenceTrajectory
 
     rng = StableRNG(1234)
 
@@ -164,22 +155,35 @@ end
     _, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, D_outer, D_inner, D_obs; static_arrays=false
     )
+
+    # Promote the inner drift to TimeVaryingParametric so θ controls b
+    C_in = hier_model.inner_model.dyn.b.f.C
+    parametric_inner_dyn = LinearGaussianLatentDynamics(
+        hier_model.inner_model.dyn.A,
+        TimeVaryingParametric((θ, t, c) -> θ + C_in * c.prev_outer),
+        hier_model.inner_model.dyn.Q,
+    )
+    parametric_hier = HierarchicalSSM(
+        hier_model.outer_prior,
+        hier_model.outer_dyn,
+        hier_model.inner_model.prior,
+        parametric_inner_dyn,
+        hier_model.inner_model.obs,
+    )
+
     x0, _, xs, _, ys = SSMProblems.sample(rng, hier_model, T_len)
     outer_traj = ReferenceTrajectory(x0, xs)
 
-    # Parameterise the model by b (inner dynamics offset)
-    fixed_model = hier_model
-    build_hier(θ) = GeneralisedFilters.GFTest.with_inner_drift(fixed_model, θ)
-
     prior = MvNormal(zeros(D_inner), 4.0 * I)
-    pssm = ParameterisedSSM(build_hier, ys)
-    ld = SSMParameterLogDensity(prior, pssm, KF(), outer_traj)
+    ld = TrajectoryParameterLogDensity(prior, parametric_hier, KF(), ys, outer_traj)
 
     θ_test = [0.5]
     ll = LogDensityProblems.logdensity(ld, θ_test)
 
-    model = build_hier(θ_test)
-    ll_expected = logpdf(prior, θ_test) + trajectory_logdensity(model, KF(), outer_traj, ys)
+    # Manual reference using the same θ-positional path
+    ll_expected =
+        logpdf(prior, θ_test) +
+        trajectory_logdensity(parametric_hier, KF(), outer_traj, ys, θ_test)
 
     @test ll ≈ ll_expected
     @test LogDensityProblems.dimension(ld) == 1
