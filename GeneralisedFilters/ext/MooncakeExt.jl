@@ -17,10 +17,15 @@ Architecture:
     * `FixedParametric`           -> accumulate into a buffer; one Mooncake pullback at
                                      end of loop through `p.f(θ, hoisted_controls)`
     * `TimeVaryingParametric`     -> per-step Mooncake pullback through `p.f(θ, t, resolved)`
-- User-closure pullbacks are obtained via `Mooncake.build_rrule`. Each call uses a
-  FRESH `θ_inner_cd = zero_fcodual(θ)` with the inner fdata explicitly accumulated into
-  the outer `θ_cd.dx` afterwards — sharing one `θ_cd` across multiple inner rule calls
-  corrupts the fdata when the user closure involves array slicing (see design doc).
+- User-closure pullbacks are obtained via `Mooncake.build_rrule`. For per-step (TVP)
+  closures the rule is built ONCE at the start of the backward sweep and reused across
+  every step (avoiding Mooncake's per-call `_copy` of the rule captures — the dominant
+  per-step cost). Each call still uses a FRESH `θ_inner_cd = zero_fcodual(θ)` with the
+  inner fdata explicitly accumulated into the outer `θ_cd.dx` afterwards — sharing one
+  `θ_cd` across inner rule calls corrupts the fdata when the user closure involves array
+  slicing (see design doc). Reusing the rule object is safe precisely because the inputs
+  are fresh; only the rule's internal captures are reused, and each forward overwrites
+  them before its pullback reads them.
 - Parametric controls are supported. Per step, ∂resolved contributions from all TVP
   parameters are summed and routed by each control's trait: TVP controls fire a per-step
   Mooncake pullback through `p.f(θ, t)`; FP controls accumulate into a control-side
@@ -73,9 +78,35 @@ _add_rdata(a, b) = increment_internal!!(NoCache(), a, b)
 _accumulate_fdata!(::NoFData, ::NoFData) = nothing
 _accumulate_fdata!(outer, inner) = (increment_internal!!(NoCache(), outer, inner); nothing)
 
-# FixedParametric per-field accumulator buffer. `Ref{Any}` keeps init lazy so we don't
-# have to know the cotangent type up front (relevant for PDMat-typed params, whose
-# cotangent type is a plain matrix, not a PDMat).
+# Per-field routing state, built once at the start of the backward sweep and reused
+# across all T steps:
+#   - FixedParametric        -> an accumulator buffer (`Ref{Any}`) for the end-of-loop
+#                               pullback. `Ref{Any}` keeps init lazy so we don't need the
+#                               cotangent type up front (a PDMat param's cotangent is a
+#                               plain matrix, not a PDMat).
+#   - TimeVaryingParametric  -> a prebuilt Mooncake rule, reused across every step.
+#   - Fixed / TimeVarying    -> nothing.
+#
+# Reusing one rule across steps is safe because each step passes FRESH input CoDuals
+# (`θ_inner`, `resolved_inner`); only the rule's internal capture buffers are reused, and
+# those are fully overwritten by each forward pass before the matching pullback reads
+# them. (The original slicing bug was about sharing a non-zero *input* CoDual, not the
+# rule object.) Building the rule once instead of per-step avoids Mooncake's per-call
+# `_copy` of the rule's captures — the dominant cost of the per-step pullback.
+_make_route_state(::Union{Fixed,TimeVarying}, θ, t, resolved) = nothing
+_make_route_state(::FixedParametric, θ, t, resolved) = Base.RefValue{Any}(nothing)
+function _make_route_state(p::TimeVaryingParametric, θ, t, resolved)
+    return build_rrule(Tuple{typeof(p.f),typeof(θ),typeof(t),typeof(resolved)})
+end
+
+# Control routing state. TVP control signature is `f(θ, t)` (no `resolved`).
+_make_ctrl_route_state(::Union{Fixed,TimeVarying}, θ, t) = nothing
+_make_ctrl_route_state(::FixedParametric, θ, t) = Base.RefValue{Any}(nothing)
+function _make_ctrl_route_state(p::TimeVaryingParametric, θ, t)
+    return build_rrule(Tuple{typeof(p.f),typeof(θ),typeof(t)})
+end
+
+# Prior accumulator buffer (priors are only Fixed / FixedParametric — no rules needed).
 _make_fp_buffer(::Any) = nothing
 _make_fp_buffer(::FixedParametric) = Base.RefValue{Any}(nothing)
 
@@ -86,16 +117,15 @@ function _acc_fp!(buf::Base.RefValue{Any}, ∂val)
 end
 
 # Per-step Mooncake pullback through a TimeVaryingParametric parameter closure
-# `f(θ, t, resolved) -> param_value`. Uses a fresh inner θ CoDual per call (sharing the
-# outer θ_cd's fdata across multiple rule invocations triggers a Mooncake misbehaviour
-# for closures involving array slicing). After the pullback, the inner fdata is
-# accumulated into the outer θ_cd's fdata explicitly.
+# `f(θ, t, resolved) -> param_value`, using the prebuilt reusable `rule`. Uses a fresh
+# inner θ CoDual per call (sharing the outer θ_cd's fdata across multiple rule
+# invocations triggers a Mooncake misbehaviour for closures involving array slicing).
+# After the pullback, the inner fdata is accumulated into the outer θ_cd's fdata.
 #
 # Returns `(∂θ_rd, ∂resolved_tan)` where `∂resolved_tan` is a NamedTuple of per-field
 # tangents on `resolved` (used for routing parametric-controls contributions).
-function _tvp_step_pullback!(f, ∂val, θ_cd, t, resolved)
+function _tvp_step_pullback!(rule, f, ∂val, θ_cd, t, resolved)
     θ = primal(θ_cd)
-    rule = build_rrule(Tuple{typeof(f),typeof(θ),typeof(t),typeof(resolved)})
     θ_inner = zero_fcodual(θ)
     resolved_inner = zero_fcodual(resolved)
     out_cd, pb = rule(zero_fcodual(f), θ_inner, zero_fcodual(t), resolved_inner)
@@ -109,10 +139,9 @@ function _tvp_step_pullback!(f, ∂val, θ_cd, t, resolved)
 end
 
 # Per-step Mooncake pullback through a TimeVaryingParametric *control* closure
-# `f(θ, t) -> control_value`. Same fresh-θ_inner pattern. Returns only ∂θ_rd.
-function _tvp_control_step_pullback!(f, ∂val, θ_cd, t)
+# `f(θ, t) -> control_value`, using the prebuilt reusable `rule`. Returns only ∂θ_rd.
+function _tvp_control_step_pullback!(rule, f, ∂val, θ_cd, t)
     θ = primal(θ_cd)
-    rule = build_rrule(Tuple{typeof(f),typeof(θ),typeof(t)})
     θ_inner = zero_fcodual(θ)
     out_cd, pb = rule(zero_fcodual(f), θ_inner, zero_fcodual(t))
     out_primal = primal(out_cd)
@@ -171,8 +200,8 @@ function _route_param!(buf, ∂θ_rd, ::FixedParametric, ∂val, _, _, _)
     _acc_fp!(buf, ∂val)
     return (∂θ_rd, nothing)
 end
-function _route_param!(_, ∂θ_rd, p::TimeVaryingParametric, ∂val, θ_cd, t, resolved)
-    ∂θ_p, ∂resolved_tan = _tvp_step_pullback!(p.f, ∂val, θ_cd, t, resolved)
+function _route_param!(rule, ∂θ_rd, p::TimeVaryingParametric, ∂val, θ_cd, t, resolved)
+    ∂θ_p, ∂resolved_tan = _tvp_step_pullback!(rule, p.f, ∂val, θ_cd, t, resolved)
     return (_add_rdata(∂θ_rd, ∂θ_p), ∂resolved_tan)
 end
 
@@ -190,8 +219,9 @@ end
 
 # End-of-loop FixedParametric pullback per field. Returns `(∂θ_rd, ∂hoisted_tan)` where
 # ∂hoisted_tan is `nothing` when there's no FP contribution (buf empty), else a
-# NamedTuple of per-control tangents into `hoisted_controls`.
-_finish_fp_field!(∂θ_rd, _, ::Nothing, _, _) = (∂θ_rd, nothing)
+# NamedTuple of per-control tangents into `hoisted_controls`. The default no-ops for
+# non-FP fields (their route state is `nothing` or a TVP rule, not an FP buffer).
+_finish_fp_field!(∂θ_rd, _, _, _, _) = (∂θ_rd, nothing)
 function _finish_fp_field!(
     ∂θ_rd, p::FixedParametric, buf::Base.RefValue{Any}, θ_cd, hoisted_controls
 )
@@ -207,8 +237,8 @@ function _route_control!(buf, ∂θ_rd, ::FixedParametric, ∂val, _, _)
     _acc_fp!(buf, ∂val)
     return ∂θ_rd
 end
-function _route_control!(_, ∂θ_rd, p::TimeVaryingParametric, ∂val, θ_cd, t)
-    return _add_rdata(∂θ_rd, _tvp_control_step_pullback!(p.f, ∂val, θ_cd, t))
+function _route_control!(rule, ∂θ_rd, p::TimeVaryingParametric, ∂val, θ_cd, t)
+    return _add_rdata(∂θ_rd, _tvp_control_step_pullback!(rule, p.f, ∂val, θ_cd, t))
 end
 
 # Per-control end-of-loop FP-control trait dispatch. The `∂val` is the cotangent on
@@ -227,7 +257,8 @@ function _route_hoisted_control!(_, ∂θ_rd, ::TimeVaryingParametric, _)
 end
 
 # End-of-loop FP-control pullback per field. ∂val is the buffer's accumulated tangent.
-_finish_fp_control_field!(∂θ_rd, _, ::Nothing, _) = ∂θ_rd
+# The default no-ops for non-FP controls (route state is `nothing` or a TVP rule).
+_finish_fp_control_field!(∂θ_rd, _, _, _) = ∂θ_rd
 function _finish_fp_control_field!(
     ∂θ_rd, p::FixedParametric, buf::Base.RefValue{Any}, θ_cd
 )
@@ -235,7 +266,30 @@ function _finish_fp_control_field!(
     return _add_rdata(∂θ_rd, _fp_control_finish_pullback!(p.f, buf[], θ_cd))
 end
 
-# Per-component buffer NamedTuple, keyed by the component's field names.
+# Per-component route-state NamedTuple (FP buffers + prebuilt TVP rules), keyed by the
+# component's field names. `t` / `resolved` are sample values used only to form the TVP
+# rule signature.
+@generated function _make_route_states(component, θ, t, resolved)
+    pairs = [
+        Expr(
+            :(=),
+            k,
+            :(_make_route_state(getfield(component, $(QuoteNode(k))), θ, t, resolved)),
+        ) for k in fieldnames(component)
+    ]
+    return Expr(:tuple, pairs...)
+end
+
+# Per-controls route-state NamedTuple (FP buffers + prebuilt TVP control rules).
+@generated function _make_ctrl_route_states(controls::NamedTuple{N}, θ, t) where {N}
+    pairs = [
+        Expr(:(=), k, :(_make_ctrl_route_state(getfield(controls, $(QuoteNode(k))), θ, t)))
+        for k in N
+    ]
+    return Expr(:tuple, pairs...)
+end
+
+# Prior accumulator NamedTuple (FP buffers only; priors have no TVP fields).
 @generated function _make_fp_buffers(component)
     pairs = [
         Expr(:(=), k, :(_make_fp_buffer(getfield(component, $(QuoteNode(k)))))) for
@@ -336,7 +390,7 @@ _sum_field(a, b) = a + b
 # Per-step controls routing: walk the controls NamedTuple, dispatching each on the
 # control's trait. `∂resolved_tan` is a NamedTuple with the same keys as `controls`.
 @generated function _route_controls_step!(
-    fp_ctrl_bufs::NamedTuple{N},
+    ctrl_states::NamedTuple{N},
     ∂θ_rd,
     controls::NamedTuple{N},
     ∂resolved_tan::NamedTuple{N},
@@ -349,7 +403,7 @@ _sum_field(a, b) = a + b
         push!(
             exprs,
             :(∂θ_rd = _route_control!(
-                getfield(fp_ctrl_bufs, $sym),
+                getfield(ctrl_states, $sym),
                 ∂θ_rd,
                 getfield(controls, $sym),
                 getfield(∂resolved_tan, $sym),
@@ -364,7 +418,7 @@ end
 # End-of-loop controls routing for the ∂hoisted accumulator. Fixed/FP entries route as
 # before; TVP entries are no-ops because TVP controls aren't in `hoisted_controls`.
 @generated function _route_hoisted_controls!(
-    fp_ctrl_bufs::NamedTuple{N},
+    ctrl_states::NamedTuple{N},
     ∂θ_rd,
     controls::NamedTuple{N},
     ∂hoisted_tan::NamedTuple{N},
@@ -375,7 +429,7 @@ end
         push!(
             exprs,
             :(∂θ_rd = _route_hoisted_control!(
-                getfield(fp_ctrl_bufs, $sym),
+                getfield(ctrl_states, $sym),
                 ∂θ_rd,
                 getfield(controls, $sym),
                 getfield(∂hoisted_tan, $sym),
@@ -387,7 +441,7 @@ end
 
 # Fire FP-control pullbacks at end of loop.
 @generated function _finish_fp_controls!(
-    ∂θ_rd, controls::NamedTuple{N}, fp_ctrl_bufs::NamedTuple{N}, θ_cd
+    ∂θ_rd, controls::NamedTuple{N}, ctrl_states::NamedTuple{N}, θ_cd
 ) where {N}
     exprs = Expr[]
     for k in N
@@ -395,20 +449,11 @@ end
         push!(
             exprs,
             :(∂θ_rd = _finish_fp_control_field!(
-                ∂θ_rd, getfield(controls, $sym), getfield(fp_ctrl_bufs, $sym), θ_cd
+                ∂θ_rd, getfield(controls, $sym), getfield(ctrl_states, $sym), θ_cd
             )),
         )
     end
     return Expr(:block, exprs..., :(return ∂θ_rd))
-end
-
-# Per-control FP buffer construction. Returns a NamedTuple keyed by control names with
-# `Ref{Any}` for FP entries and `nothing` for the rest (matches the param buffer pattern).
-@generated function _make_fp_control_buffers(controls::NamedTuple{N}) where {N}
-    pairs = [
-        Expr(:(=), k, :(_make_fp_buffer(getfield(controls, $(QuoteNode(k)))))) for k in N
-    ]
-    return Expr(:tuple, pairs...)
 end
 
 ## RRULE!! #####################################################################################
@@ -445,35 +490,47 @@ function Mooncake.rrule!!(
     initial_state = _step_initial(filter, prior_params)
 
     T = length(ys)
-    states = Vector{Any}(undef, T + 1)
-    caches = Vector{Any}(undef, T)
-    resolved_per_step = Vector{Any}(undef, T)
-    states[1] = initial_state
 
-    state = initial_state
-    ll = zero(eltype(eltype(ys)))
-    for t in 1:T
+    # Peel the first step to establish concrete cache / resolved types, so the storage
+    # vectors below are type-stable (the per-step types are homogeneous across t). Only
+    # the caches and resolved controls are needed by the backward sweep; intermediate
+    # states are not (the caches carry everything), so we keep only the final state.
+    resolved_1 = resolve_controls(controls, hoisted_controls, θ, 1)
+    dyn_params_1 = step_params(dyn(model), θ, 1, resolved_1, dyn_hoist)
+    obs_params_1 = step_params(obs(model), θ, 1, resolved_1, obs_hoist)
+    state, ll, cache_1 = _step_forward(
+        filter, initial_state, dyn_params_1, obs_params_1, ys[1]
+    )
+
+    caches = Vector{typeof(cache_1)}(undef, T)
+    resolved_per_step = Vector{typeof(resolved_1)}(undef, T)
+    caches[1] = cache_1
+    resolved_per_step[1] = resolved_1
+
+    for t in 2:T
         resolved = resolve_controls(controls, hoisted_controls, θ, t)
         dyn_params = step_params(dyn(model), θ, t, resolved, dyn_hoist)
         obs_params = step_params(obs(model), θ, t, resolved, obs_hoist)
-        new_state, ll_inc, cache = _step_forward(
+        state, ll_inc, cache = _step_forward(
             filter, state, dyn_params, obs_params, ys[t]
         )
-        states[t + 1] = new_state
         caches[t] = cache
         resolved_per_step[t] = resolved
         ll += ll_inc
-        state = new_state
     end
+    final_state = state
 
     function ssm_loglikelihood_pb(Δll)
-        ∂state = _zero_state_cotangent(filter, states[T + 1])
+        ∂state = _zero_state_cotangent(filter, final_state)
         ∂θ_rd = Mooncake.zero_rdata(θ)
 
-        dyn_bufs = _make_fp_buffers(dyn(model))
-        obs_bufs = _make_fp_buffers(obs(model))
+        # Route states (FP buffers + prebuilt-once TVP rules), reused across all steps.
+        # The sample t / resolved (step 1) only set the TVP rule signatures.
+        resolved_1 = resolved_per_step[1]
+        dyn_states = _make_route_states(dyn(model), θ, 1, resolved_1)
+        obs_states = _make_route_states(obs(model), θ, 1, resolved_1)
         prior_bufs = _make_fp_buffers(prior(model))
-        fp_ctrl_bufs = _make_fp_control_buffers(controls)
+        ctrl_states = _make_ctrl_route_states(controls, θ, 1)
 
         for t in T:-1:1
             ∂state, ∂dyn_p, ∂obs_p = _step_pullback(
@@ -481,15 +538,15 @@ function Mooncake.rrule!!(
             )
             resolved = resolved_per_step[t]
             ∂θ_rd, ∂res_dyn = _route_component_step!(
-                dyn_bufs, ∂θ_rd, dyn(model), ∂dyn_p, θ_cd, t, resolved
+                dyn_states, ∂θ_rd, dyn(model), ∂dyn_p, θ_cd, t, resolved
             )
             ∂θ_rd, ∂res_obs = _route_component_step!(
-                obs_bufs, ∂θ_rd, obs(model), ∂obs_p, θ_cd, t, resolved
+                obs_states, ∂θ_rd, obs(model), ∂obs_p, θ_cd, t, resolved
             )
             ∂resolved_step = _sum_nt(∂res_dyn, ∂res_obs)
             if ∂resolved_step !== nothing
                 ∂θ_rd = _route_controls_step!(
-                    fp_ctrl_bufs, ∂θ_rd, controls, ∂resolved_step, θ_cd, t
+                    ctrl_states, ∂θ_rd, controls, ∂resolved_step, θ_cd, t
                 )
             end
         end
@@ -498,10 +555,10 @@ function Mooncake.rrule!!(
         ∂θ_rd = _route_prior_component!(prior_bufs, ∂θ_rd, prior(model), ∂prior_p)
 
         ∂θ_rd, ∂hoist_dyn = _finish_fp_component!(
-            ∂θ_rd, dyn(model), dyn_bufs, θ_cd, hoisted_controls
+            ∂θ_rd, dyn(model), dyn_states, θ_cd, hoisted_controls
         )
         ∂θ_rd, ∂hoist_obs = _finish_fp_component!(
-            ∂θ_rd, obs(model), obs_bufs, θ_cd, hoisted_controls
+            ∂θ_rd, obs(model), obs_states, θ_cd, hoisted_controls
         )
         ∂θ_rd, ∂hoist_prior = _finish_fp_component!(
             ∂θ_rd, prior(model), prior_bufs, θ_cd, hoisted_controls
@@ -509,11 +566,11 @@ function Mooncake.rrule!!(
         ∂hoisted_acc = _sum_nt(_sum_nt(∂hoist_dyn, ∂hoist_obs), ∂hoist_prior)
         if ∂hoisted_acc !== nothing
             ∂θ_rd = _route_hoisted_controls!(
-                fp_ctrl_bufs, ∂θ_rd, controls, ∂hoisted_acc
+                ctrl_states, ∂θ_rd, controls, ∂hoisted_acc
             )
         end
 
-        ∂θ_rd = _finish_fp_controls!(∂θ_rd, controls, fp_ctrl_bufs, θ_cd)
+        ∂θ_rd = _finish_fp_controls!(∂θ_rd, controls, ctrl_states, θ_cd)
 
         return (NoRData(), NoRData(), NoRData(), ∂θ_rd, NoRData(), NoRData())
     end
