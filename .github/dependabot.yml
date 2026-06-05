@@ -1,0 +1,27 @@
+version: 2
+
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      all-github-actions-packages:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "julia"
+    directories:
+      - "/GeneralisedFilters"
+      - "/GeneralisedFilters/docs"
+      - "/GeneralisedFilters/examples/PGAS Example"
+      - "/GeneralisedFilters/examples/trend-inflation"
+      - "/SSMProblems"
+      - "/SSMProblems/docs"
+      - "/SSMProblems/examples/kalman-filter"
+    schedule:
+      interval: "weekly"
+    groups:
+      all-julia-packages:
+        patterns:
+          - "*"
