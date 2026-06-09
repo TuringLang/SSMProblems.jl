@@ -184,6 +184,22 @@ function simulate(obs::ObservationProcess, step::Integer, state; kwargs...)
 end
 
 """
+    logdensity(prior::StatePrior, new_state; kwargs...)
+
+Compute the log-density of a transition of the initial state prior.
+
+The method should return the log-density of the new state `new_state`.
+
+The default behaviour is to compute the log-density of the distribution return by the
+corresponding `distribution()` method.
+
+See also [`LatentDynamics`](@ref).
+"""
+function logdensity(prior::StatePrior, new_state; kwargs...)
+    return logpdf(distribution(prior; kwargs...), new_state)
+end
+
+"""
     logdensity(dyn::LatentDynamics, step::Integer, prev_state, new_state; kwargs...)
 
 Compute the log-density of a transition of the latent dynamics.
