@@ -69,7 +69,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
-        if: matrix.os == 'ubuntu-latest' && matrix.version == 'lts'
+        if: (matrix.os == 'ubuntu-latest' && matrix.version == 'lts') && github.actor != 'dependabot[bot]'
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
