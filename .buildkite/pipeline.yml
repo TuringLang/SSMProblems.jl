@@ -16,7 +16,7 @@ steps:
           Pkg.instantiate()
           Pkg.test(coverage=false)'
     agents:
-      queue: "juliagpu"
+      queue: "cuda"
     timeout_in_minutes: 60
     # Don't run Buildkite if the commit message includes the text [skip tests]
     if: build.message !~ /\[skip tests\]/
@@ -43,8 +43,7 @@ steps:
           Pkg.instantiate()
           Pkg.test(coverage=false)'
     agents:
-      queue: "juliagpu"
-      cuda: "*"
+      queue: "cuda"
     timeout_in_minutes: 120
     # Don't run Buildkite if the commit message includes the text [skip tests]
     if: build.message !~ /\[skip tests\]/
