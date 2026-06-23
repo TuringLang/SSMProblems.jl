@@ -17,3 +17,5 @@ using Literate: Literate
 # Convert to markdown and notebook
 const SCRIPTJL = joinpath(EXAMPLEPATH, "script.jl")
 Literate.markdown(SCRIPTJL, OUTDIR; name=EXAMPLE, execute=true)
+# Also emit a runnable notebook; Documenter copies it into the deployed site.
+Literate.notebook(SCRIPTJL, OUTDIR; name=EXAMPLE, execute=false)
