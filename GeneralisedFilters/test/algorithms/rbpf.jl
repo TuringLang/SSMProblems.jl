@@ -241,7 +241,7 @@ end
     using Random: randexp, AbstractRNG
     using StatsBase: sample, Weights
 
-    using OffsetArrays
+    using GeneralisedFilters: ReferenceTrajectory
 
     struct DummyResampler <: GeneralisedFilters.AbstractResampler end
 
@@ -259,7 +259,7 @@ end
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, 1, 1)
     _, _, ys = sample(rng, model, K)
 
-    ref_traj = OffsetVector([rand(rng, 1) for _ in 0:K], -1)
+    ref_traj = ReferenceTrajectory(rand(rng, 1), [rand(rng, 1) for _ in 1:K])
 
     bf = BF(N_particles; threshold=1.0, resampler=DummyResampler())
     cb = GeneralisedFilters.DenseAncestorCallback(nothing)
@@ -268,8 +268,10 @@ end
     )
 
     traj = GeneralisedFilters.get_ancestry(cb.container, N_particles)
-    true_traj = [cb.container.particles[t][N_particles - K + t] for t in 0:K]
+    true_x0 = cb.container.initial_states[N_particles - K]
+    true_xs = [cb.container.states[t][N_particles - K + t] for t in 1:K]
 
-    @test traj.parent == true_traj
+    @test traj.x0 == true_x0
+    @test traj.xs == true_xs
     @test GeneralisedFilters.get_ancestry(cb.container, 1) == ref_traj
 end

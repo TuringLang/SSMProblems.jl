@@ -2,6 +2,10 @@ using Test
 using TestItems
 using TestItemRunner
 
+# Extension test filtering:
+# - :gpu tests require CUDA hardware
+# - :mooncake tests require Mooncake (loaded as test dep, triggers MooncakeExt)
+# To skip extension tests: filter = ti -> !(:gpu in ti.tags) && !(:mooncake in ti.tags)
 @run_package_tests filter = ti -> !(:gpu in ti.tags)
 
 # Algorithm tests (by family)
@@ -14,6 +18,12 @@ include("algorithms/csmc.jl")
 # Component tests
 include("components/resamplers.jl")
 include("components/kalman_gradient.jl")
+
+# Integration tests
+include("integrations/logdensity.jl")
+include("integrations/particle_gibbs.jl")
+include("integrations/turing.jl")
+include("integrations/kalman_mooncake.jl")
 
 # Quality tests
 include("support/type_stability.jl")

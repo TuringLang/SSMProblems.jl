@@ -20,8 +20,8 @@
 
     # resample (fails test_op)
     rs = GF.resampler(algo)
-    @test_opt skip=true GF.maybe_resample(rng, rs, init_state)
-    @test_call skip=true GF.maybe_resample(rng, rs, init_state)
+    @test_opt skip = true GF.maybe_resample(rng, rs, init_state)
+    @test_call skip = true GF.maybe_resample(rng, rs, init_state)
     state = GF.maybe_resample(rng, rs, init_state)
 
     # predict

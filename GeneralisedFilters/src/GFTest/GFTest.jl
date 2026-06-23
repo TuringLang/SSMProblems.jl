@@ -1,6 +1,5 @@
 module GFTest
 
-using CUDA
 using Distributions
 using LinearAlgebra
 using PDMats
