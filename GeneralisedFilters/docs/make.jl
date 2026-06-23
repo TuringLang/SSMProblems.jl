@@ -18,7 +18,7 @@ mkpath(EXAMPLE_ASSETS_OUT)
 # (e.g. script-only scratch examples) are skipped rather than failing the build.
 examples = sort(
     filter(readdir(EXAMPLES_ROOT; join=true)) do path
-        isdir(path) && isfile(joinpath(path, string(basename(path), ".ipynb")))
+        return isdir(path) && isfile(joinpath(path, string(basename(path), ".ipynb")))
     end,
 )
 above = joinpath(@__DIR__, "..")
