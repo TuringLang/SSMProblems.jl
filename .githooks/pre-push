@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-mapfile -d '' notebooks < <(git ls-files -z '*.ipynb')
+# Portable null-delimited read (macOS system bash 3.2 lacks `mapfile`).
+notebooks=()
+while IFS= read -r -d '' notebook; do
+  notebooks+=("$notebook")
+done < <(git ls-files -z '*.ipynb')
 if [[ ${#notebooks[@]} -eq 0 ]]; then
   exit 0
 fi

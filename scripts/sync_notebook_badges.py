@@ -34,7 +34,15 @@ def title_from_slug(slug: str) -> str:
     return " ".join(word.capitalize() for word in slug.replace("_", "-").split("-"))
 
 
+# Matches a markdown image-link badge: [![alt](image)](target)
+_BADGE_MARKUP = re.compile(r"\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)")
+
+
 def is_badge_line(line: str) -> bool:
+    # Require the badge markup itself, not just a known URL, so prose that merely
+    # mentions one of these targets isn't mistaken for (and stripped as) a badge.
+    if not _BADGE_MARKUP.search(line):
+        return False
     return (
         "colab.research.google.com" in line
         or "View%20Source-GitHub" in line
@@ -101,16 +109,20 @@ def normalize_notebook(path: Path) -> bool:
     lines = source_text.splitlines()
 
     title = None
+    pre_title: list[str] = []
+    rest: list[str] = []
     for idx, line in enumerate(lines):
         if re.match(r"^#\s+", line):
             title = line.strip()
-            lines = lines[idx + 1 :]
+            rest = lines[idx + 1 :]
             break
+        pre_title.append(line)
 
     if title is None:
         title = f"# {title_from_slug(path.parent.name)}"
 
-    body = [line for line in lines if not is_badge_line(line)]
+    # Keep any content that preceded the heading rather than discarding it.
+    body = [line for line in pre_title + rest if not is_badge_line(line)]
     while body and not body[0].strip():
         body.pop(0)
     while body and not body[-1].strip():

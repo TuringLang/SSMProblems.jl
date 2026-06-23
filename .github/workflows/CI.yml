@@ -19,12 +19,15 @@ jobs:
       - uses: actions/checkout@v7
       - name: Verify notebooks are stripped
         run: |
-          notebooks=$(git ls-files '*.ipynb')
-          if [ -z "$notebooks" ]; then
+          notebooks=()
+          while IFS= read -r -d '' notebook; do
+            notebooks+=("$notebook")
+          done < <(git ls-files -z '*.ipynb')
+          if [ ${#notebooks[@]} -eq 0 ]; then
             exit 0
           fi
-          python3 scripts/sync_notebook_badges.py $notebooks
-          python3 scripts/strip_notebook_outputs.py $notebooks
+          python3 scripts/sync_notebook_badges.py "${notebooks[@]}"
+          python3 scripts/strip_notebook_outputs.py "${notebooks[@]}"
           git diff --exit-code
 
   test:

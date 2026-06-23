@@ -62,7 +62,10 @@ function inject_edit_url(markdown_path::AbstractString, example::AbstractString)
         "```\n\n",
     )
 
-    if occursin(r"(?m)^```@meta$", content)
+    # Match an existing `@meta` block only at the very start of the page (same
+    # anchor as the replacement); a `@meta` fence elsewhere in the body must not
+    # suppress injection.
+    if occursin(r"(?s)^```@meta.*?```", content)
         content = replace(content, r"(?s)^```@meta.*?```\s*" => meta_block; count=1)
     else
         content = string(meta_block, content)
@@ -112,10 +115,12 @@ function inject_docs_badges(markdown_path::AbstractString, example::AbstractStri
     if isnothing(heading_match)
         content = string(badge_line, "\n\n", content)
     else
+        # Use `nextind`/`prevind` so multibyte headings (e.g. "# Café") don't land
+        # on a UTF-8 continuation byte and throw `StringIndexError`.
         head_start = heading_match.offset
-        head_end = head_start + ncodeunits(heading_match.match) - 1
-        head = content[1:head_end]
-        tail = content[(head_end + 1):end]
+        tail_start = nextind(content, head_start + ncodeunits(heading_match.match) - 1)
+        head = content[1:prevind(content, tail_start)]
+        tail = content[tail_start:end]
         tail = replace(tail, r"^\n+" => "")
         content = string(head, "\n\n", badge_line, "\n\n", tail)
     end
