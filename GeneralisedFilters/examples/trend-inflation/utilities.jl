@@ -17,10 +17,12 @@ end
 # for normal collections
 mean_path(paths, states) = _mean_path(identity, paths, states)
 
-# for rao blackwellised particles
-function mean_path(paths::Vector{Vector{T}}, states) where {T<:GeneralisedFilters.RBState}
-    zs = _mean_path(s -> getproperty.(getproperty.(s, :z), :μ), paths, states)
-    xs = _mean_path(s -> getproperty.(s, :x), paths, states)
+# for rao blackwellised particles; `get_ancestry` returns `ReferenceTrajectory`s, which we
+# collect into plain vectors before extracting per-time-step state components
+function mean_path(paths::AbstractVector{<:GeneralisedFilters.ReferenceTrajectory}, states)
+    trajectories = map(collect, paths)
+    zs = _mean_path(s -> getproperty.(getproperty.(s, :z), :μ), trajectories, states)
+    xs = _mean_path(s -> getproperty.(s, :x), trajectories, states)
     return zs, xs
 end
 
