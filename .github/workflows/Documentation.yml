@@ -42,7 +42,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: GeneralisedFilters/docs/src/examples
-          key: notebooks-${{ runner.os }}-${{ hashFiles('GeneralisedFilters/src/**', 'SSMProblems/src/**', 'GeneralisedFilters/examples/**') }}
+          key: notebooks-${{ runner.os }}-${{ hashFiles('GeneralisedFilters/src/**', 'SSMProblems/src/**', 'GeneralisedFilters/examples/**', 'GeneralisedFilters/docs/*.jl') }}
       - name: Cache pip packages
         if: matrix.pkg.name == 'GeneralisedFilters'
         uses: actions/cache@v4

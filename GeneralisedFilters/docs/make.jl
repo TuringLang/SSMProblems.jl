@@ -66,6 +66,9 @@ end
 
 function example_summary(markdown_path::AbstractString)
     in_fence = false
+    # Accumulate the first prose paragraph so a hard-wrapped sentence isn't truncated
+    # mid-line in the index table.
+    paragraph = String[]
     for line in eachline(markdown_path)
         stripped = strip(line)
 
@@ -74,8 +77,11 @@ function example_summary(markdown_path::AbstractString)
             continue
         end
 
-        if in_fence || isempty(stripped)
-            continue
+        in_fence && continue
+
+        if isempty(stripped)
+            isempty(paragraph) && continue
+            break
         end
 
         if startswith(stripped, "# ")
@@ -88,10 +94,11 @@ function example_summary(markdown_path::AbstractString)
             continue
         end
 
-        return replace(stripped, "|" => "\\|")
+        push!(paragraph, stripped)
     end
 
-    return "Runnable example with executable source."
+    isempty(paragraph) && return "Runnable example with executable source."
+    return replace(join(paragraph, " "), "|" => "\\|")
 end
 
 function example_thumbnail(slug::AbstractString)
