@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   test:
-    name: ${{ matrix.pkg.name }} - Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }}
+    name: ${{ matrix.pkg.name }} - Julia ${{ matrix.version }} - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -25,8 +25,6 @@ jobs:
           - ubuntu-latest
           - windows-latest
           - macOS-latest
-        arch:
-          - x64
         pkg:
           - name: SSMProblems
             dir: './SSMProblems'
@@ -40,7 +38,6 @@ jobs:
         uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.version }}
-          arch: ${{ matrix.arch }}
 
       - name: Cache artifacts
         uses: julia-actions/cache@v3
