@@ -14,7 +14,13 @@ mkpath(EXAMPLE_ASSETS_OUT)
 
 # Install and precompile all packages
 # Workaround for https://github.com/JuliaLang/Pkg.jl/issues/2219
-examples = sort(filter!(isdir, readdir(EXAMPLES_ROOT; join=true)))
+# Only build directories that ship the expected `<slug>.ipynb`; other example dirs
+# (e.g. script-only scratch examples) are skipped rather than failing the build.
+examples = sort(
+    filter(readdir(EXAMPLES_ROOT; join=true)) do path
+        isdir(path) && isfile(joinpath(path, string(basename(path), ".ipynb")))
+    end,
+)
 above = joinpath(@__DIR__, "..")
 ssmproblems_path = joinpath(above, "..", "SSMProblems")
 let script = "using Pkg; Pkg.activate(ARGS[1]); Pkg.develop(path=\"$(above)\"); Pkg.develop(path=\"$(ssmproblems_path)\"); Pkg.instantiate()"
