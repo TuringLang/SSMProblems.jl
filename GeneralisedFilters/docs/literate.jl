@@ -77,7 +77,6 @@ function prepare_notebook(nb)
     nb["metadata"]["kernelspec"] = Dict(
         "display_name" => "Julia", "language" => "julia", "name" => "julia"
     )
-    delete!(nb["metadata"], "language_info")
     packages = script_packages(SCRIPTJL)
     if !isempty(packages)
         setup = Dict(
