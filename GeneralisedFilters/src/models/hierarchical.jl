@@ -108,12 +108,30 @@ function SSMProblems.simulate(
     return HierarchicalState(x, z)
 end
 
-struct HierarchicalObservations{OP<:ObservationProcess} <: ObservationProcess
-    obs::OP
+function SSMProblems.logdensity(
+    obs::ObservationProcess, step::Integer, state::HierarchicalState, observation; kwargs...
+)
+    return SSMProblems.logdensity(
+        obs, step, state.z, observation; new_outer=state.x, kwargs...
+    )
 end
 
-function SSMProblems.distribution(
-    obs::HierarchicalObservations, step::Integer, state::HierarchicalState; kwargs...
+function SSMProblems.logdensity(
+    dyn::HierarchicalDynamics,
+    step::Integer,
+    prev_state::HierarchicalState,
+    new_state::HierarchicalState;
+    kwargs...,
 )
-    return distribution(obs.obs, step, state.z; new_outer=state.x, kwargs...)
+    ll = SSMProblems.logdensity(dyn.outer_dyn, step, prev_state.x, new_state.x; kwargs...)
+    ll += SSMProblems.logdensity(
+        dyn.inner_dyn,
+        step,
+        prev_state.z,
+        new_state.z;
+        prev_outer=prev_state.x,
+        new_outer=new_state.x,
+        kwargs...,
+    )
+    return ll
 end

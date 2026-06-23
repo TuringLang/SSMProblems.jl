@@ -75,16 +75,18 @@ end
 
 @testitem "GPU offspring-to-ancestors" tags = [:gpu] begin
     using CUDA
+    ext = Base.get_extension(GeneralisedFilters, :CUDAExt)
     offspring = CuVector{Int}([0, 2, 2, 3, 5])
     true_ancestors = CuVector{Int}([2, 2, 4, 5, 5])
-    ancestors = GeneralisedFilters.offspring_to_ancestors(offspring)
+    ancestors = ext.offspring_to_ancestors(offspring)
     @test ancestors == true_ancestors
 end
 
 @testitem "GPU ancestors-to-offspring" tags = [:gpu] begin
     using CUDA
+    ext = Base.get_extension(GeneralisedFilters, :CUDAExt)
     ancestors = CuVector{Int}([4, 2, 2, 3, 1])
     true_offspring = CuVector{Int}([1, 2, 1, 1, 0])
-    offspring = GeneralisedFilters.ancestors_to_offspring(ancestors)
+    offspring = ext.ancestors_to_offspring(ancestors)
     @test offspring == true_offspring
 end

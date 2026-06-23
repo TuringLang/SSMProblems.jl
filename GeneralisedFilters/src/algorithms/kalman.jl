@@ -1,4 +1,3 @@
-using CUDA: i32
 import PDMats: PDMat, X_A_Xt, Xt_A_X, X_invA_Xt, Xt_invA_X
 import LinearAlgebra: Symmetric
 
@@ -77,23 +76,6 @@ function update(
     obs_params = calc_params(obs, iter; kwargs...)
     state, ll = kalman_update(state, obs_params, observation, algo.jitter)
     return state, ll
-end
-
-function kalman_update(state, obs_params, observation, jitter)
-    μ, Σ = params(state)
-    H, c, R = obs_params
-
-    z = _compute_innovation(μ, H, c, observation)
-    S = _compute_innovation_cov(Σ, H, R)
-    K = _compute_kalman_gain(Σ, H, S)
-    _, Σ̂_raw = _compute_joseph_update(Σ, K, H, R)
-
-    μ̂ = μ + K * z
-    Σ̂ = _apply_jitter_and_wrap(Σ̂_raw, jitter)
-
-    ll = logpdf(MvNormal(z, S), zero(z))
-
-    return MvNormal(μ̂, Σ̂), ll
 end
 
 ## KALMAN SMOOTHER #########################################################################

@@ -1,6 +1,10 @@
 using LogExpFunctions
+using DataStructures: Stack
+using Random: rand
 
 export AbstractLikelihood, InformationLikelihood, DiscreteLikelihood, log_likelihoods
+export ReferenceTrajectory
+export DenseParticleContainer, ParticleTree
 
 """Containers used for storing representations of the filtering distribution."""
 
@@ -243,3 +247,385 @@ end
 Extract the log backward likelihoods from a DiscreteLikelihood.
 """
 log_likelihoods(state::DiscreteLikelihood) = state.log_β
+
+## REFERENCE TRAJECTORY ###################################################################
+
+"""
+    ReferenceTrajectory{T0, T, VT}
+
+A 0-indexed trajectory container where the initial state (`x0`) may have a different type
+than the subsequent states (`xs`). This is common in Rao-Blackwellised settings where the
+prior's inner distribution differs from the filtered distributions at subsequent time steps.
+
+When `T0 == T`, the element type collapses to a concrete `T` (since `Union{T,T} == T`).
+
+# Fields
+- `x0::T0`: State at time 0 (typically from the prior)
+- `xs::VT`: States at times 1, 2, …, T (an `AbstractVector{T}`)
+
+Indices are 0-based: `traj[0] === x0`, `traj[t] === xs[t]` for t ≥ 1.
+"""
+struct ReferenceTrajectory{T0,T,VT<:AbstractVector{T}} <: AbstractVector{Union{T0,T}}
+    x0::T0
+    xs::VT
+end
+
+Base.size(r::ReferenceTrajectory) = (length(r.xs) + 1,)
+Base.axes(r::ReferenceTrajectory) = (0:length(r.xs),)
+Base.IndexStyle(::Type{<:ReferenceTrajectory}) = IndexLinear()
+
+Base.@propagate_inbounds function Base.getindex(r::ReferenceTrajectory, i::Integer)
+    return i == 0 ? r.x0 : r.xs[i]
+end
+
+Base.map(f, r::ReferenceTrajectory) = ReferenceTrajectory(f(r.x0), map(f, r.xs))
+
+function Base.:(==)(a::ReferenceTrajectory, b::ReferenceTrajectory)
+    return a.x0 == b.x0 && a.xs == b.xs
+end
+
+function Base.show(io::IO, r::ReferenceTrajectory)
+    print(io, "ReferenceTrajectory(x0=", r.x0, ", xs=", r.xs, ")")
+    return nothing
+end
+Base.show(io::IO, ::MIME"text/plain", r::ReferenceTrajectory) = show(io, r)
+
+## DENSE PARTICLE STORAGE #################################################################
+
+"""
+    DenseParticleContainer{T0, T, WT}
+
+Full-history particle storage: the initial particle states (time 0), plus subsequent
+particle states, weights, and ancestor indices for times 1, 2, …, T.
+
+`T0` is the type of the initial particle states; `T` is the type of the subsequent
+particle states. When they match, use the one-argument constructor — pushing subsequent
+states with a different type will raise an error.
+
+# Fields
+- `initial_states::Vector{T0}`: Time-0 particle states (fixed length N)
+- `states::Vector{Vector{T}}`: Particle states at times 1..T
+- `weights::Vector{Vector{WT}}`: Log weights at times 1..T
+- `ancestors::Vector{Vector{Int}}`: Ancestor indices at times 1..T
+
+# Constructors
+
+    DenseParticleContainer(initial_states)
+    DenseParticleContainer(initial_states, T)
+    DenseParticleContainer(initial_states, states_t1, weights_t1, ancestors_t1)
+
+- First form: assumes `T == T0`.
+- Second form: explicit subsequent-state type `T` (the container starts empty for t≥1).
+- Third form: construct directly from the initial states and the time-1 states, weights,
+  and ancestors — `T` is inferred from `states_t1`. Prefer this when the initial and
+  subsequent state types differ so that `T` is inferred from concrete data.
+
+# Mutation
+
+Use `push!(container, states, weights, ancestors)` to append a new time step. Passing
+a `states` vector whose eltype does not match `T` raises an `ArgumentError`.
+"""
+struct DenseParticleContainer{T0,T,WT}
+    initial_states::Vector{T0}
+    states::Vector{Vector{T}}
+    weights::Vector{Vector{WT}}
+    ancestors::Vector{Vector{Int}}
+end
+
+function DenseParticleContainer(initial_states::Vector{T0}) where {T0}
+    return DenseParticleContainer{T0,T0,Float64}(
+        initial_states,
+        Vector{Vector{T0}}(),
+        Vector{Vector{Float64}}(),
+        Vector{Vector{Int}}(),
+    )
+end
+
+function DenseParticleContainer(initial_states::Vector{T0}, ::Type{T}) where {T0,T}
+    return DenseParticleContainer{T0,T,Float64}(
+        initial_states,
+        Vector{Vector{T}}(),
+        Vector{Vector{Float64}}(),
+        Vector{Vector{Int}}(),
+    )
+end
+
+function DenseParticleContainer(
+    initial_states::Vector{T0},
+    states_t1::Vector{T},
+    weights_t1::Vector{WT},
+    ancestors_t1::AbstractVector{<:Integer},
+) where {T0,T,WT}
+    return DenseParticleContainer{T0,T,WT}(
+        initial_states, [states_t1], [weights_t1], [Vector{Int}(ancestors_t1)]
+    )
+end
+
+function Base.push!(
+    c::DenseParticleContainer{T0,T,WT},
+    states::Vector{T},
+    weights::Vector{WT},
+    ancestors::AbstractVector{<:Integer},
+) where {T0,T,WT}
+    push!(c.states, states)
+    push!(c.weights, weights)
+    push!(c.ancestors, Vector{Int}(ancestors))
+    return c
+end
+
+function Base.push!(
+    c::DenseParticleContainer{T0,T,WT}, states, weights, ancestors
+) where {T0,T,WT}
+    throw(
+        ArgumentError(
+            "Subsequent states/weights have type ($(eltype(states)), $(eltype(weights))) " *
+            "but the container's subsequent state/weight types are ($T, $WT). If the " *
+            "initial and subsequent types are intentionally different, construct the " *
+            "container with `DenseParticleContainer(initial_states, states_t1, " *
+            "weights_t1, ancestors_t1)` (or `DenseParticleContainer(initial_states, T)`).",
+        ),
+    )
+end
+
+"""
+    Particle(container::DenseParticleContainer, t::Integer, i::Integer)
+
+Reconstruct the `Particle` at time `t ≥ 1`, index `i`, from the container's stored
+state, weight, and ancestor index.
+"""
+function Particle(c::DenseParticleContainer, t::Integer, i::Integer)
+    return Particle(c.states[t][i], c.weights[t][i], c.ancestors[t][i])
+end
+
+"""
+    get_ancestry(container::DenseParticleContainer, i::Integer)
+
+Return the trajectory of particle `i` as a [`ReferenceTrajectory`](@ref), walking the
+ancestry backwards from the final time to time 0.
+"""
+function get_ancestry(c::DenseParticleContainer{T0,T}, i::Integer) where {T0,T}
+    Tlen = length(c.ancestors)
+    if Tlen == 0
+        return ReferenceTrajectory(c.initial_states[i], T[])
+    end
+    xs = Vector{T}(undef, Tlen)
+    a = i
+    for t in Tlen:-1:1
+        xs[t] = c.states[t][a]
+        a = c.ancestors[t][a]
+    end
+    x0 = c.initial_states[a]
+    return ReferenceTrajectory(x0, xs)
+end
+
+## SPARSE PARTICLE STORAGE ################################################################
+
+function append_to_stack!(s::Stack{T}, a::AbstractVector) where {T}
+    for x in a
+        push!(s, x)
+    end
+    return s
+end
+
+"""
+    ParticleTree{T0, T}
+
+Sparse storage of particle ancestry with separate buffers for initial states (time 0) and
+subsequent states (times 1..T). The initial-state buffer is never expanded or pruned; the
+subsequent-state buffer grows as needed.
+
+`T0` and `T` are the types of initial and subsequent states respectively.
+
+# Fields
+- `initial_states::Vector{T0}`: Time-0 particle states (fixed length N)
+- `states::Vector{T}`: Pool for times 1..T (expandable)
+- `parents::Vector{Int64}`: For each entry in `states`, the parent's index
+- `is_penultimate::Vector{Bool}`: `true` if `parents[i]` indexes `initial_states`,
+  `false` if it indexes `states`
+- `leaves::Vector{Int64}`: Current leaf indices (into `initial_states` before the first
+  insert, into `states` thereafter)
+- `offspring::Vector{Int64}`: Offspring counts for `states`
+- `free_indices::Stack{Int64}`: Unused slots in `states`
+- `leaves_in_initial::Ref{Bool}`: `true` until the first `insert!` call
+
+# Constructors
+
+    ParticleTree(initial_states, M)
+    ParticleTree(initial_states, T, M)
+    ParticleTree(initial_states, states_t1, ancestors_t1, M)
+
+- First form: assumes `T == T0`.
+- Second form: explicit subsequent-state type `T`.
+- Third form: construct with time-1 data already inserted — `T` is inferred from
+  `states_t1`. Prefer this when initial and subsequent types differ.
+
+# Reference
+Jacob, P., Murray L., & Rubenthaler S. (2015). Path storage in the particle filter
+[doi:10.1007/s11222-013-9445-x](https://dx.doi.org/10.1007/s11222-013-9445-x)
+"""
+struct ParticleTree{T0,T}
+    initial_states::Vector{T0}
+    states::Vector{T}
+    parents::Vector{Int64}
+    is_penultimate::Vector{Bool}
+    leaves::Vector{Int64}
+    offspring::Vector{Int64}
+    free_indices::Stack{Int64}
+    leaves_in_initial::Ref{Bool}
+end
+
+function ParticleTree(initial_states::Vector{T0}, M::Integer) where {T0}
+    return ParticleTree(initial_states, T0, M)
+end
+
+function ParticleTree(initial_states::Vector{T0}, ::Type{T}, M::Integer) where {T0,T}
+    states = Vector{T}(undef, M)
+    parents = zeros(Int64, M)
+    is_penultimate = fill(false, M)
+    offspring = zeros(Int64, M)
+    free_indices = Stack{Int64}()
+    append_to_stack!(free_indices, collect(Int64, M:-1:1))
+    leaves = collect(Int64, 1:length(initial_states))
+    return ParticleTree{T0,T}(
+        initial_states,
+        states,
+        parents,
+        is_penultimate,
+        leaves,
+        offspring,
+        free_indices,
+        Ref(true),
+    )
+end
+
+function ParticleTree(
+    initial_states::Vector{T0},
+    states_t1::Vector{T},
+    ancestors_t1::AbstractVector{<:Integer},
+    M::Integer,
+) where {T0,T}
+    tree = ParticleTree(initial_states, T, M)
+    insert!(tree, states_t1, ancestors_t1)
+    return tree
+end
+
+Base.length(tree::ParticleTree) = length(tree.states)
+Base.keys(tree::ParticleTree) = LinearIndices(tree.states)
+
+function prune!(tree::ParticleTree, offspring::AbstractVector{<:Integer})
+    if tree.leaves_in_initial[]
+        return tree
+    end
+    setindex!(tree.offspring, offspring, tree.leaves)
+    @inbounds for i in eachindex(offspring)
+        j = tree.leaves[i]
+        while j > 0 && tree.offspring[j] == 0
+            push!(tree.free_indices, j)
+            if tree.is_penultimate[j]
+                break
+            end
+            parent = tree.parents[j]
+            tree.offspring[parent] -= 1
+            j = parent
+        end
+    end
+    return tree
+end
+
+function Base.insert!(
+    tree::ParticleTree{T0,T}, states::Vector{T}, ancestors::AbstractVector{<:Integer}
+) where {T0,T}
+    parents_of_new = getindex(tree.leaves, ancestors)
+    parent_in_initial = tree.leaves_in_initial[]
+
+    if length(tree.free_indices) < length(ancestors)
+        @debug "expanding tree"
+        expand!(tree)
+    end
+
+    @inbounds for i in eachindex(states)
+        tree.leaves[i] = pop!(tree.free_indices)
+    end
+    setindex!(tree.states, states, tree.leaves)
+    setindex!(tree.parents, parents_of_new, tree.leaves)
+    setindex!(tree.is_penultimate, fill(parent_in_initial, length(states)), tree.leaves)
+    tree.leaves_in_initial[] = false
+    return tree
+end
+
+function Base.insert!(tree::ParticleTree{T0,T}, states, ancestors) where {T0,T}
+    throw(
+        ArgumentError(
+            "Subsequent particle states have type $(eltype(states)) but the tree's " *
+            "subsequent-state type is $T. If the initial and subsequent types are " *
+            "intentionally different, construct the tree with " *
+            "`ParticleTree(initial_states, states_t1, ancestors_t1, M)` (or " *
+            "`ParticleTree(initial_states, T, M)`).",
+        ),
+    )
+end
+
+function expand!(tree::ParticleTree)
+    M = length(tree)
+    resize!(tree.states, 2 * M)
+    append!(tree.parents, zeros(Int64, M))
+    append!(tree.is_penultimate, falses(M))
+    append!(tree.offspring, zeros(Int64, M))
+    append_to_stack!(tree.free_indices, collect(Int64, (2 * M):-1:(M + 1)))
+    return tree
+end
+
+function get_offspring(a::AbstractVector{<:Integer})
+    offspring = zero(a)
+    for i in a
+        offspring[i] += 1
+    end
+    return offspring
+end
+
+"""
+    get_ancestry(tree::ParticleTree)
+
+Return all leaf trajectories as a vector of [`ReferenceTrajectory`](@ref), walking from
+each leaf up to the corresponding initial state.
+"""
+function get_ancestry(tree::ParticleTree{T0,T}) where {T0,T}
+    N = length(tree.leaves)
+    if tree.leaves_in_initial[]
+        return [ReferenceTrajectory(tree.initial_states[i], T[]) for i in tree.leaves]
+    end
+    paths = Vector{ReferenceTrajectory{T0,T,Vector{T}}}(undef, N)
+    @inbounds for (k, leaf) in enumerate(tree.leaves)
+        xs = T[tree.states[leaf]]
+        j = tree.parents[leaf]
+        penult = tree.is_penultimate[leaf]
+        while !penult
+            push!(xs, tree.states[j])
+            penult = tree.is_penultimate[j]
+            j = tree.parents[j]
+        end
+        reverse!(xs)
+        paths[k] = ReferenceTrajectory(tree.initial_states[j], xs)
+    end
+    return paths
+end
+
+function rand(
+    rng::AbstractRNG, tree::ParticleTree{T0,T}, weights::AbstractVector{<:Real}
+) where {T0,T}
+    b = StatsBase.sample(rng, StatsBase.Weights(weights))
+    leaf = tree.leaves[b]
+    if tree.leaves_in_initial[]
+        return ReferenceTrajectory(tree.initial_states[leaf], T[])
+    end
+    xs = T[tree.states[leaf]]
+    j = tree.parents[leaf]
+    penult = tree.is_penultimate[leaf]
+    while !penult
+        push!(xs, tree.states[j])
+        penult = tree.is_penultimate[j]
+        j = tree.parents[j]
+    end
+    reverse!(xs)
+    return ReferenceTrajectory(tree.initial_states[j], xs)
+end

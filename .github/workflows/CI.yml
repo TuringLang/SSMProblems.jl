@@ -34,16 +34,16 @@ jobs:
             dir: './GeneralisedFilters'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Julia
-        uses: julia-actions/setup-julia@v2
+        uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
 
       - name: Cache artifacts
-        uses: julia-actions/cache@v2
+        uses: julia-actions/cache@v3
 
       - name: Install dependencies
         run: |
@@ -68,8 +68,8 @@ jobs:
           directories: ${{ matrix.pkg.dir }}
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
-        if: matrix.os == 'ubuntu-latest' && matrix.version == 'lts'
+        uses: codecov/codecov-action@v7
+        if: (matrix.os == 'ubuntu-latest' && matrix.version == 'lts') && github.actor != 'dependabot[bot]'
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -80,16 +80,16 @@ jobs:
     name: GeneralisedFilters - GPU Compilation Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Julia
-        uses: julia-actions/setup-julia@v2
+        uses: julia-actions/setup-julia@v3
         with:
           version: '1'
           arch: x64
 
       - name: Cache artifacts
-        uses: julia-actions/cache@v2
+        uses: julia-actions/cache@v3
 
       - name: Install dependencies
         run: |
