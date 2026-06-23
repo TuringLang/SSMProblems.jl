@@ -15,18 +15,31 @@ Pkg.instantiate()
 using Literate: Literate
 
 # Insert an "Open in Colab" badge (after the title) that opens the notebook published to
-# the gh-pages docs. The link targets the `dev` build for a stable URL; note the same
-# notebook is also deployed under `previews/PR<n>/` (PR previews) and `vX.Y`/`stable`
-# (releases), which this fixed `dev` link does not resolve to.
+# the gh-pages docs. The version subdir matches Documenter's deploy target: `previews/PR<n>`
+# for pull-request previews, the tag (e.g. `v1.2.3`) for tagged releases, otherwise `dev`.
 const REPO = "TuringLang/SSMProblems.jl"
 const PKG = basename(dirname(@__DIR__))
+
+function docs_subfolder()
+    ref = get(ENV, "GITHUB_REF", "")
+    if get(ENV, "GITHUB_EVENT_NAME", "") == "pull_request"
+        pr = match(r"^refs/pull/(\d+)/", ref)
+        pr === nothing || return string("previews/PR", only(pr.captures))
+    end
+    tag = match(r"^refs/tags/(.+)$", ref)
+    tag === nothing || return only(tag.captures)
+    return "dev"
+end
+
 const COLAB_BADGE = string(
     "# [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)]",
     "(https://colab.research.google.com/github/",
     REPO,
     "/blob/gh-pages/",
     PKG,
-    "/dev/examples/",
+    "/",
+    docs_subfolder(),
+    "/examples/",
     EXAMPLE,
     ".ipynb)",
 )
