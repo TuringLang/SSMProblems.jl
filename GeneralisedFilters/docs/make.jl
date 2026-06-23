@@ -11,7 +11,11 @@ mkpath(EXAMPLES_OUT)
 
 # Install and precompile all packages
 # Workaround for https://github.com/JuliaLang/Pkg.jl/issues/2219
-examples = filter!(isdir, readdir(joinpath(@__DIR__, "..", "examples"); join=true))
+# Only build directories that ship a Literate `script.jl`; other example dirs
+# (e.g. script-only scratch examples) are skipped rather than failing the build.
+examples = filter(readdir(joinpath(@__DIR__, "..", "examples"); join=true)) do path
+    return isdir(path) && isfile(joinpath(path, "script.jl"))
+end
 above = joinpath(@__DIR__, "..")
 ssmproblems_path = joinpath(above, "..", "SSMProblems")
 let script = "using Pkg; Pkg.activate(ARGS[1]); Pkg.develop(path=\"$(above)\"); Pkg.develop(path=\"$(ssmproblems_path)\"); Pkg.instantiate()"
