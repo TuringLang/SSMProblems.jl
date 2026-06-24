@@ -54,16 +54,17 @@ end
 
 const SCRIPTJL = joinpath(EXAMPLEPATH, "script.jl")
 
-# The example's declared dependencies (Literate is build-only), so the notebook can install
-# everything it needs on Colab — including packages used only by included helper files.
-function example_packages()
+# In-repo packages the example depends on; the notebook installs these from the repo's main
+# branch because their registered versions may be too old (or unregistered) for the example.
+function repo_packages()
     deps = get(Pkg.TOML.parsefile(joinpath(EXAMPLEPATH, "Project.toml")), "deps", Dict())
-    return sort(filter(!=("Literate"), collect(keys(deps))))
+    return sort(filter(in(("SSMProblems", "GeneralisedFilters")), collect(keys(deps))))
 end
 
-# Notebook postprocess: use a generic Julia kernel (so Colab picks its default Julia
-# runtime, with no pinned version) and prepend a single Pkg.add for the example's
-# dependencies so the notebook runs on a fresh Colab runtime.
+# Notebook postprocess: use a generic Julia kernel (so Colab picks its default Julia runtime,
+# with no pinned version) and prepend a cell that recreates the example environment on a
+# fresh Colab runtime — download its Project.toml, add the in-repo packages from main, then
+# instantiate the (registered) dependencies.
 function prepare_notebook(nb)
     nb["metadata"]["kernelspec"] = Dict(
         "display_name" => "Julia", "language" => "julia", "name" => "julia"
@@ -74,19 +75,26 @@ function prepare_notebook(nb)
         cell["cell_type"] == "code" || continue
         cell["source"] = filter(line -> !endswith(rstrip(line), "#hide"), cell["source"])
     end
-    packages = example_packages()
-    if !isempty(packages)
-        setup = Dict(
-            "cell_type" => "code",
-            "execution_count" => nothing,
-            "metadata" => Dict(),
-            "outputs" => [],
-            "source" =>
-                ["import Pkg\n", string("Pkg.add([", join(repr.(packages), ", "), "])")],
-        )
-        idx = findfirst(cell -> cell["cell_type"] == "code", nb["cells"])
-        insert!(nb["cells"], something(idx, lastindex(nb["cells"]) + 1), setup)
-    end
+    proj = "https://raw.githubusercontent.com/$(REPO)/main/$(PKG)/examples/$(EXAMPLE)/Project.toml"
+    specs = [
+        "Pkg.PackageSpec(; url=\"https://github.com/$(REPO)\", subdir=\"$(p)\", rev=\"main\")"
+        for p in repo_packages()
+    ]
+    setup = Dict(
+        "cell_type" => "code",
+        "execution_count" => nothing,
+        "metadata" => Dict(),
+        "outputs" => [],
+        "source" => [
+            "import Pkg, Downloads\n",
+            "Downloads.download(\"$(proj)\", \"Project.toml\")\n",
+            "Pkg.activate(\".\")\n",
+            "Pkg.add([$(join(specs, ", "))])\n",
+            "Pkg.instantiate()",
+        ],
+    )
+    idx = findfirst(cell -> cell["cell_type"] == "code", nb["cells"])
+    insert!(nb["cells"], something(idx, lastindex(nb["cells"]) + 1), setup)
     return nb
 end
 
