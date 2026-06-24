@@ -15,8 +15,15 @@ using PDMats
 const GF = GeneralisedFilters
 
 INFL_PATH = joinpath(@__DIR__, "..", "..", "..", "examples", "trend-inflation"); #hide
-# INFL_PATH = joinpath(@__DIR__)
 include(joinpath(INFL_PATH, "utilities.jl")); #hide
+#nb # Download the helper script and data so the notebook is self-contained on Colab:
+#nb using Downloads
+#nb INFL_URL = "https://raw.githubusercontent.com/TuringLang/SSMProblems.jl/main/GeneralisedFilters/examples/trend-inflation"
+#nb for f in ("utilities.jl", "data.csv")
+#nb     isfile(f) || Downloads.download("$(INFL_URL)/$(f)", f)
+#nb end
+#nb INFL_PATH = pwd()
+#nb include(joinpath(INFL_PATH, "utilities.jl"))
 
 # ## Model Definition
 

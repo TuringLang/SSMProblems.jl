@@ -54,29 +54,27 @@ end
 
 const SCRIPTJL = joinpath(EXAMPLEPATH, "script.jl")
 
-# Top-level `using`/`import` package names, so the notebook can install them on Colab.
-function script_packages(path)
-    pkgs = String[]
-    for line in eachline(path)
-        m = match(r"^\s*(?:using|import)\s+(.+)", line)
-        m === nothing && continue
-        for part in split(first(split(m.captures[1], ':')), ',')
-            token = first(split(strip(part), r"\s+as\s+"))
-            name = strip(first(split(token, '.')))
-            isempty(name) || name in pkgs || push!(pkgs, String(name))
-        end
-    end
-    return sort(pkgs)
+# The example's declared dependencies (Literate is build-only), so the notebook can install
+# everything it needs on Colab — including packages used only by included helper files.
+function example_packages()
+    deps = get(Pkg.TOML.parsefile(joinpath(EXAMPLEPATH, "Project.toml")), "deps", Dict())
+    return sort(filter(!=("Literate"), collect(keys(deps))))
 end
 
 # Notebook postprocess: use a generic Julia kernel (so Colab picks its default Julia
-# runtime, with no pinned version) and prepend a single Pkg.add for all imported packages
-# so the notebook runs on a fresh Colab runtime.
+# runtime, with no pinned version) and prepend a single Pkg.add for the example's
+# dependencies so the notebook runs on a fresh Colab runtime.
 function prepare_notebook(nb)
     nb["metadata"]["kernelspec"] = Dict(
         "display_name" => "Julia", "language" => "julia", "name" => "julia"
     )
-    packages = script_packages(SCRIPTJL)
+    # `#hide` is a Documenter-only directive that Literate leaves in the notebook; drop
+    # those lines (e.g. the repo-relative paths that only work during the docs build).
+    for cell in nb["cells"]
+        cell["cell_type"] == "code" || continue
+        cell["source"] = filter(line -> !endswith(rstrip(line), "#hide"), cell["source"])
+    end
+    packages = example_packages()
     if !isempty(packages)
         setup = Dict(
             "cell_type" => "code",
