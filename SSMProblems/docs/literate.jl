@@ -54,47 +54,18 @@ end
 
 const SCRIPTJL = joinpath(EXAMPLEPATH, "script.jl")
 
-# In-repo packages the example depends on; the notebook installs these from the repo's main
-# branch because their registered versions may be too old (or unregistered) for the example.
-function repo_packages()
-    deps = get(Pkg.TOML.parsefile(joinpath(EXAMPLEPATH, "Project.toml")), "deps", Dict())
-    return sort(filter(in(("SSMProblems", "GeneralisedFilters")), collect(keys(deps))))
-end
-
-# Notebook postprocess: use a generic Julia kernel (so Colab picks its default Julia runtime,
-# with no pinned version) and prepend a cell that recreates the example environment on a
-# fresh Colab runtime — download its Project.toml, add the in-repo packages from main, then
-# instantiate the (registered) dependencies.
+# Notebook postprocess: only what can't be expressed as `#nb` source lines — a generic Julia
+# kernel (so Colab picks its default Julia runtime, with no pinned version) and dropping the
+# Documenter-only `#hide` lines Literate otherwise leaves in the notebook. The Colab
+# dependency setup lives in the example script as `#nb` lines.
 function prepare_notebook(nb)
     nb["metadata"]["kernelspec"] = Dict(
         "display_name" => "Julia", "language" => "julia", "name" => "julia"
     )
-    # `#hide` is a Documenter-only directive that Literate leaves in the notebook; drop
-    # those lines (e.g. the repo-relative paths that only work during the docs build).
     for cell in nb["cells"]
         cell["cell_type"] == "code" || continue
         cell["source"] = filter(line -> !endswith(rstrip(line), "#hide"), cell["source"])
     end
-    proj = "https://raw.githubusercontent.com/$(REPO)/main/$(PKG)/examples/$(EXAMPLE)/Project.toml"
-    specs = [
-        "Pkg.PackageSpec(; url=\"https://github.com/$(REPO)\", subdir=\"$(p)\", rev=\"main\")"
-        for p in repo_packages()
-    ]
-    setup = Dict(
-        "cell_type" => "code",
-        "execution_count" => nothing,
-        "metadata" => Dict(),
-        "outputs" => [],
-        "source" => [
-            "import Pkg, Downloads\n",
-            "Downloads.download(\"$(proj)\", \"Project.toml\")\n",
-            "Pkg.activate(\".\")\n",
-            "Pkg.add([$(join(specs, ", "))])\n",
-            "Pkg.instantiate()",
-        ],
-    )
-    idx = findfirst(cell -> cell["cell_type"] == "code", nb["cells"])
-    insert!(nb["cells"], something(idx, lastindex(nb["cells"]) + 1), setup)
     return nb
 end
 
