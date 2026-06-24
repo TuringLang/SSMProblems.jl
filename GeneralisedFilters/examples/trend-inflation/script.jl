@@ -4,6 +4,21 @@
 # Watson, 2016) using GeneralisedFilters to define a heirarchical model for use in Rao-
 # Blackwellised particle filtering.
 
+#nb # Install dependencies so the notebook runs on a fresh Colab runtime. GeneralisedFilters
+#nb # and SSMProblems are added from the repo's main branch (registered versions may be too
+#nb # old, e.g. lack ReferenceTrajectory):
+#nb import Pkg, Downloads
+#nb Downloads.download(
+#nb     "https://raw.githubusercontent.com/TuringLang/SSMProblems.jl/main/GeneralisedFilters/examples/trend-inflation/Project.toml",
+#nb     "Project.toml",
+#nb )
+#nb Pkg.activate(".")
+#nb Pkg.add([
+#nb     Pkg.PackageSpec(; url="https://github.com/TuringLang/SSMProblems.jl", subdir="GeneralisedFilters", rev="main"),
+#nb     Pkg.PackageSpec(; url="https://github.com/TuringLang/SSMProblems.jl", subdir="SSMProblems", rev="main"),
+#nb ])
+#nb Pkg.instantiate()
+
 using GeneralisedFilters
 using SSMProblems
 using Distributions

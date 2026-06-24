@@ -55,38 +55,17 @@ end
 
 const SCRIPTJL = joinpath(EXAMPLEPATH, "script.jl")
 
-# The example's declared dependencies (Literate is build-only), so the notebook can install
-# everything it needs on Colab — including packages used only by included helper files.
-function example_packages()
-    deps = get(Pkg.TOML.parsefile(joinpath(EXAMPLEPATH, "Project.toml")), "deps", Dict())
-    return sort(filter(!=("Literate"), collect(keys(deps))))
-end
-
-# Notebook postprocess: use a generic Julia kernel (so Colab picks its default Julia
-# runtime, with no pinned version) and prepend a single Pkg.add for the example's
-# dependencies so the notebook runs on a fresh Colab runtime.
+# Notebook postprocess: only what can't be expressed as `#nb` source lines — a generic Julia
+# kernel (so Colab picks its default Julia runtime, with no pinned version) and dropping the
+# Documenter-only `#hide` lines Literate otherwise leaves in the notebook. The Colab
+# dependency setup lives in the example script as `#nb` lines.
 function prepare_notebook(nb)
     nb["metadata"]["kernelspec"] = Dict(
         "display_name" => "Julia", "language" => "julia", "name" => "julia"
     )
-    # `#hide` is a Documenter-only directive that Literate leaves in the notebook; drop
-    # those lines (e.g. the repo-relative paths that only work during the docs build).
     for cell in nb["cells"]
         cell["cell_type"] == "code" || continue
         cell["source"] = filter(line -> !endswith(rstrip(line), "#hide"), cell["source"])
-    end
-    packages = example_packages()
-    if !isempty(packages)
-        setup = Dict(
-            "cell_type" => "code",
-            "execution_count" => nothing,
-            "metadata" => Dict(),
-            "outputs" => [],
-            "source" =>
-                ["import Pkg\n", string("Pkg.add([", join(repr.(packages), ", "), "])")],
-        )
-        idx = findfirst(cell -> cell["cell_type"] == "code", nb["cells"])
-        insert!(nb["cells"], something(idx, lastindex(nb["cells"]) + 1), setup)
     end
     return nb
 end

@@ -1,7 +1,18 @@
 # # Kalman Filter
 #
 # This example implements a Kalman filter for a linear Gaussian state space model using the
-# SSMProblems interface. 
+# SSMProblems interface.
+
+#nb # Install dependencies so the notebook runs on a fresh Colab runtime. SSMProblems is
+#nb # added from the repo's main branch (the registered version may be too old):
+#nb import Pkg, Downloads
+#nb Downloads.download(
+#nb     "https://raw.githubusercontent.com/TuringLang/SSMProblems.jl/main/SSMProblems/examples/kalman-filter/Project.toml",
+#nb     "Project.toml",
+#nb )
+#nb Pkg.activate(".")
+#nb Pkg.add(Pkg.PackageSpec(; url="https://github.com/TuringLang/SSMProblems.jl", subdir="SSMProblems", rev="main"))
+#nb Pkg.instantiate()
 
 using AbstractMCMC
 using Distributions
