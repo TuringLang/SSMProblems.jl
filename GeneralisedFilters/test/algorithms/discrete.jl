@@ -7,7 +7,6 @@
     using GeneralisedFilters.GFTest: MixtureObservation
     using Distributions
     using StableRNGs
-    using SSMProblems
 
     rng = StableRNG(1234)
     α0 = rand(rng, 3)
@@ -17,8 +16,8 @@
 
     μs = [0.0, 1.0, 2.0]
 
-    prior = HomogeneousDiscretePrior(α0)
-    dyn = HomogeneousDiscreteLatentDynamics(P)
+    prior = DiscretePrior(α0)
+    dyn = DiscreteDynamics(P)
     obs = MixtureObservation(μs)
     model = StateSpaceModel(prior, dyn, obs)
 
@@ -34,7 +33,7 @@
     path_probs = Dict{Tuple{Int,Int},Float64}()
     for x0 in 1:K, x1 in 1:K
         prior_prob = α0[x0] * P[x0, x1]
-        likelihood = exp(SSMProblems.logdensity(obs, 1, x1, y))
+        likelihood = exp(logdensity(obs, 1, x1, y))
         path_probs[(x0, x1)] = prior_prob * likelihood
     end
     marginal = sum(values(path_probs))
@@ -50,8 +49,6 @@ end
     using GeneralisedFilters
     using GeneralisedFilters.GFTest: MixtureObservation
     using Distributions
-    using Random
-    using SSMProblems
     using LogExpFunctions
 
     # Simple 3-state HMM with Gaussian emissions
@@ -72,17 +69,14 @@ end
 
     # Run backward predictor
     algo = BackwardDiscretePredictor()
-    rng = Random.default_rng()
-    dyn = HomogeneousDiscreteLatentDynamics(P)
+    dyn = DiscreteDynamics(P)
 
     # Initialize at time T and run backward pass
     β = (
-        let lik = GeneralisedFilters.backward_initialise(
-                rng, obs, algo, T, observations[T]; num_states=K
-            )
+        let lik = backward_initialise(algo, obs, T, observations[T], K)
             for t in (T - 1):-1:1
-                lik = GeneralisedFilters.backward_predict(rng, dyn, algo, t, lik)
-                lik = GeneralisedFilters.backward_update(obs, algo, t, lik, observations[t])
+                lik = backward_predict(algo, lik, dyn)
+                lik = backward_update(algo, lik, obs, t, observations[t])
             end
             lik
         end
@@ -116,7 +110,6 @@ end
     using GeneralisedFilters.GFTest: MixtureObservation
     using Distributions
     using Random
-    using SSMProblems
     using LogExpFunctions
 
     K = 3
@@ -133,8 +126,8 @@ end
     μs = [0.0, 2.0, 4.0]
     obs = MixtureObservation(μs)
 
-    prior = HomogeneousDiscretePrior(α0)
-    dyn = HomogeneousDiscreteLatentDynamics(P)
+    prior = DiscretePrior(α0)
+    dyn = DiscreteDynamics(P)
     model = StateSpaceModel(prior, dyn, obs)
 
     observations = [0.5, 1.8, 3.5, 2.1]
@@ -179,7 +172,6 @@ end
     using GeneralisedFilters.GFTest: MixtureObservation
     using Distributions
     using Random
-    using SSMProblems
     using LogExpFunctions
 
     K = 3
@@ -196,8 +188,8 @@ end
     μs = [0.0, 2.0, 4.0]
     obs = MixtureObservation(μs)
 
-    prior = HomogeneousDiscretePrior(α0)
-    dyn = HomogeneousDiscreteLatentDynamics(P)
+    prior = DiscretePrior(α0)
+    dyn = DiscreteDynamics(P)
     model = StateSpaceModel(prior, dyn, obs)
 
     observations = [0.5, 1.8, 3.5, 2.1]
@@ -208,10 +200,10 @@ end
     df = DiscreteFilter()
     filtered = Vector{Vector{Float64}}(undef, T)
 
-    let s = initialise(rng, SSMProblems.prior(model), df)
+    let s = initialise(rng, model.prior, df)
         for t in 1:T
-            pred = predict(rng, SSMProblems.dyn(model), df, t, s, observations[t])
-            s, _ = update(SSMProblems.obs(model), df, t, pred, observations[t])
+            pred = predict(rng, model.dyn, df, t, s, observations[t])
+            s, _ = update(model.obs, df, t, pred, observations[t])
             filtered[t] = s
         end
     end
@@ -220,14 +212,12 @@ end
     # β_{t_smooth}(i) = p(y_{t_smooth+1:T} | x_{t_smooth} = i)
     bdp = BackwardDiscretePredictor()
     back_lik = (
-        let lik = GeneralisedFilters.backward_initialise(
-                rng, obs, bdp, T, observations[T]; num_states=K
-            )
+        let lik = backward_initialise(bdp, obs, T, observations[T], K)
             for t in (T - 1):-1:(t_smooth + 1)
-                lik = GeneralisedFilters.backward_predict(rng, dyn, bdp, t, lik)
-                lik = GeneralisedFilters.backward_update(obs, bdp, t, lik, observations[t])
+                lik = backward_predict(bdp, lik, dyn)
+                lik = backward_update(bdp, lik, obs, t, observations[t])
             end
-            GeneralisedFilters.backward_predict(rng, dyn, bdp, t_smooth, lik)
+            backward_predict(bdp, lik, dyn)
         end
     )
 

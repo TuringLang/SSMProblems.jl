@@ -2,29 +2,26 @@ using Test
 using TestItems
 using TestItemRunner
 
-# Extension test filtering:
+# `@run_package_tests` discovers every `@testitem` in the package, so test suites are
+# selected here by filtering rather than by `include`.
+#
+# Extension/hardware filtering:
 # - :gpu tests require CUDA hardware
 # - :mooncake tests require Mooncake (loaded as test dep, triggers MooncakeExt)
-# To skip extension tests: filter = ti -> !(:gpu in ti.tags) && !(:mooncake in ti.tags)
-@run_package_tests filter = ti -> !(:gpu in ti.tags)
+#
+# The suites below cover algorithms and integrations whose ports land in later stages of the
+# interface redesign; they are excluded by filename until their components exist.
+const PENDING_TEST_FILES = (
+    "algorithms/particles.jl",
+    "algorithms/rbpf.jl",
+    "algorithms/csmc.jl",
+    "components/kalman_gradient.jl",
+    "integrations/logdensity.jl",
+    "integrations/particle_gibbs.jl",
+    "integrations/turing.jl",
+    "integrations/kalman_mooncake.jl",
+)
 
-# Algorithm tests (by family)
-include("algorithms/kalman.jl")
-include("algorithms/particles.jl")
-include("algorithms/discrete.jl")
-include("algorithms/rbpf.jl")
-include("algorithms/csmc.jl")
+_is_pending(filename) = any(f -> endswith(filename, f), PENDING_TEST_FILES)
 
-# Component tests
-include("components/resamplers.jl")
-include("components/kalman_gradient.jl")
-
-# Integration tests
-include("integrations/logdensity.jl")
-include("integrations/particle_gibbs.jl")
-include("integrations/turing.jl")
-include("integrations/kalman_mooncake.jl")
-
-# Quality tests
-include("support/type_stability.jl")
-include("support/aqua.jl")
+@run_package_tests filter = ti -> !(:gpu in ti.tags) && !_is_pending(ti.filename)

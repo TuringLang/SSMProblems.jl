@@ -14,10 +14,11 @@
     for Dy in Dys
         rng = StableRNG(SEED)
         model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, Dx, Dy)
-        _, _, ys = sample(rng, model, T)
+        _, _, ys = simulate(rng, model, T)
 
         kf_state, kf_ll = GeneralisedFilters.filter(StableRNG(SEED), model, KF(), ys)
-        srkf_state, srkf_ll = GeneralisedFilters.filter(StableRNG(SEED), model, SRKF(), ys)
+        srkf_sqrt, srkf_ll = GeneralisedFilters.filter(StableRNG(SEED), model, SRKF(), ys)
+        srkf_state = GaussianState(srkf_sqrt)
 
         @test srkf_state.μ ≈ kf_state.μ
         @test srkf_state.Σ ≈ kf_state.Σ
@@ -27,10 +28,8 @@ end
 
 @testitem "SRKF filter StaticArrays" begin
     using GeneralisedFilters
-    using SSMProblems
     using StableRNGs
     using StaticArrays
-    using PDMats
 
     D = 2
     rng = StableRNG(1234)
@@ -47,15 +46,14 @@ end
     R = @SMatrix rand(rng, D, D)
     R = R * R'
 
-    model = create_homogeneous_linear_gaussian_model(
-        μ0, PDMat(Σ0), A, b, PDMat(Q), H, c, PDMat(R)
-    )
+    model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
 
-    _, _, ys = sample(rng, model, 2)
+    _, _, ys = simulate(rng, model, 2)
 
-    state, _ = GeneralisedFilters.filter(rng, model, SRKF(), ys)
+    sqrt_state, _ = GeneralisedFilters.filter(rng, model, SRKF(), ys)
+    state = GaussianState(sqrt_state)
 
     @test ys[2] isa SVector{D,Float64}
     @test state.μ isa SVector{D,Float64}
-    @test state.Σ isa PDMat{Float64,SMatrix{D,D,Float64,D * D}}
+    @test state.Σ isa SMatrix{D,D,Float64}
 end
