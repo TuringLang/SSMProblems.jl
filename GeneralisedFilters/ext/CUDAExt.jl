@@ -5,19 +5,10 @@ This extension provides GPU-accelerated particle filtering operations:
 - GPU resampling methods (Multinomial, Systematic, Stratified) for CuVector weights
 - Offspring/ancestor conversion kernels
 - ParallelParticleTree for GPU-based sparse particle storage
-- ParallelAncestorCallback for GPU ancestry tracking
 """
 module CUDAExt
 
-using GeneralisedFilters:
-    GeneralisedFilters,
-    Multinomial,
-    Systematic,
-    Stratified,
-    AbstractCallback,
-    PostInitCallback,
-    PostUpdateCallback,
-    num_particles
+using GeneralisedFilters: GeneralisedFilters, Multinomial, Systematic, Stratified
 
 using GeneralisedFilters: ReferenceTrajectory
 
@@ -266,35 +257,6 @@ function expand(states, M)
     new_states = similar(states, M)
     new_states[1:length(states)] = states
     return new_states
-end
-
-## GPU ANCESTOR CALLBACK ###################################################################
-
-"""
-    ParallelAncestorCallback
-
-A callback for parallel sparse ancestry storage, which preallocates and returns a populated
-`ParallelParticleTree` object.
-"""
-struct ParallelAncestorCallback{T} <: AbstractCallback
-    tree::ParallelParticleTree{T}
-end
-
-function (c::ParallelAncestorCallback)(
-    model, filter, step, state, data, ::PostInitCallback; kwargs...
-)
-    N = num_particles(filter)
-    @inbounds c.tree.states[1:N] = deepcopy(state.particles)
-    return nothing
-end
-
-function (c::ParallelAncestorCallback)(
-    model, filter, step, state, data, ::PostUpdateCallback; kwargs...
-)
-    # insert! implicitly deepcopies
-    particles = state.particles
-    insert!(c.tree, getfield.(particles, :state), getfield.(particles, :ancestor))
-    return nothing
 end
 
 end # module CUDAExt

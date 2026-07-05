@@ -1,137 +1,105 @@
-import SSMProblems: LatentDynamics, ObservationProcess, simulate
-export HierarchicalSSM
+export HierarchicalPrior, HierarchicalDynamics, HierarchicalObservation, HierarchicalSSM
+export HierarchicalState
 
-struct HierarchicalSSM{PT<:StatePrior,LD<:LatentDynamics,MT<:StateSpaceModel} <:
-       AbstractStateSpaceModel
-    outer_prior::PT
-    outer_dyn::LD
-    inner_model::MT
-end
-outer_prior(model::HierarchicalSSM) = model.outer_prior
-inner_prior(model::HierarchicalSSM) = model.inner_model.prior
-outer_dyn(model::HierarchicalSSM) = model.outer_dyn
-inner_dyn(model::HierarchicalSSM) = model.inner_model.dyn
-SSMProblems.obs(model::HierarchicalSSM) = model.inner_model.obs
+"""
+    HierarchicalPrior(outer, inner)
 
-struct HierarchicalPrior{P1<:StatePrior,P2<:StatePrior} <: StatePrior
-    outer_prior::P1
-    inner_prior::P2
-end
-function SSMProblems.prior(model::HierarchicalSSM)
-    return HierarchicalPrior(model.outer_prior, model.inner_model.prior)
-end
-outer_prior(prior::HierarchicalPrior) = prior.outer_prior
-inner_prior(prior::HierarchicalPrior) = prior.inner_prior
-
-struct HierarchicalDynamics{D1<:LatentDynamics,D2<:LatentDynamics} <: LatentDynamics
-    outer_dyn::D1
-    inner_dyn::D2
-end
-function SSMProblems.dyn(model::HierarchicalSSM)
-    return HierarchicalDynamics(model.outer_dyn, model.inner_model.dyn)
-end
-outer_dyn(dyn::HierarchicalDynamics) = dyn.outer_dyn
-inner_dyn(dyn::HierarchicalDynamics) = dyn.inner_dyn
-
-function HierarchicalSSM(
-    outer_prior::StatePrior,
-    outer_dyn::LatentDynamics,
-    inner_prior::StatePrior,
-    inner_dyn::LatentDynamics,
-    obs::ObservationProcess,
-)
-    inner_model = StateSpaceModel(inner_prior, inner_dyn, obs)
-    return HierarchicalSSM(outer_prior, outer_dyn, inner_model)
+Prior for a Rao-Blackwellisable model. `outer` is the prior for the sampled component;
+`inner` is either a constant prior atom or a conditioning callable `(; x0) -> atom`.
+"""
+struct HierarchicalPrior{OP<:StatePrior,IP} <: StatePrior
+    outer::OP
+    inner::IP
 end
 
 """
-A container for a sampled state from a hierarchical SSM, with separation between the outer
-and inner dimensions. Note this differs from a RBState in the the inner state is a sample
-rather than a conditional distribution.
+    HierarchicalDynamics(outer, inner)
+
+Dynamics for a Rao-Blackwellisable model. `outer` is the dynamics for the sampled component;
+`inner` is either a constant dynamics atom or a conditioning callable
+`(; t, x_prev, x_new) -> atom`.
+"""
+struct HierarchicalDynamics{OD<:LatentDynamics,ID} <: LatentDynamics
+    outer::OD
+    inner::ID
+end
+
+"""
+    HierarchicalObservation(inner)
+
+Observation process for a Rao-Blackwellisable model. `inner` is either a constant observation
+atom/emission or a conditioning callable `(; t, x) -> atom/emission`.
+"""
+struct HierarchicalObservation{IO} <: ObservationProcess
+    inner::IO
+end
+
+const HierarchicalSSM = StateSpaceModel{
+    <:HierarchicalPrior,<:HierarchicalDynamics,<:HierarchicalObservation
+}
+
+"""
+    StateSpaceModel(outer_prior, outer_dyn, inner_prior, inner_dyn, obs)
+
+Shorthand for building a hierarchical model. The explicit component form using
+`HierarchicalPrior`/`HierarchicalDynamics`/`HierarchicalObservation` is the canonical
+construction.
+"""
+function StateSpaceModel(
+    outer_prior::StatePrior, outer_dyn::LatentDynamics, inner_prior, inner_dyn, obs
+)
+    return StateSpaceModel(
+        HierarchicalPrior(outer_prior, inner_prior),
+        HierarchicalDynamics(outer_dyn, inner_dyn),
+        HierarchicalObservation(obs),
+    )
+end
+
+"""
+    HierarchicalState(x, z)
+
+A joint sample from a hierarchical model, with outer component `x` and a sampled inner
+component `z`. This differs from an `RBState`, whose inner component is a distribution rather
+than a sample.
 """
 struct HierarchicalState{XT,ZT}
     x::XT
     z::ZT
 end
 
-function AbstractMCMC.sample(
-    rng::AbstractRNG, model::HierarchicalSSM, T::Integer; kwargs...
-)
-    outer_dyn, inner_model = model.outer_dyn, model.inner_model
+## GENERATIVE INTERFACE ####################################################################
 
-    x0 = simulate(rng, model.outer_prior; kwargs...)
-    z0 = simulate(rng, inner_model.prior; new_outer=x0, kwargs...)
-
-    # Simulate outer dynamics
-    xs = fill(simulate(rng, outer_dyn, 1, x0; kwargs...), T)
-    zs = fill(
-        simulate(rng, inner_model.dyn, 1, z0; prev_outer=x0, new_outer=xs[1], kwargs...), T
-    )
-
-    for t in 2:T
-        xs[t] = simulate(rng, outer_dyn, t, xs[t - 1]; kwargs...)
-        zs[t] = simulate(
-            rng,
-            inner_model.dyn,
-            t,
-            zs[t - 1];
-            prev_outer=xs[t - 1],
-            new_outer=xs[t],
-            kwargs...,
-        )
-    end
-
-    ys = map(t -> simulate(rng, inner_model.obs, t, zs[t]; new_outer=xs[t], kwargs...), 1:T)
-    return x0, z0, xs, zs, ys
-end
-
-function SSMProblems.simulate(rng::AbstractRNG, prior::HierarchicalPrior; kwargs...)
-    outer_prior, inner_prior = prior.outer_prior, prior.inner_prior
-    x0 = simulate(rng, outer_prior; kwargs...)
-    z0 = simulate(rng, inner_prior; new_outer=x0, kwargs...)
-    # TODO (RB): this isn't really RB at all, just hierarchical state
-    return HierarchicalState(x0, z0)
-end
-
-function SSMProblems.simulate(
-    rng::AbstractRNG,
-    proc::HierarchicalDynamics,
-    step::Integer,
-    prev_state::HierarchicalState;
-    kwargs...,
-)
-    outer_dyn, inner_dyn = proc.outer_dyn, proc.inner_dyn
-    x = simulate(rng, outer_dyn, step, prev_state.x; kwargs...)
-    z = simulate(
-        rng, inner_dyn, step, prev_state.z; prev_outer=prev_state.x, new_outer=x, kwargs...
-    )
+function simulate(rng::AbstractRNG, p::HierarchicalPrior)
+    x = simulate(rng, p.outer)
+    z = simulate(rng, resolve(p.inner, (; x0=x)))
     return HierarchicalState(x, z)
 end
 
-function SSMProblems.logdensity(
-    obs::ObservationProcess, step::Integer, state::HierarchicalState, observation; kwargs...
+function simulate(
+    rng::AbstractRNG, d::HierarchicalDynamics, t::Integer, s::HierarchicalState
 )
-    return SSMProblems.logdensity(
-        obs, step, state.z, observation; new_outer=state.x, kwargs...
-    )
+    x = simulate(rng, d.outer, t, s.x)
+    z = simulate(rng, resolve(d.inner, (; t, x_prev=s.x, x_new=x)), t, s.z)
+    return HierarchicalState(x, z)
 end
 
-function SSMProblems.logdensity(
-    dyn::HierarchicalDynamics,
-    step::Integer,
-    prev_state::HierarchicalState,
-    new_state::HierarchicalState;
-    kwargs...,
+function simulate(
+    rng::AbstractRNG, o::HierarchicalObservation, t::Integer, s::HierarchicalState
 )
-    ll = SSMProblems.logdensity(dyn.outer_dyn, step, prev_state.x, new_state.x; kwargs...)
-    ll += SSMProblems.logdensity(
-        dyn.inner_dyn,
-        step,
-        prev_state.z,
-        new_state.z;
-        prev_outer=prev_state.x,
-        new_outer=new_state.x,
-        kwargs...,
-    )
-    return ll
+    return simulate(rng, resolve(o.inner, (; t, x=s.x)), t, s.z)
+end
+
+function logdensity(p::HierarchicalPrior, s::HierarchicalState)
+    return logdensity(p.outer, s.x) + logdensity(resolve(p.inner, (; x0=s.x)), s.z)
+end
+
+function logdensity(
+    d::HierarchicalDynamics, t::Integer, sp::HierarchicalState, sn::HierarchicalState
+)
+    return logdensity(d.outer, t, sp.x, sn.x) +
+           logdensity(resolve(d.inner, (; t, x_prev=sp.x, x_new=sn.x)), t, sp.z, sn.z)
+end
+
+function logdensity(o::HierarchicalObservation, t::Integer, s::HierarchicalState, y)
+    return logdensity(resolve(o.inner, (; t, x=s.x)), t, s.z, y)
 end
