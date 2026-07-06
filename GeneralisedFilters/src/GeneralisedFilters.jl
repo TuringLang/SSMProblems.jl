@@ -30,9 +30,14 @@ include("models/interface.jl")
 include("models/atoms.jl")
 include("models/hierarchical.jl")
 
+## ACTIVITY ################################################################################
+
+include("activity.jl")
+
 ## KERNELS #################################################################################
 
 include("kernels/kalman.jl")
+include("kernels/kalman_adjoint.jl")
 
 ## FILTERING/SMOOTHING #####################################################################
 
