@@ -103,10 +103,11 @@ function kalman_step_cached(
     return filt, ll, cache
 end
 
-function kalman_step(
-    state::GaussianState, d::LinearGaussianDynamics, o::LinearGaussianObservation, y
-)
-    filt, ll, _ = kalman_step_cached(state, d, o, y)
+# The fused step is the differentiable primitive (the Mooncake reverse rule is registered on
+# it). Its arguments are left untyped so activity-flagged components pass straight through
+# `_component`; the typed `kalman_step_cached` remains the kernel that rejects wrong types.
+function kalman_step(state, dyn, obs, y)
+    filt, ll, _ = kalman_step_cached(state, _component(dyn), _component(obs), y)
     return filt, ll
 end
 
