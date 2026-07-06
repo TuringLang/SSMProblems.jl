@@ -15,11 +15,9 @@ const PENDING_TEST_FILES = (
     "algorithms/particles.jl",
     "algorithms/rbpf.jl",
     "algorithms/csmc.jl",
-    "components/kalman_gradient.jl",
     "integrations/logdensity.jl",
     "integrations/particle_gibbs.jl",
     "integrations/turing.jl",
-    "integrations/kalman_mooncake.jl",
 )
 
 _is_pending(filename) = any(f -> endswith(filename, f), PENDING_TEST_FILES)
