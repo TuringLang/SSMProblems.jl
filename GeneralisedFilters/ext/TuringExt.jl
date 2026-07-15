@@ -244,6 +244,18 @@ end
 
 ## ABSTRACTMCMC INTERFACE ######################################################################
 
+# DynamicPPL 0.41 removed ParamsWithStats(vi, model, stats) in favour of
+# ParamsWithStats(InitFromParams(vi.values), model, stats); see DynamicPPL's HISTORY.md.
+const _PARAMS_WITH_STATS_NEEDS_INIT_STRATEGY = pkgversion(DynamicPPL) >= v"0.41"
+
+function _params_with_stats(vi, model, stats)
+    return if _PARAMS_WITH_STATS_NEEDS_INIT_STRATEGY
+        DynamicPPL.ParamsWithStats(DynamicPPL.InitFromParams(vi.values), model, stats)
+    else
+        DynamicPPL.ParamsWithStats(vi, model, stats)
+    end
+end
+
 function AbstractMCMC.step(
     rng::AbstractRNG,
     model::DynamicPPL.Model,
@@ -292,7 +304,7 @@ function AbstractMCMC.step(
         rng, model, vi, DynamicPPL.InitFromParams(init_vi), DynamicPPL.LinkAll()
     )
 
-    transition = DynamicPPL.ParamsWithStats(vi, model, AbstractMCMC.getstats(param_state))
+    transition = _params_with_stats(vi, model, AbstractMCMC.getstats(param_state))
     state = ParticleGibbsTuringState(vi, trajectory_new, param_state, ldf, vnt_traj_new, θ)
     return transition, state
 end
@@ -335,7 +347,7 @@ function AbstractMCMC.step(
         rng, model, vi, DynamicPPL.InitFromParams(init_vi), DynamicPPL.LinkAll()
     )
 
-    transition = DynamicPPL.ParamsWithStats(vi, model, AbstractMCMC.getstats(param_state))
+    transition = _params_with_stats(vi, model, AbstractMCMC.getstats(param_state))
     new_state = ParticleGibbsTuringState(
         vi, trajectory_new, param_state, state.ldf, vnt_traj_new, state.θ
     )
