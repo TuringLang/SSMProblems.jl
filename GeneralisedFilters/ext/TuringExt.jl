@@ -246,14 +246,14 @@ end
 
 # DynamicPPL 0.41 removed ParamsWithStats(vi, model, stats) in favour of
 # ParamsWithStats(InitFromParams(vi.values), model, stats); see DynamicPPL's HISTORY.md.
-const _PARAMS_WITH_STATS_NEEDS_INIT_STRATEGY = pkgversion(DynamicPPL) >= v"0.41"
-
-function _params_with_stats(vi, model, stats)
-    return if _PARAMS_WITH_STATS_NEEDS_INIT_STRATEGY
-        DynamicPPL.ParamsWithStats(DynamicPPL.InitFromParams(vi.values), model, stats)
-    else
-        DynamicPPL.ParamsWithStats(vi, model, stats)
+if pkgversion(DynamicPPL) >= v"0.41"
+    function _params_with_stats(vi, model, stats)
+        return DynamicPPL.ParamsWithStats(
+            DynamicPPL.InitFromParams(vi.values), model, stats
+        )
     end
+else
+    _params_with_stats(vi, model, stats) = DynamicPPL.ParamsWithStats(vi, model, stats)
 end
 
 function AbstractMCMC.step(
