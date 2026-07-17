@@ -247,11 +247,13 @@ end
 # DynamicPPL 0.41 removed ParamsWithStats(vi, model, stats) in favour of
 # ParamsWithStats(InitFromParams(vi.values), model, stats); see DynamicPPL's HISTORY.md.
 if pkgversion(DynamicPPL) >= v"0.41"
+    # COV_EXCL_START: DynamicPPL is capped at "0.40" below, so this branch never runs here.
     function _params_with_stats(vi, model, stats)
         return DynamicPPL.ParamsWithStats(
             DynamicPPL.InitFromParams(vi.values), model, stats
         )
     end
+    # COV_EXCL_STOP
 else
     _params_with_stats(vi, model, stats) = DynamicPPL.ParamsWithStats(vi, model, stats)
 end
