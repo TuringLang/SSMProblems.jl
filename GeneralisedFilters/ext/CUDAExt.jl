@@ -143,7 +143,7 @@ end
 
 ## GPU SPARSE PARTICLE STORAGE #############################################################
 
-mutable struct ParallelParticleTree{ST,M<:CUDA.AbstractMemory}
+mutable struct ParallelParticleTree{ST,M<:CUDA.DeviceMemory}
     states::ST
     parents::CuVector{Int64,M}
     leaves::CuVector{Int64,M}
