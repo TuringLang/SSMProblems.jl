@@ -18,13 +18,24 @@ using Random: AbstractRNG
 
 ## GPU RESAMPLING ##########################################################################
 
+# Respect either a host RNG or a CUDA RNG; broadcasts below must use device arrays.
+_device_uniforms(rng::AbstractRNG, ::Type{T}, n::Int) where {T} = CuArray(rand(rng, T, n))
+
+function _validate_resampling_count(weights, n)
+    n >= 0 || throw(ArgumentError("sample count must be nonnegative"))
+    n > 0 && isempty(weights) && throw(ArgumentError("cannot sample from empty weights"))
+    return nothing
+end
+
 # Following Code 5 of Murray et. al (2015)
 function GeneralisedFilters.sample_ancestors(
     rng::AbstractRNG, ::Multinomial, weights::CuVector{WT}, n::Int=length(weights)
 ) where {WT}
+    _validate_resampling_count(weights, n)
+    n == 0 && return CUDA.zeros(Int, 0)
     W = cumsum(weights)
-    Wn = CUDA.@allowscalar W[n]
-    us = CUDA.rand(WT, n) * Wn
+    Wn = CUDA.@allowscalar W[end]
+    us = _device_uniforms(rng, WT, n) .* Wn
     as = searchsortedfirst(W, us)
     return as
 end
@@ -40,8 +51,10 @@ end
 function sample_offspring(
     rng::AbstractRNG, ::Systematic, weights::CuVector{WT}, n::Int=length(weights)
 ) where {WT}
+    _validate_resampling_count(weights, n)
+    n == 0 && return CUDA.zeros(Int, length(weights))
     W = cumsum(weights)
-    Wn = CUDA.@allowscalar W[n]
+    Wn = CUDA.@allowscalar W[end]
     u0 = CUDA.@allowscalar rand(rng, WT)
     r = n * W / Wn
     offspring = min.(n, floor.(Int, r .+ u0))
@@ -59,9 +72,11 @@ end
 function sample_offspring(
     rng::AbstractRNG, ::Stratified, weights::CuVector{WT}, n::Int=length(weights)
 ) where {WT}
-    u = rand(rng, n)
+    _validate_resampling_count(weights, n)
+    n == 0 && return CUDA.zeros(Int, length(weights))
+    u = _device_uniforms(rng, WT, n)
     W = cumsum(weights)
-    Wn = CUDA.@allowscalar W[n]
+    Wn = CUDA.@allowscalar W[end]
     r = n * W / Wn
     k = min.(n, floor.(Int, r .+ 1))
     offspring = min.(n, floor.(Int, r .+ u[k]))
@@ -95,7 +110,9 @@ end
 
 function offspring_to_ancestors(offspring::CuVector{<:Integer})
     N = length(offspring)
-    ancestors = similar(offspring)
+    total = N == 0 ? 0 : CUDA.@allowscalar offspring[end]
+    ancestors = similar(offspring, total)
+    total == 0 && return ancestors
 
     threads = 256
     blocks = ceil(Int, N / threads)
@@ -121,6 +138,7 @@ end
 function ancestors_to_offspring(ancestors::CuVector{Int})
     N = length(ancestors)
     offspring = CUDA.zeros(Int, N)
+    N == 0 && return offspring
 
     threads = 256
     blocks = ceil(Int, N / threads)
@@ -221,7 +239,7 @@ end
 # in a single `states` buffer (homogeneous type), so the returned trajectories have
 # T0 == T.
 function get_ancestry(tree::ParallelParticleTree{ST}, T::Integer) where {ST}
-    buf = Vector{Vector{ST}}(undef, T + 1)
+    buf = Vector{Vector{eltype(tree.states)}}(undef, T + 1)
     parents = copy(tree.leaves)
     for t in (T + 1):-1:2
         buf[t] = Vector(tree.states[parents])
@@ -239,7 +257,7 @@ end
 function get_ancestry(
     container::ParallelParticleTree{ST}, i::Integer, T::Integer
 ) where {ST}
-    xs = Vector{ST}(undef, T)
+    xs = Vector{eltype(container.states)}(undef, T)
     CUDA.@allowscalar begin
         ancestor_index = container.leaves[i]
         for t in T:-1:1

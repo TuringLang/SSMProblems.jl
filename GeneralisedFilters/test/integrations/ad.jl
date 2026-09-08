@@ -202,3 +202,63 @@ end
 
     @test ForwardDiff.gradient(nll, θ0) ≈ central_diff(nll, θ0) rtol = 1e-6
 end
+
+@testitem "AD: parameter-dependent observations" tags = [:mooncake] begin
+    using GeneralisedFilters
+    using GeneralisedFilters.GFTest: check_gradients
+    using StaticArrays
+    using Mooncake
+    using ForwardDiff
+    model = create_homogeneous_linear_gaussian_model(
+        SA[0.1],
+        SMatrix{1,1}(1.0),
+        SMatrix{1,1}(0.8),
+        SA[0.0],
+        SMatrix{1,1}(0.2),
+        SMatrix{1,1}(1.0),
+        SA[0.0],
+        SMatrix{1,1}(0.3),
+    )
+    f(θ) = marginal_loglikelihood(model, KF(), [SA[θ[1]], SA[θ[1] + θ[2]]])
+    result = check_gradients(f, [0.2, -0.4])
+    @test result.agrees
+    @test result.ad ≈ ForwardDiff.gradient(f, [0.2, -0.4])
+end
+
+@testitem "AD: clipping threshold and unconstrained matrix storage" tags = [:mooncake] begin
+    using GeneralisedFilters
+    using GeneralisedFilters: repair_covariance
+    using GeneralisedFilters.GFTest: check_gradients
+    using StaticArrays
+    using Mooncake
+    # Lower entries are ignored by Symmetric; clipping threshold is differentiable
+    # away from eigenvalue crossings. Check each independently parameterised entry.
+    f(θ) = sum(
+        SA[0.2 0.3; 0.4 0.7] .*
+        repair_covariance(EigenClip(θ[5]), SA[θ[1] θ[2]; θ[3] θ[4]]),
+    )
+    @test check_gradients(f, [1.0, 0.1, -0.2, 0.2, 0.5]).agrees
+    # A near-degenerate pair on opposite sides of the threshold still has a
+    # nontrivial divided difference; it cannot be replaced by a midpoint derivative.
+    ext = Base.get_extension(GeneralisedFilters, :MooncakeExt)
+    K = ext._clip_divided_differences(SA[0.5 - 1e-10, 0.5 + 1e-10], 0.5)
+    @test K[1, 2] ≈ 0.5
+end
+
+@testitem "AD: mixed precision uses output cotangent precision" tags = [:mooncake] begin
+    using GeneralisedFilters
+    using GeneralisedFilters: kalman_step
+    using GeneralisedFilters.GFTest: check_gradients
+    using StaticArrays
+    using Mooncake
+    state = GaussianState(SA[0.1f0], SMatrix{1,1}(1.0f0))
+    obs = LinearGaussianObservation(SMatrix{1,1}(1.0), SA[0.0], SMatrix{1,1}(0.3))
+    function f(θ)
+        dyn = LinearGaussianDynamics(SMatrix{1,1}(θ[1]), SA[0.2], SMatrix{1,1}(0.1))
+        filtered, ll = kalman_step(state, dyn, obs, SA[0.4])
+        return 1e40 * filtered.μ[1] + ll
+    end
+    result = check_gradients(f, [0.8])
+    @test all(isfinite, result.ad)
+    @test result.agrees
+end

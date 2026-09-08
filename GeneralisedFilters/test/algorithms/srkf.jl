@@ -57,3 +57,23 @@ end
     @test state.μ isa SVector{D,Float64}
     @test state.Σ isa SMatrix{D,D,Float64}
 end
+
+@testitem "Square-root marginal likelihood and conditional objective" begin
+    using GeneralisedFilters, StaticArrays, ForwardDiff
+    p = GaussianPrior(SVector(0.0), SMatrix{1,1}(1.0))
+    d = LinearGaussianDynamics(SMatrix{1,1}(0.8), SVector(0.1), SMatrix{1,1}(0.3))
+    observation(c) =
+        LinearGaussianObservation(SMatrix{1,1}(1.0), SVector(c), SMatrix{1,1}(0.4))
+    ys = [SVector(0.1), SVector(-0.3)]
+    model = StateSpaceModel(p, d, observation(0.0))
+    @test marginal_loglikelihood(model, SRKF(), ys) ≈
+        marginal_loglikelihood(model, KF(), ys)
+    @test marginal_loglikelihood(model, SRKF(), SVector{1,Float64}[]) == 0
+    f(c, af) = marginal_loglikelihood(StateSpaceModel(p, d, observation(c)), af, ys)
+    @test ForwardDiff.derivative(c -> f(c, SRKF()), 0.2) ≈
+        ForwardDiff.derivative(c -> f(c, KF()), 0.2)
+    hier = StateSpaceModel(p, d, p, d, observation(0.0))
+    path = ReferenceTrajectory(SVector(0.2), [SVector(0.3), SVector(-0.1)])
+    @test trajectory_logdensity(hier, SRKF(), path, ys) ≈
+        trajectory_logdensity(hier, KF(), path, ys)
+end

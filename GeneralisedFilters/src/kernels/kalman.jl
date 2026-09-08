@@ -52,7 +52,7 @@ function kalman_update_cached(state::GaussianState, o::LinearGaussianObservation
     v = y - (H * μ̂ + c)
     S = symmetrise(H * Σ̂ * H' + R)
     Sc = cholesky(Symmetric(S))
-    Si = inv(Sc)
+    Si = Sc \ one(S)
     K = Σ̂ * H' * Si
     IKH = I - K * H
     Σ = symmetrise(IKH * Σ̂ * IKH' + K * R * K')
@@ -176,7 +176,7 @@ function backward_predict(
     m = λ - Ω * b
     Λ = symmetrise(F' * Ω * F + I)
     Λc = cholesky(Symmetric(Λ))
-    FΛ_inv_Ft = F * (Λc \ Matrix(F'))
+    FΛ_inv_Ft = F * (Λc \ F')
     I_minus_term = I - Ω * FΛ_inv_Ft
     Ω̂ = symmetrise(A' * I_minus_term * Ω * A)
     λ̂ = A' * I_minus_term * m

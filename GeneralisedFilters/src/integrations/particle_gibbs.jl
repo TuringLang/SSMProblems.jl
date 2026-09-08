@@ -1,4 +1,5 @@
-using LogDensityProblemsAD: LogDensityProblemsAD
+using ADTypes: ADTypes
+import DifferentiationInterface as DI
 using MCMCChains: MCMCChains
 
 export ParticleGibbs, ParticleGibbsModel
@@ -12,20 +13,20 @@ Particle Gibbs sampler that alternates between a parameter update (e.g., NUTS) a
 trajectory update (conditional SMC).
 
 # Fields
-- `csmc::CS`: Conditional SMC sampler for trajectory updates (e.g., `ConditionalSMC(RBPF(BF(200), KF()), AncestorSampling())`)
+- `csmc::CS`: Conditional SMC sampler for trajectory updates (e.g., `ConditionalSMC(RBPF(BF(200; resampler=Multinomial()), KF()), AncestorSampling())`)
 - `param::PS`: Parameter sampler (e.g., `AdvancedHMC.NUTS(0.8)`)
 - `adtype::ADT`: AD backend (`ADTypes.AbstractADType`). `nothing` uses AdvancedHMC's default
-  (ForwardDiff). For HierarchicalSSM models, specify a reverse-mode backend that uses
-  ChainRules (e.g., `AutoZygote()`). Requires the corresponding package to be loaded.
+  (ForwardDiff). Both regular and hierarchical models support ForwardDiff and Mooncake.
+  Load the package corresponding to the selected AD backend.
 
 # Examples
 ```julia
 
 # Regular SSM
-ParticleGibbs(ConditionalSMC(BF(100), NoRefreshment()), NUTS(0.8))
+ParticleGibbs(ConditionalSMC(BF(100; resampler=Multinomial()), NoRefreshment()), NUTS(0.8))
 
-# Hierarchical SSM (needs reverse-mode AD for KF rrule)
-ParticleGibbs(ConditionalSMC(RBPF(BF(200), KF()), AncestorSampling()), NUTS(0.8); adtype=AutoZygote())
+# Hierarchical SSM with reverse-mode AD
+ParticleGibbs(ConditionalSMC(RBPF(BF(200; resampler=Multinomial()), KF()), AncestorSampling()), NUTS(0.8); adtype=AutoMooncake())
 ```
 """
 struct ParticleGibbs{CS<:ConditionalSMC,PS,ADT<:Union{Nothing,ADTypes.AbstractADType}} <:
@@ -45,7 +46,7 @@ end
 Model for particle Gibbs inference, combining a prior on parameters with a parameterised SSM.
 
 # Fields
-- `prior::PT`: Prior distribution on θ (any Distributions.jl distribution)
+- `prior::PT`: Multivariate prior distribution on the parameter vector θ
 - `param_model::MT`: A `ParameterisedSSM` mapping θ to a concrete SSM
 
 # Examples
@@ -91,40 +92,36 @@ end
 _get_inner_filter(::AbstractParticleFilter) = nothing
 _get_inner_filter(pf::RBPF) = pf.af
 
-# Extract outer trajectory for the log-density (which only needs x, not the inner distribution)
-_outer_trajectory(trajectory, ::Nothing) = trajectory
-_outer_trajectory(trajectory, ::AbstractFilter) = map(s -> s.x, trajectory)
-
 ## LOG-DENSITY MODEL CONSTRUCTION #############################################################
 
-function _create_log_density_model(
-    model::ParticleGibbsModel, af, trajectory, adtype::Nothing
-)
-    if !isnothing(af)
-        throw(
-            ArgumentError(
-                "HierarchicalSSM models require a reverse-mode AD backend for gradient " *
-                "computation (the ChainRules rrule on kf_loglikelihood is not picked up " *
-                "by ForwardDiff). Specify `adtype=AutoZygote()` (or another reverse-mode " *
-                "backend) when constructing ParticleGibbs, and load the corresponding " *
-                "package (e.g., `using Zygote`).",
-            ),
-        )
-    end
-    ld = SSMParameterLogDensity(model.prior, model.param_model, trajectory)
-    return AbstractMCMC.LogDensityModel(ld)
+# Preparation belongs to one fixed conditional target. Rebuild it when CSMC changes x.
+struct DifferentiatedParameterDensity{L,F,A,P}
+    target::L
+    objective::F
+    adtype::A
+    preparation::P
+end
+function LogDensityProblems.capabilities(::Type{<:DifferentiatedParameterDensity})
+    return LogDensityProblems.LogDensityOrder{1}()
+end
+function LogDensityProblems.dimension(ld::DifferentiatedParameterDensity)
+    return LogDensityProblems.dimension(ld.target)
+end
+LogDensityProblems.logdensity(ld::DifferentiatedParameterDensity, θ) = ld.objective(θ)
+function LogDensityProblems.logdensity_and_gradient(ld::DifferentiatedParameterDensity, θ)
+    return DI.value_and_gradient(ld.objective, ld.preparation, ld.adtype, θ)
 end
 
 function _create_log_density_model(
-    model::ParticleGibbsModel, af, trajectory, adtype::ADTypes.AbstractADType
+    model::ParticleGibbsModel, af, trajectory, adtype; initial_params=mean(model.prior)
 )
-    ld = if isnothing(af)
-        SSMParameterLogDensity(model.prior, model.param_model, trajectory)
-    else
-        SSMParameterLogDensity(model.prior, model.param_model, af, trajectory)
-    end
-    ld_with_grad = LogDensityProblemsAD.ADgradient(adtype, ld)
-    return AbstractMCMC.LogDensityModel(ld_with_grad)
+    ld = SSMParameterLogDensity(model.prior, model.param_model, af, trajectory)
+    adtype === nothing && return AbstractMCMC.LogDensityModel(ld)
+    objective = θ -> LogDensityProblems.logdensity(ld, θ)
+    prep = DI.prepare_gradient(objective, adtype, initial_params)
+    return AbstractMCMC.LogDensityModel(
+        DifferentiatedParameterDensity(ld, objective, adtype, prep)
+    )
 end
 
 ## ABSTRACTMCMC INTERFACE #####################################################################
@@ -149,8 +146,8 @@ function AbstractMCMC.step(
     trajectory, _ = _csmc_sample(rng, ssm, pg.csmc, model.param_model.observations, nothing)
 
     # Create log-density model (uses outer-only trajectory for hierarchical models)
-    outer_traj = _outer_trajectory(trajectory, af)
-    ld_model = _create_log_density_model(model, af, outer_traj, pg.adtype)
+    outer_traj = trajectory
+    ld_model = _create_log_density_model(model, af, outer_traj, pg.adtype; initial_params=θ)
 
     # Run initial parameter step
     _, param_state = AbstractMCMC.step(rng, ld_model, pg.param; initial_params=θ, kwargs...)
@@ -177,12 +174,18 @@ function AbstractMCMC.step(
 )
     # Create fresh log-density model with current trajectory
     af = _get_inner_filter(pg.csmc.pf)
-    outer_traj = _outer_trajectory(state.trajectory, af)
-    ld_model = _create_log_density_model(model, af, outer_traj, pg.adtype)
+    outer_traj = state.trajectory
+    ld_model = _create_log_density_model(
+        model, af, outer_traj, pg.adtype; initial_params=state.θ
+    )
 
-    # Run parameter step (preserves adaptation via state.param_state)
+    # Refresh cached target density/gradient after the trajectory changes, preserving adaptation.
     _, param_state = AbstractMCMC.step(
-        rng, ld_model, pg.param, state.param_state; kwargs...
+        rng,
+        ld_model,
+        pg.param,
+        AbstractMCMC.setparams!!(ld_model, state.param_state, state.θ);
+        kwargs...,
     )
 
     # Extract new θ and run CSMC (pass full trajectory for conditioning)

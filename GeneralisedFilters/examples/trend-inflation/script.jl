@@ -5,16 +5,15 @@
 # Blackwellised particle filtering.
 
 using GeneralisedFilters
-using SSMProblems
 using Distributions
 using Random
 using StatsBase
 using LinearAlgebra
-using PDMats
+using StaticArrays
 
 const GF = GeneralisedFilters
 
-INFL_PATH = joinpath(@__DIR__, "..", "..", "..", "examples", "trend-inflation"); #hide
+INFL_PATH = @__DIR__; #hide
 # INFL_PATH = joinpath(@__DIR__)
 include(joinpath(INFL_PATH, "utilities.jl")); #hide
 
@@ -51,17 +50,17 @@ include(joinpath(INFL_PATH, "utilities.jl")); #hide
 
 # We begin by defining the non-linear dynamics, which aren't conditioned contemporaneous
 # states. Since these processes are traditionally non-linear/non-Gaussian we use the
-# SSMProblems interface to define the stochastic volatility components.
+# process interface to define the stochastic volatility components.
 
 struct StochasticVolatilityPrior{T<:Real} <: StatePrior end
 
 # 
 
-function SSMProblems.distribution(prior::StochasticVolatilityPrior{T}; kwargs...) where {T}
+function GF.distribution(prior::StochasticVolatilityPrior{T}) where {T}
     return product_distribution(Normal(zero(T), T(1)), Normal(zero(T), T(1)))
 end
 
-# For the dynamics, instead of using the `SSMProblems.distribution` utility, we only define
+# For the dynamics, instead of using the `GF.distribution` utility, we only define
 # the `simulate` method, which is sufficient for the RBPF.
 
 struct StochasticVolatility{ΓT<:AbstractVector} <: LatentDynamics
@@ -70,12 +69,8 @@ end
 
 # 
 
-function SSMProblems.simulate(
-    rng::AbstractRNG,
-    proc::StochasticVolatility,
-    step::Integer,
-    state::AbstractVector{T};
-    kwargs...,
+function GF.simulate(
+    rng::AbstractRNG, proc::StochasticVolatility, step::Integer, state::AbstractVector{T}
 ) where {T<:Real}
     new_state = deepcopy(state)
     new_state[1:2] += proc.γ .* randn(rng, T, 2)
@@ -84,31 +79,17 @@ end
 
 # #### Local Level Trend Process
 #
-# For the conditionally linear and Gaussian components, we subtype the model and provide a
-# keyword argument as the conditional element. In this case $A$ and $b$ remain constant, but
-# $Q$ is conditional on the log variance, stored in `new_outer` (the nomenclature chosen for
-# heirarchical modeling).
-
-struct LocalLevelTrend <: LinearGaussianLatentDynamics end
-
-# 
-
-GF.calc_A(::LocalLevelTrend, ::Integer; kwargs...) = [1;;]
-GF.calc_b(::LocalLevelTrend, ::Integer; kwargs...) = [0;]
-function GF.calc_Q(::LocalLevelTrend, ::Integer; new_outer, kwargs...)
-    return PDMat([exp(new_outer[1]);;])
+# Resolve small Gaussian atoms from the current outer state. Static arrays preserve
+# the one-dimensional inner state throughout Kalman filtering.
+function local_level(ctx)
+    return LinearGaussianDynamics(
+        @SMatrix([1.0;;]), @SVector([0.0]), SMatrix{1,1}(exp(ctx.x_new[1]))
+    )
 end
-
-# Similarly, we define the observation process conditional on a separate log variance.
-
-struct SimpleObservation <: LinearGaussianObservationProcess end
-
-# 
-
-GF.calc_H(::SimpleObservation, ::Integer; kwargs...) = [1;;]
-GF.calc_c(::SimpleObservation, ::Integer; kwargs...) = [0;]
-function GF.calc_R(::SimpleObservation, ::Integer; new_outer, kwargs...)
-    return PDMat([exp(new_outer[2]);;])
+function simple_observation(ctx)
+    return LinearGaussianObservation(
+        @SMatrix([1.0;;]), @SVector([0.0]), SMatrix{1,1}(exp(ctx.x[2]))
+    )
 end
 
 # ### Unobserved Components with Stochastic Volatility
@@ -120,34 +101,31 @@ function UCSV(γ::T) where {T<:Real}
     stoch_vol_prior = StochasticVolatilityPrior{T}()
     stoch_vol_process = StochasticVolatility(fill(γ, 2))
 
-    local_level_model = StateSpaceModel(
-        GF.HomogeneousGaussianPrior(zeros(T, 1), PDMat([100.0;;])),
-        LocalLevelTrend(),
-        SimpleObservation(),
+    return StateSpaceModel(
+        stoch_vol_prior,
+        stoch_vol_process,
+        GaussianPrior(@SVector([0.0]), @SMatrix([100.0;;])),
+        local_level,
+        simple_observation,
     )
-
-    return HierarchicalSSM(stoch_vol_prior, stoch_vol_process, local_level_model)
 end;
 
-# For plotting, we can extract the ancestry of the Rao Blackwellised particles using the
-# callback system. For our inflation data, this reduces to the following:
+# For plotting, an explicit filtering loop records ancestry after each step.
 
 rng = MersenneTwister(1234);
-sparse_ancestry = GF.AncestorCallback(nothing);
-states, ll = GF.filter(
+states, ll, tree = filter_with_ancestry(
     rng,
     UCSV(0.2),
     RBPF(BF(2^12), KalmanFilter()),
-    [[pce] for pce in fred_data.value];
-    callback=sparse_ancestry,
+    [SVector(pce) for pce in fred_data.value],
 );
 
-# The `sparse_ancestry` object stores a sparse ancestry tree which we can use to approximate
+# The tree stores particle ancestry which we can use to approximate
 # the smoothed series without an additional backwards pass. We can convert this data
 # structure to a human readable array by using `GeneralisedFilters.get_ancestry` and then
 # take the mean path by passing a custom function.
 
-trends, volatilities = mean_path(GF.get_ancestry(sparse_ancestry.tree), states);
+trends, volatilities = mean_path(GF.get_ancestry(tree), states);
 plot_ucsv(trends[1, :], eachrow(volatilities), fred_data)
 
 # #### Outlier Adjustments
@@ -157,7 +135,7 @@ plot_ucsv(trends[1, :], eachrow(volatilities), fred_data)
 
 # ```math
 # \eta_{t} \sim N(0, s_{t} \cdot \sigma_{\eta, t}^2) \quad \quad s_{t} \sim \begin{cases}
-# U(0,2) & \text{ with probability } p \\
+# U(2,10) & \text{ with probability } p \\
 # \delta(1) & \text{ with probability } 1 - p
 # \end{cases}
 # ```
@@ -169,9 +147,7 @@ struct OutlierAdjustedVolatilityPrior{T<:Real} <: StatePrior end
 
 # 
 
-function SSMProblems.distribution(
-    prior::OutlierAdjustedVolatilityPrior{T}; kwargs...
-) where {T}
+function GF.distribution(prior::OutlierAdjustedVolatilityPrior{T}) where {T}
     return product_distribution(Normal(zero(T), T(1)), Normal(zero(T), T(1)), Dirac(one(T)))
 end
 
@@ -188,14 +164,13 @@ end
 # The simulation then calls the volatility process, and computes the outlier term in the
 # third state
 
-function SSMProblems.simulate(
+function GF.simulate(
     rng::AbstractRNG,
     proc::OutlierAdjustedVolatility,
     step::Integer,
-    state::AbstractVector{T};
-    kwargs...,
+    state::AbstractVector{T},
 ) where {T<:Real}
-    new_state = SSMProblems.simulate(rng, proc.volatility, step, state; kwargs...)
+    new_state = GF.simulate(rng, proc.volatility, step, state)
     new_state[3] = rand(rng, proc.switch_dist) ? rand(rng, proc.outlier_dist) : one(T)
     return new_state
 end
@@ -203,14 +178,10 @@ end
 # For the observation process, we define a new object where $R$ is dependent on both the
 # measurement volatility as well as this outlier adjustment coefficient.
 
-struct OutlierAdjustedObservation <: LinearGaussianObservationProcess end
-
-# 
-
-GF.calc_H(::OutlierAdjustedObservation, ::Integer; kwargs...) = [1;;]
-GF.calc_c(::OutlierAdjustedObservation, ::Integer; kwargs...) = [0;]
-function GF.calc_R(::OutlierAdjustedObservation, ::Integer; new_outer, kwargs...)
-    return PDMat([new_outer[3] * exp(new_outer[2]);;])
+function outlier_observation(ctx)
+    return LinearGaussianObservation(
+        @SMatrix([1.0;;]), @SVector([0.0]), SMatrix{1,1}(ctx.x[3] * exp(ctx.x[2]))
+    )
 end
 
 # ### Outlier Adjusted UCSV
@@ -224,30 +195,28 @@ function UCSVO(γ::T, prob::T) where {T<:Real}
         StochasticVolatility(fill(γ, 2)), Bernoulli(prob), Uniform{T}(2, 10)
     )
 
-    local_level_model = StateSpaceModel(
-        GF.HomogeneousGaussianPrior(zeros(T, 1), PDMat([100.0;;])),
-        LocalLevelTrend(),
-        OutlierAdjustedObservation(),
+    return StateSpaceModel(
+        stoch_vol_prior,
+        stoch_vol_process,
+        GaussianPrior(@SVector([0.0]), @SMatrix([100.0;;])),
+        local_level,
+        outlier_observation,
     )
-
-    return HierarchicalSSM(stoch_vol_prior, stoch_vol_process, local_level_model)
 end;
 
 # We then repeat the same experiment, this time with an outlier probability of $p = 0.05$
 
 rng = MersenneTwister(1234);
-sparse_ancestry = GF.AncestorCallback(nothing)
-states, ll = GF.filter(
+states, ll, tree = filter_with_ancestry(
     rng,
     UCSVO(0.2, 0.05),
     RBPF(BF(2^12), KalmanFilter()),
-    [[pce] for pce in fred_data.value];
-    callback=sparse_ancestry,
+    [SVector(pce) for pce in fred_data.value],
 );
 
 # this process is identical to the last, except with an additional `volatilities` state
 # which captures the outlier distance. We omit this feature in the plots, but the impact is
 # clear when comparing the maximum transitory noise around the GFC.
 
-trends, volatilities = mean_path(GF.get_ancestry(sparse_ancestry.tree), states);
+trends, volatilities = mean_path(GF.get_ancestry(tree), states);
 plot_ucsv(trends[1, :], eachrow(volatilities), fred_data)

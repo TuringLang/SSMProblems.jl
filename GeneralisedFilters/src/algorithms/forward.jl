@@ -31,11 +31,21 @@ end
 
 function update(obs, ::DiscreteFilter, t::Integer, π::AbstractVector, y)
     o = resolve(obs, (; t))
-    b = map(i -> exp(logdensity(o, t, i, y)), eachindex(π))
-    filtered = b .* π
-    likelihood = sum(filtered)
-    return filtered / likelihood, log(likelihood)
+    log_weights = map(i -> log(π[i]) + logdensity(o, t, i, y), eachindex(π))
+    ll = logsumexp(log_weights)
+    # Impossible observations have zero evidence; avoid manufacturing NaN beliefs.
+    ll == -Inf && return zero.(π), ll
+    return exp.(log_weights .- ll), ll
 end
+
+"""
+    marginal_loglikelihood(model, ::DiscreteFilter, ys)
+
+Evaluate a finite-state model's deterministic forward likelihood. Emission weights are
+normalised in log space; impossible observations return `-Inf`.
+"""
+marginal_loglikelihood(model::StateSpaceModel, af::DiscreteFilter, ys::AbstractVector) =
+    last(filter(model, af, ys))
 
 ## BACKWARD DISCRETE PREDICTOR #############################################################
 
@@ -96,7 +106,12 @@ function _discrete_backward_step(
     K = length(filtered)
     return map(1:K) do i
         correction = sum(1:K) do j
-            P[i, j] * smoothed_next[j] / predicted[j]
+            # An unreachable state contributes zero, including the 0/0 case.
+            if iszero(predicted[j])
+                zero(smoothed_next[j])
+            else
+                P[i, j] * smoothed_next[j] / predicted[j]
+            end
         end
         filtered[i] * correction
     end
@@ -110,6 +125,8 @@ function smooth(
     t_smooth=1,
 )
     _validate_observations(model, ys)
+    1 <= t_smooth <= length(ys) ||
+        throw(ArgumentError("smoothing time must lie in 1:length(ys)"))
     T = length(ys)
     df = DiscreteFilter()
 

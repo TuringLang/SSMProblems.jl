@@ -26,7 +26,7 @@ jobs:
         pkg:
           - name: GeneralisedFilters
             dir: './GeneralisedFilters'
-            additional_paths: "./SSMProblems"
+            additional_paths: ""
           - name: SSMProblems
             dir: './SSMProblems'
             additional_paths: ""
@@ -43,9 +43,6 @@ jobs:
           using Pkg;
           Pkg.Registry.update();
           Pkg.develop(PackageSpec(path="${{ matrix.pkg.dir }}"));
-          if "${{ matrix.pkg.name }}" == "GeneralisedFilters"
-              Pkg.develop(PackageSpec(path="./SSMProblems"));
-          end;
           Pkg.instantiate();'
       - name: Build and deploy
         uses: TuringLang/actions/DocsDocumenter@main

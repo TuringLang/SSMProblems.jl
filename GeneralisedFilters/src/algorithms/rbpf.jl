@@ -3,8 +3,15 @@ import Distributions: logpdf
 import LogExpFunctions: softmax, logsumexp
 import StatsBase: Weights
 
-export RBPF
+export RBPF, RBState
 
+"""
+    RBPF(particle_filter, analytical_filter)
+
+Rao–Blackwellised particle filter for hierarchical models. Particle proposals receive
+an `RBState` and return the outer sample; the analytical filter then resolves and updates
+the conditional inner model. Reference trajectories contain outer samples only.
+"""
 struct RBPF{PFT<:AbstractParticleFilter,AFT<:AbstractFilter} <: AbstractParticleFilter
     pf::PFT
     af::AFT
@@ -14,10 +21,10 @@ num_particles(algo::RBPF) = num_particles(algo.pf)
 resampler(algo::RBPF) = resampler(algo.pf)
 
 function initialise_particle(
-    rng::AbstractRNG, prior::HierarchicalPrior, algo::RBPF, ref_state; kwargs...
+    rng::AbstractRNG, prior::HierarchicalPrior, algo::RBPF, ref_state
 )
-    x = sample_prior(rng, prior.outer_prior, algo.pf, ref_state; kwargs...)
-    z = initialise(rng, prior.inner_prior, algo.af; new_outer=x, kwargs...)
+    x = sample_prior(rng, prior.outer, algo.pf, ref_state)
+    z = initialise(rng, _component(inner_prior(prior, x)), algo.af)
     return Particle(RBState(x, z), 0)
 end
 
@@ -28,30 +35,18 @@ function predict_particle(
     iter::Integer,
     particle::Particle{<:RBState},
     observation,
-    ref_state;
-    kwargs...,
+    ref_state,
 )
-    # TODO: really we should be conditioning on the current RB state to allow for optimal proposals
-    new_x, logw_inc = propogate(
-        rng,
-        dyn.outer_dyn,
-        algo.pf,
-        iter,
-        particle.state.x,
-        observation,
-        ref_state;
-        kwargs...,
+    new_x, logw_inc = propagate(
+        rng, dyn.outer, algo.pf, iter, particle.state, observation, ref_state
     )
     new_z = predict(
         rng,
-        dyn.inner_dyn,
+        _component(inner_dynamics(dyn, iter, particle.state.x, new_x)),
         algo.af,
         iter,
         particle.state.z,
-        observation;
-        prev_outer=particle.state.x,
-        new_outer=new_x,
-        kwargs...,
+        observation,
     )
 
     return Particle(
@@ -64,17 +59,14 @@ function update_particle(
     algo::RBPF,
     iter::Integer,
     particle::Particle{<:RBState},
-    observation;
-    kwargs...,
+    observation,
 )
     new_z, log_increment = update(
-        obs,
+        _component(inner_observation(obs, iter, particle.state.x)),
         algo.af,
         iter,
         particle.state.z,
-        observation;
-        new_outer=particle.state.x,
-        kwargs...,
+        observation,
     )
     return Particle(
         RBState(particle.state.x, new_z),
@@ -89,36 +81,29 @@ function predictive_state(
     weight_strategy::RepresentativeStateLookAhead,
     rbpf::RBPF,
     iter::Integer,
-    state::RBState;
-    kwargs...,
+    state::RBState,
 )
-    x_star = predictive_statistic(
-        rng, weight_strategy.pp, dyn.outer_dyn, iter, state.x; kwargs...
-    )
+    x_star = predictive_statistic(rng, weight_strategy.pp, dyn.outer, iter, state.x)
     z_star = predict(
         rng,
-        dyn.inner_dyn,
+        _component(inner_dynamics(dyn, iter, state.x, x_star)),
         rbpf.af,
         iter,
         state.z,
-        nothing;  # no observation available — maybe we should pass this in
-        prev_outer=state.x,
-        new_outer=x_star,
-        kwargs...,
+        nothing,
     )
     return RBState(x_star, z_star)
 end
 
 function predictive_loglik(
-    obs::ObservationProcess,
-    algo::RBPF,
-    iter::Integer,
-    state::RBState,
-    observation;
-    kwargs...,
+    obs::ObservationProcess, algo::RBPF, iter::Integer, state::RBState, observation
 )
     _, log_increment = update(
-        obs, algo.af, iter, state.z, observation; new_outer=state.x, kwargs...
+        _component(inner_observation(obs, iter, state.x)),
+        algo.af,
+        iter,
+        state.z,
+        observation,
     )
     return log_increment
 end

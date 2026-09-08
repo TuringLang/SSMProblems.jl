@@ -18,10 +18,25 @@ end
 mean_path(paths, states) = _mean_path(identity, paths, states)
 
 # for rao blackwellised particles
-function mean_path(paths::Vector{Vector{T}}, states) where {T<:GeneralisedFilters.RBState}
+function mean_path(
+    paths::AbstractVector{<:AbstractVector{<:GeneralisedFilters.RBState}}, states
+)
     zs = _mean_path(s -> getproperty.(getproperty.(s, :z), :μ), paths, states)
     xs = _mean_path(s -> getproperty.(s, :x), paths, states)
     return zs, xs
+end
+
+# Track the state returned by each public filtering step; no callback is needed.
+function filter_with_ancestry(rng, model, algo, ys)
+    initial = GeneralisedFilters.initialise(rng, model.prior, algo)
+    state, ll = GeneralisedFilters.step(rng, model, algo, 1, initial, ys[1])
+    tree = GeneralisedFilters._init_tree(initial, state)
+    for t in 2:length(ys)
+        state, inc = GeneralisedFilters.step(rng, model, algo, t, state, ys[t])
+        ll += inc
+        GeneralisedFilters._update_tree!(tree, state)
+    end
+    return state, ll, tree
 end
 
 function plot_ucsv(trend, volatilities, fred_data)
@@ -50,4 +65,7 @@ function plot_ucsv(trend, volatilities, fred_data)
 end
 
 # this is essential for plotting dates
-date_format(dates) = x -> [Dates.format(dates[floor(Int, i) + 1], "yyyy") for i in x]
+function date_format(dates)
+    return x ->
+        [Dates.format(dates[clamp(floor(Int, i), 1, length(dates))], "yyyy") for i in x]
+end

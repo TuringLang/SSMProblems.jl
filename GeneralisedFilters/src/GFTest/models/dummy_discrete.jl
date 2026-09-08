@@ -14,20 +14,7 @@
     with K_outer * K_inner states.
 """
 
-export InnerDiscreteDynamics, DiscreteGaussianObservation, create_dummy_discrete_model
-
-"""
-    InnerDiscreteDynamics
-
-Discrete dynamics for the inner state of a hierarchical model.
-The transition matrix P_inner[i,j] = p(z_t = j | z_{t-1} = i).
-Currently independent of the outer state.
-"""
-struct InnerDiscreteDynamics{PT<:AbstractMatrix} <: DiscreteLatentDynamics
-    P::PT
-end
-
-GeneralisedFilters.calc_P(dyn::InnerDiscreteDynamics, ::Integer; kwargs...) = dyn.P
+export DiscreteGaussianObservation, create_dummy_discrete_model
 
 """
     DiscreteGaussianObservation
@@ -41,14 +28,14 @@ struct DiscreteGaussianObservation{MT<:AbstractVector,VT<:AbstractVector} <:
     σ²::VT  # Variance for each state
 end
 
-function SSMProblems.distribution(
-    obs::DiscreteGaussianObservation, ::Integer, state::Integer; kwargs...
+function GeneralisedFilters.distribution(
+    obs::DiscreteGaussianObservation, ::Integer, state::Integer
 )
     return Normal(obs.μ[state], sqrt(obs.σ²[state]))
 end
 
-function SSMProblems.logdensity(
-    obs::DiscreteGaussianObservation, ::Integer, state::Integer, y; kwargs...
+function GeneralisedFilters.logdensity(
+    obs::DiscreteGaussianObservation, ::Integer, state::Integer, y
 )
     return logpdf(Normal(obs.μ[state], sqrt(obs.σ²[state])), y)
 end
@@ -65,22 +52,22 @@ struct JointDiscreteObservation{MT<:AbstractVector,VT<:AbstractVector} <: Observ
     K_inner::Int
 end
 
-function SSMProblems.distribution(
-    obs::JointDiscreteObservation, ::Integer, joint_state::Integer; kwargs...
+function GeneralisedFilters.distribution(
+    obs::JointDiscreteObservation, ::Integer, joint_state::Integer
 )
     inner_state = mod1(joint_state, obs.K_inner)
     return Normal(obs.μ[inner_state], sqrt(obs.σ²[inner_state]))
 end
 
-function SSMProblems.logdensity(
-    obs::JointDiscreteObservation, ::Integer, joint_state::Integer, y; kwargs...
+function GeneralisedFilters.logdensity(
+    obs::JointDiscreteObservation, ::Integer, joint_state::Integer, y
 )
     inner_state = mod1(joint_state, obs.K_inner)
     return logpdf(Normal(obs.μ[inner_state], sqrt(obs.σ²[inner_state])), y)
 end
 
 """
-    create_dummy_discrete_model(rng, K_outer, K_inner; kwargs...)
+    create_dummy_discrete_model(rng, K_outer, K_inner)
 
 Create a dummy hierarchical discrete model and its equivalent joint model.
 
@@ -115,13 +102,13 @@ function create_dummy_discrete_model(
     σ²_obs = fill(obs_noise^2, K_inner)
 
     # Create hierarchical model
-    outer_prior = HomogeneousDiscretePrior(α0_outer)
-    outer_dyn = HomogeneousDiscreteLatentDynamics(P_outer)
-    inner_prior = HomogeneousDiscretePrior(α0_inner)
-    inner_dyn = InnerDiscreteDynamics(P_inner)
+    outer_prior = DiscretePrior(α0_outer)
+    outer_dyn = DiscreteDynamics(P_outer)
+    inner_prior = DiscretePrior(α0_inner)
+    inner_dyn = DiscreteDynamics(P_inner)
     obs = DiscreteGaussianObservation(μ_obs, σ²_obs)
 
-    hier_model = HierarchicalSSM(outer_prior, outer_dyn, inner_prior, inner_dyn, obs)
+    hier_model = StateSpaceModel(outer_prior, outer_dyn, inner_prior, inner_dyn, obs)
 
     # Create joint model on product space
     K_joint = K_outer * K_inner
@@ -143,8 +130,8 @@ function create_dummy_discrete_model(
         end
     end
 
-    joint_prior = HomogeneousDiscretePrior(α0_joint)
-    joint_dyn = HomogeneousDiscreteLatentDynamics(P_joint)
+    joint_prior = DiscretePrior(α0_joint)
+    joint_dyn = DiscreteDynamics(P_joint)
     joint_obs = JointDiscreteObservation(μ_obs, σ²_obs, K_inner)
 
     joint_model = StateSpaceModel(joint_prior, joint_dyn, joint_obs)

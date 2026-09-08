@@ -179,7 +179,9 @@ Simulate a trajectory of length `T`, returning `(x0, xs, ys)` where `x0` is the 
 state, `xs` the states at times `1:T`, and `ys` the observations at times `1:T`.
 """
 function simulate(rng::AbstractRNG, model::StateSpaceModel, T::Integer)
+    T >= 0 || throw(ArgumentError("simulation length must be nonnegative"))
     x0 = simulate(rng, model.prior)
+    T == 0 && return (x0, typeof(x0)[], Any[])
     xs = fill(simulate(rng, model.dyn, 1, x0), T)
     for t in 2:T
         xs[t] = simulate(rng, model.dyn, t, xs[t - 1])

@@ -61,14 +61,16 @@ function _kalman_adjoints(c, Δμ, ΔΣ, δll, dyn, obs)
     fdyn = _field_flags(dyn)
     fobs = _field_flags(obs)
     g = _kalman_reverse_core(c, Δμ, ΔΣ, δll)
+    # The primal symmetrises covariance expressions. Project their storage
+    # cotangents too, including when the output seed selects only one triangle.
     return (;
         g.μ0̄,
-        g.Σ0̄,
+        Σ0̄=symmetrise(g.Σ0̄),
         Ā=_A_adjoint(Val(fdyn[1]), c, g),
         b̄=_b_adjoint(Val(fdyn[2]), c, g),
-        Q̄=_Q_adjoint(Val(fdyn[3]), c, g),
+        Q̄=symmetrise(_Q_adjoint(Val(fdyn[3]), c, g)),
         H̄=_H_adjoint(Val(fobs[1]), c, g),
         c̄=_c_adjoint(Val(fobs[2]), c, g),
-        R̄=_R_adjoint(Val(fobs[3]), c, g),
+        R̄=symmetrise(_R_adjoint(Val(fobs[3]), c, g)),
     )
 end

@@ -109,3 +109,21 @@ end
         @test trajectory_logdensity(model, KF(), initial_only, ys0) ≈ logpdf(Normal(), 0.4)
     end
 end
+
+@testitem "Empty filtering and simulation do not evaluate a transition" begin
+    using GeneralisedFilters
+    using StaticArrays
+    using Random
+    p = GaussianPrior(SA[0.0], SMatrix{1,1}(1.0))
+    d = TimeVaryingDynamics(ctx -> error("no transition should be evaluated"))
+    o = TimeVaryingObservation(ctx -> error("no observation should be evaluated"))
+    model = StateSpaceModel(p, d, o)
+    state, ll = GeneralisedFilters.filter(model, KF(), SVector{1,Float64}[])
+    @test state == distribution(p) || isapprox(state, distribution(p))
+    @test ll == 0
+    x0, xs, ys = simulate(MersenneTwister(2), model, 0)
+    @test x0 isa SVector{1,Float64}
+    @test isempty(xs) && isempty(ys)
+    @test_throws ArgumentError simulate(model, -1)
+    @test_throws ArgumentError smooth(model, KS, ys)
+end

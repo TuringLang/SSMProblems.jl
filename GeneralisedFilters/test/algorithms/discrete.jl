@@ -231,3 +231,50 @@ end
 
     @test smoothed_2f ≈ smoothed_rts
 end
+
+@testitem "Discrete marginal likelihood stability and unreachable smoothing states" begin
+    using GeneralisedFilters, LinearAlgebra, ForwardDiff
+    using Distributions: Normal, Categorical, logpdf
+    using LogExpFunctions: logsumexp
+    const GF = GeneralisedFilters
+    obs = DistributionObservation((t, x) -> Normal(0.01(x - 1), 1.0))
+    build(p) = StateSpaceModel(
+        DiscretePrior([p, 1 - p]), DiscreteDynamics([1.0 0.0; 0.0 1.0]), obs
+    )
+    model = build(0.3)
+    ys = [100.0]
+    expected = logsumexp([
+        log(0.3) + logpdf(Normal(0.0, 1.0), 100.0),
+        log(0.7) + logpdf(Normal(0.01, 1.0), 100.0),
+    ])
+    state, ll = GF.filter(model, DF(), ys)
+    @test ll ≈ expected
+    @test marginal_loglikelihood(model, DF(), ys) ≈ expected
+    @test all(isfinite, state)
+    @test sum(state) ≈ 1
+    @test marginal_loglikelihood(model, DF(), Float64[]) == 0
+    derivative = ForwardDiff.derivative(
+        p -> marginal_loglikelihood(build(p), DF(), ys), 0.3
+    )
+    @test derivative ≈ state[1] / 0.3 - state[2] / 0.7
+
+    unreachable = StateSpaceModel(DiscretePrior([1.0, 0.0]), model.dyn, obs)
+    smoothed, _ = smooth(GF.default_rng(), unreachable, DiscreteSmoother(), [0.1, 0.2])
+    @test smoothed ≈ [1.0, 0.0]
+
+    impossible = StateSpaceModel(
+        model.prior, model.dyn, DistributionObservation((t, x) -> Categorical([1.0, 0.0]))
+    )
+    state, ll = GF.filter(impossible, DF(), [2, 2])
+    @test ll == -Inf
+    @test state == [0.0, 0.0]
+
+    # A conditional model uses the same evaluator for its parameter objective.
+    hier = StateSpaceModel(
+        DiscretePrior([0.4, 0.6]), model.dyn, ((; x0),) -> model.prior, model.dyn, obs
+    )
+    path = ReferenceTrajectory(1, [2])
+    @test inner_loglikelihood(DF(), hier, path, ys) ≈ expected
+    @test trajectory_logdensity(hier, DF(), ReferenceTrajectory(1, [1]), ys) ≈
+        log(0.4) + expected
+end

@@ -57,6 +57,7 @@ function filter(
 )
     _validate_observations(model, ys)
     init_state = initialise(rng, model.prior, algo; ref_state)
+    isempty(ys) && return (init_state, 0.0)
 
     # First iteration peeled out for type stability.
     state, log_evidence = step(rng, model, algo, 1, init_state, ys[1]; ref_state)
@@ -105,8 +106,15 @@ end
 include("algorithms/kalman.jl")
 include("algorithms/srkf.jl")
 include("algorithms/forward.jl")
+include("algorithms/particles.jl")
+include("algorithms/rbpf.jl")
+include("ancestor_sampling.jl")
+include("algorithms/csmc.jl")
 
 include("integrations/conditional_logdensity.jl")
+include("integrations/logdensity.jl")
+include("integrations/particle_gibbs.jl")
+include("integrations/ssm_trajectory.jl")
 
 ## TEST UTILITIES ##########################################################################
 

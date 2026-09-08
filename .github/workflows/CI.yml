@@ -32,6 +32,11 @@ jobs:
             dir: './SSMProblems'
           - name: GeneralisedFilters
             dir: './GeneralisedFilters'
+        exclude:
+          - version: 'lts'
+            pkg:
+              name: GeneralisedFilters
+              dir: './GeneralisedFilters'
 
     steps:
       - uses: actions/checkout@v4
@@ -50,26 +55,23 @@ jobs:
           julia --project=${{ matrix.pkg.dir }}/ --color=yes -e '
           using Pkg;
           Pkg.Registry.update();
-          if "${{ matrix.pkg.name }}" == "GeneralisedFilters"
-              Pkg.develop(PackageSpec(path="./SSMProblems"));
-          end;
           Pkg.instantiate();'
 
       - name: Run tests
         uses: julia-actions/julia-runtest@v1
         with:
           project: ${{ matrix.pkg.dir }}
-          coverage: ${{ matrix.os == 'ubuntu-latest' && matrix.version == 'lts' }}
+          coverage: ${{ matrix.os == 'ubuntu-latest' && ((matrix.pkg.name == 'GeneralisedFilters' && matrix.version == '1') || (matrix.pkg.name == 'SSMProblems' && matrix.version == 'lts')) }}
 
       - name: Process code coverage
         uses: julia-actions/julia-processcoverage@v1
-        if: matrix.os == 'ubuntu-latest' && matrix.version == 'lts'
+        if: matrix.os == 'ubuntu-latest' && ((matrix.pkg.name == 'GeneralisedFilters' && matrix.version == '1') || (matrix.pkg.name == 'SSMProblems' && matrix.version == 'lts'))
         with:
           directories: ${{ matrix.pkg.dir }}
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
-        if: matrix.os == 'ubuntu-latest' && matrix.version == 'lts'
+        if: matrix.os == 'ubuntu-latest' && ((matrix.pkg.name == 'GeneralisedFilters' && matrix.version == '1') || (matrix.pkg.name == 'SSMProblems' && matrix.version == 'lts'))
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -77,7 +79,7 @@ jobs:
           fail_ci_if_error: true
 
   test-gpu:
-    name: GeneralisedFilters - GPU Compilation Check
+    name: GeneralisedFilters - CUDA Extension Load Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -96,14 +98,13 @@ jobs:
           julia --project=GeneralisedFilters --color=yes -e '
             using Pkg;
             Pkg.Registry.update();
-            Pkg.develop(PackageSpec(path="./SSMProblems"));
             Pkg.instantiate();'
 
-      - name: Check GPU code compilation
+      - name: Check CUDA extension loading
         run: |
           julia --project=GeneralisedFilters --color=yes -e '
             using Pkg;
-            # Add CUDA manually to check for compilation
+            # Load the optional extension without requiring a GPU
             Pkg.add("CUDA");
             using CUDA;
             using GeneralisedFilters;

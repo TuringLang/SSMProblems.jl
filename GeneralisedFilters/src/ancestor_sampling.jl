@@ -1,6 +1,3 @@
-import LinearAlgebra: I, cholesky, logdet, dot
-using PDMats: PDMats
-
 export future_conditional_density, ancestor_weight
 
 @doc raw"""
@@ -64,7 +61,7 @@ See also: [`compute_marginal_predictive_likelihood`](@ref), [`BackwardInformatio
 function future_conditional_density(
     dyn::LatentDynamics, ::AbstractFilter, iter::Integer, state, ref_state; kwargs...
 )
-    return SSMProblems.logdensity(dyn, iter, state, ref_state; kwargs...)
+    return logdensity(dyn, iter, state, ref_state)
 end
 
 function future_conditional_density(
@@ -76,7 +73,7 @@ function future_conditional_density(
     kwargs...,
 )
     trans_density = future_conditional_density(
-        dyn.outer_dyn, algo.pf, iter, state.x, ref_state.x; kwargs...
+        dyn.outer, algo.pf, iter, state.x, ref_state.x; kwargs...
     )
     filt_dist = state.z
     # A representation of the predictive likelihood p(y_{t+1:T} | z_{t+1}) conditioned on
@@ -87,14 +84,11 @@ function future_conditional_density(
     # TODO: this is wasteful if prediction doesn't depend on the new outer state
     pred_dist = predict(
         default_rng(),
-        dyn.inner_dyn,
+        inner_dynamics(dyn, iter, state.x, ref_state.x),
         algo.af,
         iter,
         filt_dist,
-        nothing;
-        prev_outer=state.x,
-        new_outer=ref_state.x,
-        kwargs...,
+        nothing,
     )
 
     marginal_pred_lik = compute_marginal_predictive_likelihood(pred_dist, back_info)
@@ -127,48 +121,4 @@ See also: [`future_conditional_density`](@ref)
 function ancestor_weight(particle::Particle, dyn, algo, iter::Integer, ref_state; kwargs...)
     return log_weight(particle) +
            future_conditional_density(dyn, algo, iter, particle.state, ref_state; kwargs...)
-end
-
-"""
-    compute_marginal_predictive_likelihood(forward_dist, backward_dist)
-
-Compute the marginal predictive likelihood p(y_{t:T} | y_{1:t-1}) given a one-step predicted
-filtering distribution p(x_{t+1} | y_{1:t}) and a backward predictive likelihood
-p(y_{t+1:T} | x_{t+1}).
-
-This Gaussian implementation is based on Lemma 1 of https://arxiv.org/pdf/1505.06357
-"""
-function compute_marginal_predictive_likelihood(
-    forward_dist::MvNormal, backward_dist::InformationLikelihood
-)
-    μ, Σ = params(forward_dist)
-    λ, Ω = natural_params(backward_dist)
-    Γ = cholesky(Σ).L
-
-    # Apply two-filter smoother style formula
-    Λ = PDMat(Xt_A_X(Ω, Γ).data + I)
-    M = Γ' * (λ - Ω * μ)
-    ζ = PDMats.quad(Ω, μ) - 2 * dot(λ, μ) - PDMats.invquad(Λ, M)
-
-    return -0.5 * (logdet(Λ) + ζ)
-end
-
-"""
-    compute_marginal_predictive_likelihood(forward_dist::AbstractVector, backward_dist::DiscreteLikelihood)
-
-Compute the marginal predictive likelihood p(y_{t+1:T} | y_{1:t}) for discrete states.
-
-Given a predicted filtering distribution π_{t+1}(i) = p(x_{t+1} = i | y_{1:t}) and backward
-likelihood β_{t+1}(i) = p(y_{t+1:T} | x_{t+1} = i), computes:
-
-    p(y_{t+1:T} | y_{1:t}) = Σ_i π_{t+1}(i) * β_{t+1}(i)
-
-All computations are performed in log-space for numerical stability.
-"""
-function compute_marginal_predictive_likelihood(
-    forward_dist::AbstractVector, backward_dist::DiscreteLikelihood
-)
-    log_forward = log.(forward_dist)
-    log_β = log_likelihoods(backward_dist)
-    return logsumexp(log_forward .+ log_β)
 end

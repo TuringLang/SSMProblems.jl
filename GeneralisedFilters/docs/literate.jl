@@ -10,7 +10,6 @@ const OUTDIR = ARGS[2]
 using Pkg: Pkg
 const EXAMPLEPATH = joinpath(@__DIR__, "..", "examples", EXAMPLE)
 Pkg.activate(EXAMPLEPATH)
-# Pkg.develop(joinpath(@__DIR__, "..", "..", "SSMProblems"))
 Pkg.instantiate()
 using Literate: Literate
 

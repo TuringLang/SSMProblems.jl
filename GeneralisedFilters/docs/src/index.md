@@ -1,25 +1,17 @@
 # GeneralisedFilters
 
-## Installation
+GeneralisedFilters implements analytical and particle filtering, smoothing, and particle
+Gibbs for state-space models. A hierarchical model can marginalise its inner Gaussian
+states while sampling only its outer trajectory. Parameter updates differentiate the
+conditional marginal likelihood using ForwardDiff or Mooncake.
 
-In the `julia` REPL:
+Install with `import Pkg; Pkg.add("GeneralisedFilters")`. Load `Mooncake` to enable the
+handwritten reverse rule, or `Turing` for the Gibbs integration. These packages are optional.
+The package defines its own model interface; importing SSMProblems is no longer required.
 
-```julia
-] add GeneralisedFilters
-```
+Small, fixed-dimensional states can use StaticArrays. Ordinary arrays remain supported;
+the optimised reverse rule applies to immutable floating-point static arrays. Model builders
+must preserve the numeric types supplied by AD.
 
-## Documentation
-
-`GeneralisedFilters` provides implementations of various filtering and
-smoothing algorithms for state-space models (SSMs). The goal of the package is
-to provide a modular and extensible framework for implementing advanced
-algorithms including Rao-Blackwellised particle filters, two-filter smoothers,
-and particle Gibbs/conditional SMC. Performance is a primary focus of this work,
-with type stability, GPU-acceleration, and efficient history storage being key
-design goals.
-
-### Interface
-```@autodocs
-Modules = [GeneralisedFilters]
-Order   = [:type, :function, :module]
-```
+See [Models and conditioning](models/linear-gaussian.md),
+[Particle Gibbs and Turing](inference.md), and [Migrating to 0.6](migration.md).

@@ -1,3 +1,10 @@
 [deps]
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
-Literate = "98b081ad-f1c9-55d3-8b20-4c87d4299306"
+GeneralisedFilters = "3ef92589-7ab8-43f9-b5b9-a3a0c86ecbb7"
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+
+[compat]
+Documenter = "1"
+Distributions = "0.25"
+StaticArrays = "1"

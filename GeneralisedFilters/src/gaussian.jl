@@ -13,6 +13,7 @@ struct GaussianState{TM<:AbstractVector,TS<:AbstractMatrix}
 end
 
 Statistics.mean(g::GaussianState) = g.μ
+Distributions.mode(g::GaussianState) = g.μ
 Statistics.cov(g::GaussianState) = g.Σ
 Base.length(g::GaussianState) = length(g.μ)
 Base.eltype(::Type{GaussianState{TM,TS}}) where {TM,TS} = eltype(TM)

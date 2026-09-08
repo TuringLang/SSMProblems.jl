@@ -16,6 +16,14 @@ a [`SqrtGaussianState`](@ref).
 struct SRKalmanFilter <: AbstractFilter end
 SRKF() = SRKalmanFilter()
 
+"""
+    marginal_loglikelihood(model, ::SRKalmanFilter, ys)
+
+Evaluate the deterministic square-root Kalman likelihood through the ordinary filter.
+"""
+marginal_loglikelihood(model::StateSpaceModel, af::SRKalmanFilter, ys::AbstractVector) =
+    last(filter(model, af, ys))
+
 function initialise(
     ::AbstractRNG, prior::GaussianPrior, ::SRKalmanFilter; ref_state=nothing
 )

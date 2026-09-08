@@ -2,13 +2,13 @@
     make_pd(M)
 
 Project a square matrix to the nearest positive-definite matrix by symmetrising and
-clipping negative eigenvalues to `1e-8`. Returns a `PDMat`.
+clipping negative eigenvalues to `1e-8`. Returns a symmetric matrix.
 """
 function make_pd(M)
     M_sym = (M + M') / 2
     λ, V = eigen(M_sym)
     λ_clipped = max.(λ, 1e-8)
-    return PDMat(Symmetric(V * Diagonal(λ_clipped) * V'))
+    return Matrix(Symmetric(V * Diagonal(λ_clipped) * V'))
 end
 
 function rand_cov(

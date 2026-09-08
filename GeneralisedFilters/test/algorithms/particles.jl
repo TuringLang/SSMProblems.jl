@@ -3,7 +3,7 @@
 ## Bootstrap Filter #########################################################################
 
 @testitem "Bootstrap filter" begin
-    using SSMProblems
+    using GeneralisedFilters
     using StableRNGs
     using StatsBase: weights
 
@@ -11,7 +11,7 @@
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
         rng, 1, 1; static_arrays=true
     )
-    _, _, ys = sample(rng, model, 4)
+    _, _, ys = simulate(rng, model, 4)
 
     resampler = GeneralisedFilters.GFTest.AlternatingResampler()
     bf = BF(10^6; resampler=resampler)
@@ -29,7 +29,7 @@ end
 ## Guided Filter ############################################################################
 
 @testitem "Guided filter" begin
-    using SSMProblems
+    using GeneralisedFilters
     using StableRNGs
     using StatsBase: weights
 
@@ -37,7 +37,7 @@ end
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
         rng, 1, 1; static_arrays=true
     )
-    _, _, ys = sample(rng, model, 4)
+    _, _, ys = simulate(rng, model, 4)
 
     prop = GeneralisedFilters.GFTest.OptimalProposal(model.dyn, model.obs)
     resampler = GeneralisedFilters.GFTest.AlternatingResampler()
@@ -55,10 +55,10 @@ end
 ## Auxiliary Bootstrap Filter ###############################################################
 
 @testitem "ABF" begin
+    using GeneralisedFilters
     using Distributions
     using GeneralisedFilters
     using LinearAlgebra
-    using SSMProblems
     using StableRNGs
     using StatsBase: weights
 
@@ -66,7 +66,7 @@ end
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(
         rng, 1, 1; static_arrays=true
     )
-    _, _, ys = sample(rng, model, 4)
+    _, _, ys = simulate(rng, model, 4)
 
     resampler = ESSResampler(0.8)
     bf = BF(10^6; resampler=resampler)
@@ -79,4 +79,34 @@ end
 
     @test first(kf_state.μ) ≈ sum(first.(xs) .* ws) rtol = 1e-2
     @test llkf ≈ llabf atol = 1e-3
+end
+
+@testitem "APF evidence correction with nonuniform lookahead" begin
+    using GeneralisedFilters
+    using LogExpFunctions: logsumexp
+    using LinearAlgebra: I
+    using Distributions: Bernoulli
+    using StableRNGs
+    const GF = GeneralisedFilters
+    weights = log.([0.2, 0.3, 0.5])
+    eta = log.([0.7, 1.8, 0.4])
+    likelihood = log.([0.6, 0.2, 0.9])
+    particles = [GF.Particle(i, weights[i], i) for i in 1:3]
+    state = GF.ParticleDistribution(particles, 0.0)
+    # Fixed ancestor draw includes the pinned reference ancestor. Correction must
+    # use that ancestor's own lookahead, including for the reference particle.
+    idxs = [1, 3, 3]
+    resampled = GF.construct_new_state(state, idxs, eta)
+    @test GF.log_weights(resampled) ≈ -eta[idxs]
+    model = StateSpaceModel(
+        DiscretePrior(fill(1 / 3, 3)),
+        DiscreteDynamics(Matrix{Float64}(I, 3, 3)),
+        DistributionObservation((t, x) -> Bernoulli(exp(likelihood[x]))),
+    )
+    predicted = GF.predict(StableRNG(13), model.dyn, BF(3), 1, resampled, true)
+    _, actual = GF.update(model.obs, BF(3), 1, predicted, true)
+    expected =
+        logsumexp(weights + eta) - logsumexp(weights) +
+        logsumexp(likelihood[idxs] - eta[idxs]) - log(3)
+    @test actual ≈ expected
 end

@@ -271,13 +271,18 @@ struct ReferenceTrajectory{T0,T,VT<:AbstractVector{T}} <: AbstractVector{Union{T
 end
 
 Base.size(r::ReferenceTrajectory) = (length(r.xs) + 1,)
-Base.axes(r::ReferenceTrajectory) = (0:length(r.xs),)
+# Axes must themselves use the same indices as their values. A plain `0:T`
+# range is indexed 1:T+1 and makes Base.LinearIndices silently become one-based.
+Base.axes(r::ReferenceTrajectory) = (Base.IdentityUnitRange(0:length(r.xs)),)
 Base.IndexStyle(::Type{<:ReferenceTrajectory}) = IndexLinear()
 
 Base.@propagate_inbounds function Base.getindex(r::ReferenceTrajectory, i::Integer)
     return i == 0 ? r.x0 : r.xs[i]
 end
 
+# Shallow copy preserves the initial state's identity and copies the sequence buffer,
+# just as copying a vector of mutable states preserves the individual state objects.
+Base.copy(r::ReferenceTrajectory) = ReferenceTrajectory(r.x0, copy(r.xs))
 Base.map(f, r::ReferenceTrajectory) = ReferenceTrajectory(f(r.x0), map(f, r.xs))
 
 function Base.:(==)(a::ReferenceTrajectory, b::ReferenceTrajectory)

@@ -72,6 +72,8 @@ function smooth(
     t_smooth=1,
 )
     _validate_observations(model, ys)
+    1 <= t_smooth <= length(ys) ||
+        throw(ArgumentError("smoothing time must lie in 1:length(ys)"))
     kf = KalmanFilter()
     T = length(ys)
 

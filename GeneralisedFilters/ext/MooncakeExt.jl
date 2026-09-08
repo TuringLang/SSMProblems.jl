@@ -14,8 +14,8 @@ using GeneralisedFilters:
     kalman_step_cached,
     repair_covariance,
     symmetrise
-using LinearAlgebra: Symmetric, Diagonal, eigen
-using StaticArrays: SVector, SMatrix, StaticVector
+using LinearAlgebra: Symmetric, Diagonal, eigen, triu, diag
+using StaticArrays: SVector, SMatrix
 import Mooncake as MC
 
 ## TANGENT HELPERS #########################################################################
@@ -24,36 +24,44 @@ import Mooncake as MC
 _mc_static_array(t, x) = typeof(x)(MC.get_tangent_field(t, :data))
 # Build the Mooncake tangent of a static array from its entries.
 _mc_static_tangent(x) = MC.build_tangent(typeof(x), Tuple(x))
+_mc_static_tangent(x, primal) = _mc_static_tangent(typeof(primal)(x))
+
+# Restrict the handwritten rule to immutable floating-point storage. Mutable static
+# arrays and other scalar types use Mooncake's derived rules.
+const FloatVector = SVector{N,T} where {N,T<:Union{Float32,Float64}}
+const FloatMatrix = SMatrix{M,N,T,L} where {M,N,T<:Union{Float32,Float64},L}
 
 # Seed the reverse pass: recover the cotangents of the filtered mean, covariance, and
 # log-likelihood from the output codual's forward and reverse data.
-function _mc_seed(dy_rdata, y_fdata, c)
+function _mc_seed(dy_rdata, y_fdata, output)
     dy_state, dy_ll = MC.tangent(y_fdata, dy_rdata)
-    dμ = _mc_static_array(MC.get_tangent_field(dy_state, :μ), c.μ0)
-    dΣ = _mc_static_array(MC.get_tangent_field(dy_state, :Σ), c.Σ0)
+    dμ = _mc_static_array(MC.get_tangent_field(dy_state, :μ), output.μ)
+    dΣ = _mc_static_array(MC.get_tangent_field(dy_state, :Σ), output.Σ)
     return dμ, dΣ, dy_ll
 end
 
 function _mc_state_tangent(state, g)
     return MC.build_tangent(
-        typeof(state), _mc_static_tangent(g.μ0̄), _mc_static_tangent(g.Σ0̄)
+        typeof(state),
+        _mc_static_tangent(g.μ0̄, state.μ),
+        _mc_static_tangent(g.Σ0̄, state.Σ),
     )
 end
 
 function _mc_dyn_tangent(dyn::LinearGaussianDynamics, g)
     return MC.build_tangent(
         typeof(dyn),
-        _mc_static_tangent(g.Ā),
-        _mc_static_tangent(g.b̄),
-        _mc_static_tangent(g.Q̄),
+        _mc_static_tangent(g.Ā, dyn.A),
+        _mc_static_tangent(g.b̄, dyn.b),
+        _mc_static_tangent(g.Q̄, dyn.Q),
     )
 end
 function _mc_obs_tangent(obs::LinearGaussianObservation, g)
     return MC.build_tangent(
         typeof(obs),
-        _mc_static_tangent(g.H̄),
-        _mc_static_tangent(g.c̄),
-        _mc_static_tangent(g.R̄),
+        _mc_static_tangent(g.H̄, obs.H),
+        _mc_static_tangent(g.c̄, obs.c),
+        _mc_static_tangent(g.R̄, obs.R),
     )
 end
 
@@ -71,10 +79,10 @@ end
 # Mooncake's derived rules.
 MC.@is_primitive MC.DefaultCtx MC.ReverseMode Tuple{
     typeof(kalman_step),
-    GaussianState{<:SVector,<:SMatrix},
-    MaybeWithFlags{<:LinearGaussianDynamics{<:SMatrix,<:SVector,<:SMatrix}},
-    MaybeWithFlags{<:LinearGaussianObservation{<:SMatrix,<:SVector,<:SMatrix}},
-    StaticVector,
+    GaussianState{<:FloatVector,<:FloatMatrix},
+    MaybeWithFlags{<:LinearGaussianDynamics{<:FloatMatrix,<:FloatVector,<:FloatMatrix}},
+    MaybeWithFlags{<:LinearGaussianObservation{<:FloatMatrix,<:FloatVector,<:FloatMatrix}},
+    FloatVector,
 }
 
 function MC.rrule!!(
@@ -92,14 +100,14 @@ function MC.rrule!!(
     out_cd = MC.zero_fcodual((new_state, ll))
 
     function kalman_step_pullback!!(dy_rdata)
-        dμ, dΣ, dll = _mc_seed(dy_rdata, MC.tangent(out_cd), c)
+        dμ, dΣ, dll = _mc_seed(dy_rdata, MC.tangent(out_cd), new_state)
         g = _kalman_adjoints(c, dμ, dΣ, dll, dyn, obs)
         return (
             MC.NoRData(),
             MC.rdata(_mc_state_tangent(state, g)),
             MC.rdata(_mc_dyn_tangent(dyn, g)),
             MC.rdata(_mc_obs_tangent(obs, g)),
-            MC.zero_rdata(y),
+            MC.rdata(_mc_static_tangent(-dll * c.w + c.K' * dμ, y)),
         )
     end
     return out_cd, kalman_step_pullback!!
@@ -110,16 +118,20 @@ end
 # Divided differences of `f(λ) = max(λ, ε)` for the spectral-function pullback. Degenerate
 # eigenvalues fall back to the derivative `f'(λ) = (λ > ε)` since `f` is piecewise linear.
 function _clip_divided_differences(λ, ε)
-    T = eltype(λ)
-    tol = sqrt(eps(real(T)))
-    f(x) = max(x, ε)
-    fp(x) = x > ε ? one(T) : zero(T)
-    kfun(li, lj) = abs(li - lj) > tol ? (f(li) - f(lj)) / (li - lj) : fp((li + lj) / 2)
+    function kfun(li, lj)
+        if li > ε && lj > ε
+            return one(li)
+        elseif li <= ε && lj <= ε
+            return zero(li)
+        else
+            return (max(li, ε) - max(lj, ε)) / (li - lj)
+        end
+    end
     return kfun.(λ, λ')
 end
 
 MC.@is_primitive MC.DefaultCtx MC.ReverseMode Tuple{
-    typeof(repair_covariance),EigenClip,SMatrix
+    typeof(repair_covariance),EigenClip{<:Union{Float32,Float64}},FloatMatrix
 }
 
 function MC.rrule!!(
@@ -135,10 +147,17 @@ function MC.rrule!!(
     out_cd = MC.zero_fcodual(Σ⁺)
 
     function repair_pullback!!(dΣ⁺_rdata)
-        Σ̄⁺ = symmetrise(_mc_static_array(MC.tangent(MC.tangent(out_cd), dΣ⁺_rdata), Σ))
+        Σ̄⁺ = symmetrise(_mc_static_array(MC.tangent(MC.tangent(out_cd), dΣ⁺_rdata), Σ⁺))
         Kmat = _clip_divided_differences(λ, clip.ε)
         Σ̄ = symmetrise(V * (Kmat .* (V' * Σ̄⁺ * V)) * V')
-        return (MC.NoRData(), MC.zero_rdata(clip), MC.rdata(_mc_static_tangent(Σ̄)))
+        Σ̄_storage = 2 * triu(Σ̄, 1) + Diagonal(diag(Σ̄))
+        ε̄ = sum(diag(V' * Σ̄⁺ * V) .* (λ .<= clip.ε))
+        clip_tangent = MC.build_tangent(typeof(clip), typeof(clip.ε)(ε̄))
+        return (
+            MC.NoRData(),
+            MC.rdata(clip_tangent),
+            MC.rdata(_mc_static_tangent(Σ̄_storage, Σ)),
+        )
     end
     return out_cd, repair_pullback!!
 end
