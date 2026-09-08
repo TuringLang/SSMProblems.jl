@@ -27,22 +27,25 @@ function predict(
     y;
     ref_state=nothing,
 )
-    return kalman_predict(state, resolve(dyn, (; t)))
+    return kalman_predict(state, _component(resolve(dyn, (; t))))
 end
 
 function update(obs, algo::KalmanFilter, t::Integer, state::GaussianState, y)
-    return kalman_update(state, resolve(obs, (; t)), y; repair=algo.repair)
+    return kalman_update(state, _component(resolve(obs, (; t))), y; repair=algo.repair)
 end
 
 """
     marginal_loglikelihood(model, af::KalmanFilter, ys)
 
 Marginal log-likelihood `log p(y_{1:T})` of a linear-Gaussian model, computed through the
-fused Kalman step. This is the differentiable entry point for non-hierarchical models.
+fused Kalman step. Conditional inner models returned by `condition_inner` use this same
+evaluator. Observations must be one-based and match the conditional trajectory horizon.
+An empty observation sequence has zero marginal log-likelihood.
 """
 function marginal_loglikelihood(
     model::StateSpaceModel, af::KalmanFilter, ys::AbstractVector
 )
+    _validate_observations(model, ys)
     p = model.prior::GaussianPrior
     state = GaussianState(p.μ0, p.Σ0)
     ll = zero(eltype(p.μ0))
@@ -68,6 +71,7 @@ function smooth(
     ys::AbstractVector;
     t_smooth=1,
 )
+    _validate_observations(model, ys)
     kf = KalmanFilter()
     T = length(ys)
 
@@ -88,7 +92,7 @@ function smooth(
     smoothed = filtered[T]
     for t in (T - 1):-1:t_smooth
         # Atom index t+1 parameterises the transition x_t → x_{t+1}.
-        d = resolve(model.dyn, (; t=t + 1))
+        d = _component(resolve(model.dyn, (; t=t + 1)))
         smoothed = rts_backward_step(filtered[t], d, smoothed, predicted[t + 1])
     end
 

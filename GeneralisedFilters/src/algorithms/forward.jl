@@ -109,6 +109,7 @@ function smooth(
     ys::AbstractVector;
     t_smooth=1,
 )
+    _validate_observations(model, ys)
     T = length(ys)
     df = DiscreteFilter()
 

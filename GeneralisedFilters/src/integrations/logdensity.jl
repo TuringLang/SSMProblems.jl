@@ -1,3 +1,7 @@
+# Legacy pre-closure integration, currently excluded from the package include graph.
+# The active trajectory-density API lives in conditional_logdensity.jl. The PG/Turing
+# port must reuse that API rather than re-enable these obsolete definitions unchanged.
+
 using LogDensityProblems: LogDensityProblems
 import Distributions: logpdf
 

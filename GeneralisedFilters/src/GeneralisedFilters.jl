@@ -55,6 +55,7 @@ function filter(
     ys::AbstractVector;
     ref_state=nothing,
 )
+    _validate_observations(model, ys)
     init_state = initialise(rng, model.prior, algo; ref_state)
 
     # First iteration peeled out for type stability.
@@ -104,6 +105,8 @@ end
 include("algorithms/kalman.jl")
 include("algorithms/srkf.jl")
 include("algorithms/forward.jl")
+
+include("integrations/conditional_logdensity.jl")
 
 ## TEST UTILITIES ##########################################################################
 
