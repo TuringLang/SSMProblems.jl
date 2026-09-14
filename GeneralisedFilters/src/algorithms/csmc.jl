@@ -19,9 +19,11 @@ struct NoRefreshment <: AbstractTrajectoryRefreshment end
 """
     AncestorSampling([backward_predictor]) <: AbstractTrajectoryRefreshment
 
-Conditional SMC with ancestor sampling (CSMC-AS / PGAS). At each time step, the reference
+Conditional SMC with ancestor sampling (CSMC-AS / PGAS). At resampling events, the reference
 particle's ancestor is resampled using backward weights, improving mixing for the full
-trajectory. Resampling occurs at every step, independent of the PF ESS threshold.
+trajectory. The PF resampling trigger is respected: ancestor sampling is performed
+when ordinary resampling occurs. At skipped steps, every particle retains its ancestor
+and accumulated weight.
 For RBPF models, backward predictive likelihoods are computed at the start of
 each sweep which enable closed form ancestor weights. The optional backward predictor
 uses the analytical filter's default when omitted. Gaussian defaults apply no jitter;
@@ -60,9 +62,9 @@ Conditional Sequential Monte Carlo sampler with configurable trajectory refreshm
 
 # Examples
 ```julia
-ConditionalSMC(BF(100; resampler=Multinomial()))                                  # Vanilla CSMC (NoRefreshment default)
-ConditionalSMC(BF(100; resampler=Multinomial()), AncestorSampling())              # CSMC with ancestor sampling
-ConditionalSMC(RBPF(BF(200; resampler=Multinomial()), KF()), AncestorSampling())  # Rao-Blackwellised PGAS
+ConditionalSMC(BF(100))                                  # Vanilla CSMC (NoRefreshment default)
+ConditionalSMC(BF(100), AncestorSampling())              # CSMC with ancestor sampling
+ConditionalSMC(RBPF(BF(200), KF()), AncestorSampling())  # Rao-Blackwellised PGAS
 ```
 """
 struct ConditionalSMC{PF<:AbstractParticleFilter,TR<:AbstractTrajectoryRefreshment} <:
@@ -73,16 +75,15 @@ end
 
 ConditionalSMC(pf) = ConditionalSMC(pf, NoRefreshment())
 
-_is_multinomial(::AbstractResampler) = false
-_is_multinomial(::Multinomial) = true
-_is_multinomial(rs::ESSResampler) = _is_multinomial(rs.resampler)
 function _validate_csmc(model, csmc, observations, ref_traj)
     Base.require_one_based_indexing(observations)
     isempty(observations) && throw(ArgumentError("CSMC requires at least one observation"))
-    _is_multinomial(resampler(csmc.pf)) || throw(
+    rs = resampler(csmc.pf)
+    supports_conditional(rs) || throw(
         ArgumentError(
-            "ConditionalSMC requires multinomial resampling; use BF(N; resampler=Multinomial()). " *
-            "Pinning an ancestor after dependent resampling is not a valid conditional kernel.",
+            "ConditionalSMC requires a resampler with a conditional law, which " *
+            "$rs does not implement. Multinomial, Systematic and Stratified " *
+            "resampling are supported.",
         ),
     )
     if !isnothing(ref_traj)
@@ -93,16 +94,9 @@ function _validate_csmc(model, csmc, observations, ref_traj)
             ),
         )
     end
-    if csmc.pf isa AuxiliaryParticleFilter && !(csmc.refreshment isa NoRefreshment)
-        throw(
-            ArgumentError(
-                "AuxiliaryParticleFilter supports ConditionalSMC with NoRefreshment only; " *
-                "ancestor sampling and backward simulation require an unwrapped PF or RBPF.",
-            ),
-        )
-    end
-    if csmc.pf isa RBPF && !(csmc.refreshment isa NoRefreshment)
-        af = csmc.pf.af
+    base_pf = _refreshment_filter(csmc.pf)
+    if base_pf isa RBPF && !(csmc.refreshment isa NoRefreshment)
+        af = base_pf.af
         af isa KalmanFilter &&
             !(af.repair isa NoRepair) &&
             throw(
@@ -110,7 +104,7 @@ function _validate_csmc(model, csmc, observations, ref_traj)
                     "Gaussian ancestor sampling/backward simulation requires KalmanFilter(repair=NoRepair())",
                 ),
             )
-        bp = _backward_predictor(csmc.pf, csmc.refreshment)
+        bp = _backward_predictor(base_pf, csmc.refreshment)
         if bp isa BackwardInformationPredictor
             any(j -> !isnothing(j) && !iszero(j), (bp.initial_jitter, bp.jitter)) && throw(
                 ArgumentError(
@@ -231,7 +225,8 @@ end
 
 ## BACKWARD PREDICTIVE LIKELIHOODS #########################################################
 
-default_backward_predictor(::KalmanFilter) = BackwardInformationPredictor()
+default_backward_predictor(::KalmanFilter) = SqrtBackwardInformationPredictor()
+default_backward_predictor(::SRKalmanFilter) = SqrtBackwardInformationPredictor()
 default_backward_predictor(::DiscreteFilter) = BackwardDiscretePredictor()
 function _backward_predictor(pf::RBPF, strategy)
     return if isnothing(strategy.backward_predictor)
@@ -241,14 +236,23 @@ function _backward_predictor(pf::RBPF, strategy)
     end
 end
 
-function _backward_start(bp::BackwardInformationPredictor, model, pf, t, y, x)
+function _backward_start(
+    bp::Union{BackwardInformationPredictor,SqrtBackwardInformationPredictor},
+    model,
+    pf,
+    t,
+    y,
+    x,
+)
     return backward_initialise(bp, _component(inner_observation(model, t, x)), y)
 end
 function _backward_start(bp::BackwardDiscretePredictor, model, pf, t, y, x)
     n = length(_component(inner_prior(model, x)).α0)
     return backward_initialise(bp, inner_observation(model, t, x), t, y, n)
 end
-function _backward_observe(bp::BackwardInformationPredictor, lik, obs, t, y)
+function _backward_observe(
+    bp::Union{BackwardInformationPredictor,SqrtBackwardInformationPredictor}, lik, obs, t, y
+)
     return backward_update(bp, lik, _component(obs), y)
 end
 function _backward_observe(bp::BackwardDiscretePredictor, lik, obs, t, y)
@@ -312,8 +316,9 @@ Run one conditional SMC sweep, returning `(trajectory, log_likelihood)`.
 
 `ref_traj` is the reference trajectory from the previous iteration (or `nothing` for
 the initial unconditional run). For RBPF, the returned trajectory contains only outer states; legacy inputs containing
-`RBState` objects are accepted and stripped. Ancestor sampling resamples every step
-regardless of the underlying ESS threshold. All strategies require multinomial resampling.
+`RBState` objects are accepted and stripped. Ancestor sampling respects the underlying
+resampling trigger and refreshes ancestors only at resampling events. All strategies require a resampler that
+implements a conditional law (see `supports_conditional`).
 """
 function _csmc_sample(
     rng::AbstractRNG,
@@ -355,33 +360,35 @@ function _csmc_sample(
 
     # Backward predictive likelihoods (only non-nothing for RBPF)
     back_liks = _compute_backward_likelihoods(
-        rng, model, pf, observations, ref_state, csmc.refreshment
+        rng, model, _refreshment_filter(pf), observations, ref_state, csmc.refreshment
     )
 
     init_state = initialise(rng, model.prior, pf; ref_state)
 
     # Perform one CSMC-AS step on the current state
     function _csmc_as_step(state, t)
-        ancestor_idx = 0
-        if !isnothing(ref_state)
+        rs = _step_resampler(rng, model, pf, t, state, observations[t])
+        if !will_resample(rs, state)
+            # The trigger depends only on the previous cloud, which is held fixed during
+            # this ancestor update. Choosing the identity update on this branch is valid
+            # also for ESS-dependent schedules, not only predetermined schedules.
+            # Identity resampling carries the filtering weights. Retaining the reference
+            # ancestor is a valid partial PGAS update; replacing it while retaining the
+            # identity resampling weights is not the multinomial PGAS construction.
+            state = preserve_sample(state)
+        elseif isnothing(ref_state)
+            state = resample(rng, rs, state)
+        else
             ref_as = _build_ancestor_ref(ref_state, back_liks, t)
             as_weights = map(state.particles) do particle
                 ancestor_weight(particle, model.dyn, pf, t, ref_as)
             end
             ancestor_idx = StatsBase.sample(rng, StatsBase.Weights(softmax(as_weights)))
+            # Draw the WHOLE conditional law given the newly selected ancestor. For
+            # dependent schemes, sampling conditional on ancestor 1 and overwriting it
+            # afterwards gives the wrong distribution for all the other offspring.
+            state = resample(rng, rs, state; ref_state, ref_idx=ancestor_idx)
         end
-
-        previous_state = state
-        state = resample(rng, resampler(pf), state; ref_state)
-
-        if !isnothing(ref_state)
-            state.particles[1] = Particle(
-                previous_state.particles[ancestor_idx].state,
-                state.particles[1].log_w,
-                ancestor_idx,
-            )
-        end
-
         return move(rng, model, pf, t, state, observations[t]; ref_state)
     end
 
@@ -463,7 +470,13 @@ function _csmc_sample(
     sampled_state = container.states[K][idx]
 
     back_lik = _bs_init_back_lik(
-        rng, model, pf, observations, K, sampled_state, csmc.refreshment
+        rng,
+        model,
+        _refreshment_filter(pf),
+        observations,
+        K,
+        sampled_state,
+        csmc.refreshment,
     )
 
     xs = Vector{typeof(sampled_state)}(undef, K)
@@ -478,7 +491,15 @@ function _csmc_sample(
         xs[t] = container.states[t][idx]
 
         back_lik = _bs_step_back_lik(
-            rng, model, pf, t, back_lik, observations, xs[t], xs[t + 1], csmc.refreshment
+            rng,
+            model,
+            _refreshment_filter(pf),
+            t,
+            back_lik,
+            observations,
+            xs[t],
+            xs[t + 1],
+            csmc.refreshment,
         )
     end
 

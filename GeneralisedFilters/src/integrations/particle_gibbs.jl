@@ -13,7 +13,7 @@ Particle Gibbs sampler that alternates between a parameter update (e.g., NUTS) a
 trajectory update (conditional SMC).
 
 # Fields
-- `csmc::CS`: Conditional SMC sampler for trajectory updates (e.g., `ConditionalSMC(RBPF(BF(200; resampler=Multinomial()), KF()), AncestorSampling())`)
+- `csmc::CS`: Conditional SMC sampler for trajectory updates (e.g., `ConditionalSMC(RBPF(BF(200), KF()), AncestorSampling())`)
 - `param::PS`: Parameter sampler (e.g., `AdvancedHMC.NUTS(0.8)`)
 - `adtype::ADT`: AD backend (`ADTypes.AbstractADType`). `nothing` uses AdvancedHMC's default
   (ForwardDiff). Both regular and hierarchical models support ForwardDiff and Mooncake.
@@ -23,10 +23,10 @@ trajectory update (conditional SMC).
 ```julia
 
 # Regular SSM
-ParticleGibbs(ConditionalSMC(BF(100; resampler=Multinomial()), NoRefreshment()), NUTS(0.8))
+ParticleGibbs(ConditionalSMC(BF(100), NoRefreshment()), NUTS(0.8))
 
 # Hierarchical SSM with reverse-mode AD
-ParticleGibbs(ConditionalSMC(RBPF(BF(200; resampler=Multinomial()), KF()), AncestorSampling()), NUTS(0.8); adtype=AutoMooncake())
+ParticleGibbs(ConditionalSMC(RBPF(BF(200), KF()), AncestorSampling()), NUTS(0.8); adtype=AutoMooncake())
 ```
 """
 struct ParticleGibbs{CS<:ConditionalSMC,PS,ADT<:Union{Nothing,ADTypes.AbstractADType}} <:
@@ -91,6 +91,7 @@ end
 
 _get_inner_filter(::AbstractParticleFilter) = nothing
 _get_inner_filter(pf::RBPF) = pf.af
+_get_inner_filter(pf::AuxiliaryParticleFilter) = _get_inner_filter(pf.pf)
 
 ## LOG-DENSITY MODEL CONSTRUCTION #############################################################
 

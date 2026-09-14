@@ -56,3 +56,38 @@ end
 
 GaussianState(g::SqrtGaussianState) = GaussianState(g.μ, symmetrise(g.U' * g.U))
 SqrtGaussianState(g::GaussianState) = SqrtGaussianState(g.μ, cholesky(Symmetric(g.Σ)).U)
+
+export CovarianceFactor, SqrtGaussianState
+
+"""
+    CovarianceFactor(F)
+
+Covariance represented by an explicit factor `Σ = F*F'`. The factor may be rectangular
+or rank deficient. Square-root algorithms consume `F` directly, without reconstructing
+and refactorising `Σ`. This does not add noise or repair the statistical model.
+"""
+struct CovarianceFactor{T,M<:AbstractMatrix{T}} <: AbstractMatrix{T}
+    factor::M
+end
+Base.size(C::CovarianceFactor) = (size(C.factor, 1), size(C.factor, 1))
+function Base.getindex(C::CovarianceFactor, i::Int, j::Int)
+    return sum(C.factor[i, k] * conj(C.factor[j, k]) for k in axes(C.factor, 2))
+end
+Base.Matrix(C::CovarianceFactor) = Matrix(C.factor * C.factor')
+_covariance_root(C::CovarianceFactor) = C.factor
+_covariance_root(C::AbstractMatrix) = cholesky(Symmetric(C)).L
+
+Statistics.mean(g::SqrtGaussianState) = g.μ
+Statistics.cov(g::SqrtGaussianState) = symmetrise(g.U' * g.U)
+Base.length(g::SqrtGaussianState) = length(g.μ)
+Base.eltype(::Type{SqrtGaussianState{TM,TU}}) where {TM,TU} = eltype(TM)
+Random.rand(rng::AbstractRNG, g::SqrtGaussianState) = g.μ + g.U' * _randn_like(rng, g.μ)
+function Random.rand(
+    rng::AbstractRNG, g::GaussianState{<:AbstractVector,<:CovarianceFactor}
+)
+    F = g.Σ.factor
+    return g.μ + F * _factor_randn(rng, F)
+end
+
+_factor_randn(rng, F::AbstractMatrix) = randn(rng, eltype(F), size(F, 2))
+_factor_randn(rng, F::StaticMatrix{N,M,T}) where {N,M,T} = SVector{M,T}(randn(rng, T, M))

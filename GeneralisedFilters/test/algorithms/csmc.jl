@@ -39,8 +39,19 @@
     )
     ys = [SVector(0.2), SVector(-0.4), SVector(0.7)]
     truth, _ = smooth(rng, joint, KalmanSmoother(), ys; t_smooth=1)
-    for strategy in (NoRefreshment(), AncestorSampling(), BackwardSimulation())
-        pf = RBPF(BF(12; resampler=Multinomial(), threshold=0.8), KF())
+    # Multinomial covers every refreshment strategy. The schemes that need reindexing are
+    # checked on vanilla CSMC, where an invalid conditional law biases the posterior.
+    cases = (
+        (NoRefreshment(), Multinomial()),
+        (AncestorSampling(), Multinomial()),
+        (BackwardSimulation(), Multinomial()),
+        (NoRefreshment(), Systematic()),
+        (NoRefreshment(), Stratified()),
+        (AncestorSampling(), Systematic()),
+        (AncestorSampling(), Stratified()),
+    )
+    for (strategy, scheme) in cases
+        pf = RBPF(BF(12; resampler=scheme, threshold=0.8), KF())
         sampler = ConditionalSMC(pf, strategy)
         xmeans = Float64[]
         zmeans = Float64[]
@@ -119,12 +130,13 @@
     aux_ref, aux_ll = GF._csmc_sample(rng, joint, aux_sampler, ys, aux_ref)
     @test isfinite(aux_ll)
     @test length(aux_ref) == 4
-    @test_throws ArgumentError GF._csmc_sample(
-        rng, joint, ConditionalSMC(auxiliary, AncestorSampling()), ys, aux_ref
-    )
-    @test_throws ArgumentError GF._csmc_sample(
-        rng, joint, ConditionalSMC(auxiliary, BackwardSimulation()), ys, aux_ref
-    )
+    for strategy in (AncestorSampling(), BackwardSimulation())
+        refreshed, ll = GF._csmc_sample(
+            rng, joint, ConditionalSMC(auxiliary, strategy), ys, aux_ref
+        )
+        @test length(refreshed) == 4
+        @test isfinite(ll)
+    end
     # Public standalone chain entry points.
     cm = CSMCModel(hier, ys)
     sampler = ConditionalSMC(RBPF(BF(8; resampler=Multinomial()), KF()), AncestorSampling())
@@ -134,7 +146,7 @@
     @test next_state.trajectory[0] isa SVector
     @test length(next_state.trajectory) == 4
     @test_throws ArgumentError GF._csmc_sample(
-        rng, hier, ConditionalSMC(RBPF(BF(8), KF())), ys, nothing
+        rng, hier, ConditionalSMC(RBPF(BF(8; resampler=Metropolis()), KF())), ys, nothing
     )
     @test_throws ArgumentError GF._csmc_sample(
         rng, hier, sampler, SVector{1,Float64}[], nothing
@@ -234,5 +246,41 @@ end
         end
         @test count / 5000 ≈ truth atol = 0.035
         @test ref[0] isa Int
+    end
+end
+
+@testitem "Adaptive ancestor sampling preserves the enumerated path distribution" begin
+    using GeneralisedFilters, StableRNGs
+    using Distributions: Bernoulli, Categorical
+    using LogExpFunctions: softmax
+    const GF = GeneralisedFilters
+    rng = StableRNG(8192)
+    model = StateSpaceModel(
+        DiscretePrior([0.35, 0.65]),
+        DiscreteDynamics([0.8 0.2; 0.25 0.75]),
+        DistributionObservation((t, x) -> Bernoulli(x == 1 ? 0.2 : 0.85)),
+    )
+    ys = [true, false]
+    paths = [
+        ReferenceTrajectory(x[1], collect(x[2:3])) for x in Iterators.product(1:2, 1:2, 1:2)
+    ]
+    paths = vec(paths)
+    probabilities = softmax([trajectory_logdensity(model, p, ys) for p in paths])
+    path_index(p) = 1 + (p[0] - 1) + 2(p[1] - 1) + 4(p[2] - 1)
+    # Independent exact-target inputs test one-step invariance of ALL path probabilities,
+    # avoiding burn-in and serial-correlation assumptions in a long MCMC-chain test.
+    for scheme in (Multinomial(), Systematic(), Stratified()), threshold in (0.0, 0.8, 1.0)
+        sampler = ConditionalSMC(BF(3; resampler=scheme, threshold), AncestorSampling())
+        counts = zeros(Int, length(paths))
+        draws = 16000
+        for _ in 1:draws
+            ref = paths[rand(rng, Categorical(probabilities))]
+            sampled, _ = GF._csmc_sample(rng, model, sampler, ys, ref)
+            counts[path_index(sampled)] += 1
+        end
+        for i in eachindex(paths)
+            sigma = sqrt(probabilities[i] * (1 - probabilities[i]) / draws)
+            @test abs(counts[i] / draws - probabilities[i]) < 6sigma + 1 / draws
+        end
     end
 end

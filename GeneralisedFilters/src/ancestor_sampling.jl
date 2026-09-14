@@ -53,7 +53,8 @@ The log future conditional density (up to additive constants independent of ``x_
 - **Generic** (`LatentDynamics`, `AbstractFilter`): Returns `logdensity(dyn, iter, state, ref_state)`
 - **Rao-Blackwellised** (`HierarchicalDynamics`, `RBPF`): Combines outer transition density with
   marginal predictive likelihood. The `ref_state.z` must be an `AbstractLikelihood`
-  (`InformationLikelihood` for Gaussian inner states, `DiscreteLikelihood` for discrete inner states).
+  (`InformationLikelihood` or `SqrtInformationLikelihood` for Gaussian inner states,
+  `DiscreteLikelihood` for discrete inner states).
 
 See also: [`compute_marginal_predictive_likelihood`](@ref), [`BackwardInformationPredictor`](@ref),
 [`BackwardDiscretePredictor`](@ref)
@@ -121,4 +122,18 @@ See also: [`future_conditional_density`](@ref)
 function ancestor_weight(particle::Particle, dyn, algo, iter::Integer, ref_state; kwargs...)
     return log_weight(particle) +
            future_conditional_density(dyn, algo, iter, particle.state, ref_state; kwargs...)
+end
+
+# An APF changes proposal selection and carries its inverse-lookahead correction in
+# particle.log_w. Refreshment uses those corrected filtering weights and the wrapped
+# filter's future density; multiplying by the lookahead again would change the target.
+function future_conditional_density(
+    dyn::LatentDynamics,
+    algo::AuxiliaryParticleFilter,
+    iter::Integer,
+    state,
+    ref_state;
+    kwargs...,
+)
+    return future_conditional_density(dyn, algo.pf, iter, state, ref_state; kwargs...)
 end

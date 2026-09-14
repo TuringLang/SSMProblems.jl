@@ -27,3 +27,30 @@ backends on a 20-parameter conditional objective.
 The full filter still allocates particle and resampling storage. The integration currently
 rebuilds AD preparation after each trajectory change to ensure a correct target. Workspace
 reuse and large-parameter crossover measurements remain useful follow-up work.
+
+## Square-root backend and refreshment
+
+To benchmark the stable forward/backward route, including AS/BS sweeps, from the repository
+root:
+
+```julia
+include("GeneralisedFilters/benchmark/rbpg.jl")
+run_benchmarks(; analytical_filter=SRKF(), benchmark_refreshment=true)
+```
+
+A September 14 follow-up on the same two-parameter, two-dimensional fixture gave these
+warm observations after fixing static dimension inference in SRKF:
+
+| Operation | KF | SRKF | Allocations (both) |
+|:--|--:|--:|--:|
+| Conditional trajectory objective | 6.8 μs | 10.5 μs | 0 B |
+| Prepared ForwardDiff gradient | 10.7 μs | 21.0 μs | 80 B |
+| Prepared Mooncake gradient | 20.4 μs | 67.6 μs | 160 B |
+| Ancestor-sampling sweep | 2.02 ms | 2.84 ms | 5.21 MB |
+| Backward-simulation sweep | 1.83 ms | 2.64 ms | 4.74 MB |
+
+These were medians of seven warmed evaluations with compilation/full CPU tests running
+concurrently. They demonstrate removal of avoidable allocations; timings are approximate
+and do not establish a many-parameter AD crossover. Both filters use the square-root
+backward predictor here; their forward likelihood implementations differ. Complete Turing
+chain throughput and effective samples per second remain unmeasured.

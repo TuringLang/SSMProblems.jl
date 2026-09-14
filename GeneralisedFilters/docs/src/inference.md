@@ -7,7 +7,7 @@ beliefs under the current parameters.
 
 ```julia
 using GeneralisedFilters, AdvancedHMC, AbstractMCMC, ADTypes, Mooncake
-pf = RBPF(BF(100; resampler=GeneralisedFilters.Multinomial()), KF())
+pf = RBPF(BF(100), KF())
 csmc = ConditionalSMC(pf, AncestorSampling())
 pg = ParticleGibbs(csmc, AdvancedHMC.NUTS(0.8); adtype=AutoMooncake())
 model = ParticleGibbsModel(parameter_prior, ParameterisedSSM(build, observations))
@@ -33,7 +33,7 @@ using Turing, GeneralisedFilters, AdvancedHMC, AbstractMCMC, MCMCChains, ADTypes
     x ~ SSMTrajectory(ssm, KF(), ys)
 end
 # ParticleGibbs alternates the parameter NUTS and trajectory CSMC updates.
-csmc = ConditionalSMC(RBPF(BF(100; resampler=GeneralisedFilters.Multinomial()), KF()), AncestorSampling())
+csmc = ConditionalSMC(RBPF(BF(100), KF()), AncestorSampling())
 sampler = ParticleGibbs(csmc, AdvancedHMC.NUTS(0.8); adtype=AutoForwardDiff())
 chain = AbstractMCMC.sample(rng, inference_model(ys), sampler, 1000;
     n_adapts=200, progress=false, chain_type=MCMCChains.Chains)
@@ -52,3 +52,48 @@ The Turing adapter currently supports exactly one `SSMTrajectory` variable per m
 starts from prior parameter draws; `initial_params` is rejected explicitly. It is used as the
 outer sampler shown above, not as a component of `Turing.Gibbs`. The standalone parameter
 sampler supports `initial_params`.
+
+## Stable Gaussian refreshment
+
+`KF()` and `SRKF()` use `SqrtBackwardInformationPredictor()` by default for RB ancestor
+sampling and backward simulation. For square-root arithmetic in the forward pass too,
+use the same `SRKF()` in the RBPF and in `SSMTrajectory`:
+
+```julia
+pf = AuxiliaryParticleFilter(RBPF(BF(100; threshold=0.8), SRKF()), MeanPredictive())
+csmc = ConditionalSMC(pf, BackwardSimulation())
+# Inside the Turing model: x ~ SSMTrajectory(ssm, SRKF(), observations)
+```
+
+Supply `CovarianceFactor(F)` as a Gaussian atom's covariance when a prior or process
+covariance is naturally available as `F * F'`, including rectangular/rank-deficient factors.
+The square-root route consumes those factors directly. Observation noise must remain
+positive definite. Explicit noise regularization belongs in the model and must be shared
+by trajectory and parameter updates; covariance clipping inside the forward filter is
+not compatible with the analytical backward formulas.
+
+ForwardDiff and Mooncake differentiate the conditional forward likelihood; HMC does not
+need derivatives through particle selection or backward messages. Dense reverse-mode QR
+requires full column rank whenever its output carries a nonzero derivative. Rank-deficient filtering support does not
+imply differentiability through rank changes; use a smooth, fixed-rank parameterization
+and validate its gradients. The square-root implementation introduces no eigenvalue floor.
+
+`AncestorSampling()` respects the ESS trigger and currently updates the reference ancestor
+only when ordinary resampling occurs. It preserves ancestry and accumulated weights on
+skipped steps. `BackwardSimulation()` performs its backward pass after the adaptive forward
+sweep. APF lookahead weights guide ordinary ancestor selection without changing the target
+backward weights.
+
+## Possible MH correction of approximate backward weights
+
+A future fallback could use approximate backward scores to propose an ancestor and apply
+an MH correction with the target scores of only the current and proposed ancestors. With
+a fixed number of proposals per step, suffix evaluation would cost `O(T^2)` in total,
+alongside `O(NT)` particle/proposal work. This is the MH-within-PGAS construction in
+[Lindsten et al., §6.1](https://jmlr.org/papers/volume15/lindsten14a/lindsten14a.pdf).
+It is not currently an implemented refreshment strategy.
+
+One global MH correction after an arbitrary approximate particle sweep is not automatically
+valid: it requires the reverse proposal law, or a proven reversible proposal kernel for an
+evaluable surrogate target. All target evaluations, including HMC, must remain consistent.
+An MH correction still requires a stable target likelihood evaluator.

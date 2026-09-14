@@ -14,6 +14,7 @@ using GeneralisedFilters:
     kalman_step_cached,
     repair_covariance,
     symmetrise
+using LinearAlgebra: LinearAlgebra
 using LinearAlgebra: Symmetric, Diagonal, eigen, triu, diag
 using StaticArrays: SVector, SMatrix
 import Mooncake as MC
@@ -160,6 +161,37 @@ function MC.rrule!!(
         )
     end
     return out_cd, repair_pullback!!
+end
+
+## DENSE SQUARE-ROOT QR PRIMITIVE ###########################################################
+
+# Only R is needed by the filter. Avoid differentiating LAPACK's blocked QR foreigncall.
+MC.@is_primitive MC.DefaultCtx MC.ReverseMode Tuple{
+    typeof(GeneralisedFilters._qr_upper),Matrix{<:Union{Float32,Float64}}
+}
+function MC.rrule!!(
+    ::MC.CoDual{typeof(GeneralisedFilters._qr_upper)}, M_cd::MC.CoDual{<:Matrix}
+)
+    M = MC.primal(M_cd)
+    R = GeneralisedFilters._qr_upper(M)
+    out = MC.zero_fcodual(R)
+    function qr_upper_pullback!!(::MC.NoRData)
+        G = MC.tangent(out)
+        if any(!iszero, G)
+            any(iszero, diag(R)) && throw(
+                ArgumentError(
+                    "reverse differentiation through a rank-deficient square-root QR is unsupported; use a fixed full-rank parameterization",
+                ),
+            )
+            # R-only QR adjoint: Q*sym_upper(G*R')/R'.
+            U = LinearAlgebra.UpperTriangular(R)
+            D = G * R'
+            S = Symmetric(D, :U)
+            MC.tangent(M_cd) .+= (M / U) * S / U'
+        end
+        return MC.NoRData(), MC.NoRData()
+    end
+    return out, qr_upper_pullback!!
 end
 
 end

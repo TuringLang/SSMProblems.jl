@@ -255,6 +255,15 @@ end
         return [mod1(a - 1, length(weights)) for a in 1:n]
     end
 
+    GeneralisedFilters.supports_conditional(::DummyResampler) = true
+
+    function GeneralisedFilters.conditional_sample_ancestors(
+        ::AbstractRNG, ::DummyResampler, weights::AbstractVector, ref_idx::Integer
+    )
+        n = length(weights)
+        return [a == 1 ? ref_idx : mod1(a - 1, n) for a in 1:n]
+    end
+
     SEED = 1234
     K = 5
     N_particles = max(10, K + 2)

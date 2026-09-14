@@ -171,15 +171,12 @@ function backward_predict(
 )
     λ, Ω = natural_params(lik)
     A, b, Q = d.A, d.b, d.Q
-    F = cholesky(Symmetric(Q)).L
-
+    # Solve the equivalent system rather than subtracting nearly equal matrices.
+    # The square-root predictor remains preferable for ill-conditioned multivariate models.
     m = λ - Ω * b
-    Λ = symmetrise(F' * Ω * F + I)
-    Λc = cholesky(Symmetric(Λ))
-    FΛ_inv_Ft = F * (Λc \ F')
-    I_minus_term = I - Ω * FΛ_inv_Ft
-    Ω̂ = symmetrise(A' * I_minus_term * Ω * A)
-    λ̂ = A' * I_minus_term * m
+    W = I + Ω * Q
+    Ω̂ = symmetrise(A' * (W \ Ω) * A)
+    λ̂ = A' * (W \ m)
 
     if !isnothing(algo.jitter)
         Ω̂ = Ω̂ + algo.jitter * one(Ω̂)
@@ -237,4 +234,111 @@ function compute_marginal_predictive_likelihood(
     M = Γ' * (λ - Ω * μ)
     ζ = dot(μ, Ω * μ) - 2 * dot(λ, μ) - dot(M, Λc \ M)
     return -(logdet(Λc) + ζ) / 2
+end
+
+export SqrtBackwardInformationPredictor, SqrtInformationLikelihood
+
+"""
+    SqrtInformationLikelihood(B, r, logscale)
+
+Gaussian likelihood `exp(logscale - sum(abs2, B*z-r)/2)`. `B` may be rank deficient;
+this is a likelihood, not a normalized distribution on `z`. Square-root backward
+recursions retain its normalization constant, including constants from QR compression.
+"""
+struct SqrtInformationLikelihood{TB,TR,TC} <: AbstractLikelihood
+    B::TB
+    r::TR
+    logscale::TC
+end
+natural_params(l::SqrtInformationLikelihood) = (l.B' * l.r, symmetrise(l.B' * l.B))
+
+"""
+    SqrtBackwardInformationPredictor()
+
+Exact Gaussian backward likelihoods evaluated using QR and whitened residual factors.
+Unlike information-matrix subtraction, this preserves weak and strong information without
+cancellation. Explicit `CovarianceFactor`s support singular process noise. No covariance
+or precision repair is applied. Backward messages are used for trajectory updates and are
+not differentiated by the HMC parameter update.
+"""
+struct SqrtBackwardInformationPredictor <: AbstractBackwardPredictor end
+
+function _compress_residual(B, r, logscale)
+    n = size(B, 2)
+    # Padding ensures square output even when there are fewer observations than states.
+    M = vcat(hcat(B, r), zeros(eltype(B), n + 1, n + 1))
+    R = qr(M).R
+    return SqrtInformationLikelihood(
+        R[1:n, 1:n], R[1:n, n + 1], logscale - abs2(R[n + 1, n + 1]) / 2
+    )
+end
+function _compress_residual(B::StaticMatrix{M,N}, r::StaticVector, logscale) where {M,N}
+    T = promote_type(eltype(B), eltype(r))
+    R = qr(vcat(hcat(B, r), zero(SMatrix{N + 1,N + 1,T}))).R
+    return SqrtInformationLikelihood(
+        R[SOneTo(N), SOneTo(N)], R[SOneTo(N), N + 1], logscale - abs2(R[N + 1, N + 1]) / 2
+    )
+end
+
+# Upper root of I + C*C', obtained without forming a potentially ill-conditioned Gram matrix.
+function _identity_plus_root(C)
+    return _correct_cholesky_sign(
+        qr(vcat(Matrix{eltype(C)}(I, size(C, 1), size(C, 1)), C')).R
+    )
+end
+function _identity_plus_root(C::StaticMatrix{M,N,T}) where {M,N,T}
+    return _correct_cholesky_sign(qr(vcat(one(SMatrix{M,M,T}), C')).R)
+end
+
+function backward_initialise(
+    ::SqrtBackwardInformationPredictor, o::LinearGaussianObservation, y
+)
+    L = _covariance_root(o.R)
+    # Observation noise must be square and nonsingular for a normalized density.
+    size(L, 1) == size(L, 2) ||
+        throw(ArgumentError("observation noise factor must be square and nonsingular"))
+    B, r = L \ o.H, L \ (y - o.c)
+    logscale = -(length(y) * log(2π) + 2 * logabsdet(L)[1]) / 2
+    return _compress_residual(B, r, logscale)
+end
+function backward_predict(
+    ::SqrtBackwardInformationPredictor,
+    l::SqrtInformationLikelihood,
+    d::LinearGaussianDynamics,
+)
+    C = l.B * _covariance_root(d.Q)
+    U = UpperTriangular(_identity_plus_root(C))
+    B = U' \ (l.B * d.A)
+    r = U' \ (l.r - l.B * d.b)
+    logscale = l.logscale - sum(log, diag(U))
+    return _compress_residual(B, r, logscale)
+end
+function backward_update(
+    bp::SqrtBackwardInformationPredictor,
+    l::SqrtInformationLikelihood,
+    o::LinearGaussianObservation,
+    y,
+)
+    obs = backward_initialise(bp, o, y)
+    return _compress_residual(vcat(l.B, obs.B), vcat(l.r, obs.r), l.logscale + obs.logscale)
+end
+
+_forward_root(g::GaussianState) = _covariance_root(g.Σ)
+_forward_root(g::SqrtGaussianState) = g.U'
+"""
+    compute_marginal_predictive_likelihood(forward, backward::SqrtInformationLikelihood; include_constant=false)
+
+Gaussian overlap, omitting the suffix-common log normalization by default for accurate
+relative ancestor weights. Set `include_constant=true` for a normalized suffix likelihood.
+"""
+function compute_marginal_predictive_likelihood(
+    forward::Union{GaussianState,SqrtGaussianState},
+    l::SqrtInformationLikelihood;
+    include_constant::Bool=false,
+)
+    C = l.B * _forward_root(forward)
+    U = UpperTriangular(_identity_plus_root(C))
+    v = U' \ (l.r - l.B * forward.μ)
+    return (include_constant ? l.logscale : zero(l.logscale)) - sum(log, diag(U)) -
+           sum(abs2, v) / 2
 end

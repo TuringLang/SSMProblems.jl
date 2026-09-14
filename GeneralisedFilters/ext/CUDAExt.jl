@@ -2,7 +2,8 @@
 CUDA extension for GeneralisedFilters.
 
 This extension provides GPU-accelerated particle filtering operations:
-- GPU resampling methods (Multinomial, Systematic, Stratified) for CuVector weights
+- GPU resampling methods (Multinomial, Systematic, Stratified) for CuVector weights,
+  including their conditional variants for conditional SMC
 - Offspring/ancestor conversion kernels
 - ParallelParticleTree for GPU-based sparse particle storage
 """
@@ -40,11 +41,28 @@ function GeneralisedFilters.sample_ancestors(
     return as
 end
 
+# Multinomial resampling is exchangeable, so the reference may be placed in a fixed slot
+# with the remaining slots drawn by the ordinary rule.
+function GeneralisedFilters.conditional_sample_ancestors(
+    rng::AbstractRNG, ::Multinomial, weights::CuVector, ref_idx::Integer
+)
+    as = GeneralisedFilters.sample_ancestors(rng, Multinomial(), weights)
+    CUDA.@allowscalar as[1] = ref_idx
+    return as
+end
+
 function GeneralisedFilters.sample_ancestors(
     rng::AbstractRNG, ::Systematic, weights::CuVector, n::Int=length(weights)
 )
     offspring = sample_offspring(rng, Systematic(), weights, n)
     return offspring_to_ancestors(offspring)
+end
+
+function GeneralisedFilters.conditional_sample_ancestors(
+    rng::AbstractRNG, ::Systematic, weights::CuVector, ref_idx::Integer
+)
+    offspring, K = sample_conditional_offspring(rng, Systematic(), weights, ref_idx)
+    return offspring_to_ancestors(offspring; shift=K - 1)
 end
 
 # Following Code 8 of Murray et. al (2015)
@@ -61,11 +79,50 @@ function sample_offspring(
     return offspring
 end
 
+"""
+    _conditional_offset(rng, r, ref_idx, n) -> (u, K)
+
+Offset and reference slot for conditional systematic/stratified resampling, in the offset
+convention used by the offspring codes of Murray et al. (2015).
+
+Those codes compute `floor(r + u)`, which retains slot `m` for a particle whenever
+`u >= 1 - frac(r)`, whereas the stratified inverse-CDF form retains it when the offset is
+`<= frac(r)`. The two agree in distribution for a uniform offset, so the unconditional
+codes are unaffected, but the conditional offset must be complemented to land in the
+reference particle's own interval.
+"""
+function _conditional_offset(
+    rng::AbstractRNG, r::CuVector{WT}, ref_idx::Integer, n::Int
+) where {WT}
+    u, K = CUDA.@allowscalar GeneralisedFilters._reference_offset(rng, r, ref_idx, n)
+    return one(WT) - u, K
+end
+
+function sample_conditional_offspring(
+    rng::AbstractRNG, ::Systematic, weights::CuVector{WT}, ref_idx::Integer
+) where {WT}
+    n = length(weights)
+    _validate_resampling_count(weights, n)
+    W = cumsum(weights)
+    Wn = CUDA.@allowscalar W[end]
+    r = n * W / Wn
+    u0, K = _conditional_offset(rng, r, ref_idx, n)
+    offspring = min.(n, floor.(Int, r .+ u0))
+    return offspring, K
+end
+
 function GeneralisedFilters.sample_ancestors(
     rng::AbstractRNG, ::Stratified, weights::CuVector, n::Int=length(weights)
 )
     offspring = sample_offspring(rng, Stratified(), weights, n)
     return offspring_to_ancestors(offspring)
+end
+
+function GeneralisedFilters.conditional_sample_ancestors(
+    rng::AbstractRNG, ::Stratified, weights::CuVector, ref_idx::Integer
+)
+    offspring, K = sample_conditional_offspring(rng, Stratified(), weights, ref_idx)
+    return offspring_to_ancestors(offspring; shift=K - 1)
 end
 
 # Following Code 7 of Murray et. al (2015)
@@ -83,17 +140,26 @@ function sample_offspring(
     return offspring
 end
 
-## GPU SCALAR INDEXING FOR REF_STATE #######################################################
-
-# Override _set_ref_index! for CuVector to use @allowscalar
-function GeneralisedFilters._set_ref_index!(idxs::CuVector)
-    CUDA.@allowscalar idxs[1] = 1
-    return nothing
+function sample_conditional_offspring(
+    rng::AbstractRNG, ::Stratified, weights::CuVector{WT}, ref_idx::Integer
+) where {WT}
+    n = length(weights)
+    _validate_resampling_count(weights, n)
+    u = _device_uniforms(rng, WT, n)
+    W = cumsum(weights)
+    Wn = CUDA.@allowscalar W[end]
+    r = n * W / Wn
+    # Every slot but the reference's keeps its own independent offset.
+    u_ref, K = _conditional_offset(rng, r, ref_idx, n)
+    CUDA.@allowscalar u[K] = u_ref
+    k = min.(n, floor.(Int, r .+ 1))
+    offspring = min.(n, floor.(Int, r .+ u[k]))
+    return offspring, K
 end
 
 ## ANCESTOR-OFFSPRING CONVERSION ###########################################################
 
-function _offspring_to_ancestors_kernel!(ancestors, offspring, N)
+function _offspring_to_ancestors_kernel!(ancestors, offspring, N, total, shift)
     index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     stride = blockDim().x * gridDim().x
 
@@ -101,14 +167,23 @@ function _offspring_to_ancestors_kernel!(ancestors, offspring, N)
         start = i == 1 ? 0 : offspring[i - 1]
         finish = offspring[i]
         for j in (start + 1):finish
-            ancestors[j] = i
+            # Cyclical shift, which brings the reference slot to the front for conditional
+            # resampling. `shift < total`, so one wrap-around is enough.
+            slot = j - shift
+            ancestors[slot < 1 ? slot + total : slot] = i
         end
     end
 
     return nothing
 end
 
-function offspring_to_ancestors(offspring::CuVector{<:Integer})
+"""
+    offspring_to_ancestors(offspring; shift=0)
+
+Expand a cumulative offspring vector into ancestor indices, cyclically shifted so that slot
+`shift + 1` of the scheme's own ordering comes first.
+"""
+function offspring_to_ancestors(offspring::CuVector{<:Integer}; shift::Integer=0)
     N = length(offspring)
     total = N == 0 ? 0 : CUDA.@allowscalar offspring[end]
     ancestors = similar(offspring, total)
@@ -118,7 +193,7 @@ function offspring_to_ancestors(offspring::CuVector{<:Integer})
     blocks = ceil(Int, N / threads)
 
     @cuda threads = threads blocks = blocks _offspring_to_ancestors_kernel!(
-        ancestors, offspring, N
+        ancestors, offspring, N, total, shift
     )
 
     return ancestors

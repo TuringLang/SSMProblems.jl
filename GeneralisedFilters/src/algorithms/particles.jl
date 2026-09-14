@@ -295,17 +295,40 @@ function step(
     observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
-    # Compute lookahead weights approximating log p(y_{t+1} | x_{t}^(i))
+    rs = _step_resampler(rng, model, algo, iter, state, observation)
+    state = maybe_resample(rng, rs, state; ref_state)
+    return move(rng, model, algo, iter, state, observation; ref_state)
+end
+
+# Auxiliary weights affect ancestor proposals, not the filtering target used by AS/BS.
+_refreshment_filter(algo::AbstractParticleFilter) = algo
+_refreshment_filter(algo::AuxiliaryParticleFilter) = _refreshment_filter(algo.pf)
+
+function _step_resampler(rng, model, algo::AbstractParticleFilter, iter, state, observation)
+    return resampler(algo)
+end
+
+function _step_resampler(
+    rng, model, algo::AuxiliaryParticleFilter, iter, state, observation
+)
     log_ηs = map(state.particles) do particle
         compute_logeta(
             rng, algo.weight_strategy, model, algo.pf, iter, particle.state, observation
         )
     end
+    return AuxiliaryResampler(resampler(algo), log_ηs)
+end
 
-    rs = AuxiliaryResampler(resampler(algo), log_ηs)
-    state = maybe_resample(rng, rs, state; ref_state)
-
-    return move(rng, model, algo.pf, iter, state, observation; ref_state)
+function move(
+    rng::AbstractRNG,
+    model::StateSpaceModel,
+    algo::AuxiliaryParticleFilter,
+    iter::Integer,
+    state,
+    observation;
+    kwargs...,
+)
+    return move(rng, model, algo.pf, iter, state, observation; kwargs...)
 end
 
 struct MeanPredictive <: PredictiveStatistic end

@@ -36,10 +36,10 @@ trajectory objective includes outer densities and marginalises inner states. Add
 priors once through the host inference system. ForwardDiff differentiates the generic primal;
 loading Mooncake enables the static-array Kalman reverse rule.
 
-For particle Gibbs, construct `ConditionalSMC(RBPF(BF(N; resampler=GeneralisedFilters.Multinomial()), KF()), AncestorSampling())` and use
+For particle Gibbs, construct `ConditionalSMC(RBPF(BF(N), KF()), AncestorSampling())` and use
 it through the standalone `ParticleGibbs` sampler or the Turing adapter. Conditional
-SMC currently requires multinomial resampling; exact RB backward methods require an
-unrepaired analytical filter. Ordinary particle filtering supports other resamplers.
+SMC requires a resampler with a conditional law (multinomial, systematic or stratified);
+exact RB backward methods require an unrepaired analytical filter.
 
 ## Documentation and migration
 

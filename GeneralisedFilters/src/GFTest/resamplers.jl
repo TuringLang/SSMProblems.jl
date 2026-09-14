@@ -24,6 +24,10 @@ function GeneralisedFilters.will_resample(
     return alt_resampler.resample_next
 end
 
+function GeneralisedFilters.supports_conditional(alt_resampler::AlternatingResampler)
+    return GeneralisedFilters.supports_conditional(alt_resampler.resampler)
+end
+
 function GeneralisedFilters.resample(
     rng::AbstractRNG,
     alt_resampler::AlternatingResampler,

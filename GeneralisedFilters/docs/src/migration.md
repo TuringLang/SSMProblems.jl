@@ -20,27 +20,47 @@ within 0.5. Older Julia and Turing interfaces are no longer supported.
 | Callback-based history collection | Explicit `initialise`/`step` loop or CSMC history storage |
 | Persistent RB reference beliefs | Outer-only `ReferenceTrajectory`; recompute inner beliefs each sweep |
 
-Conditional SMC requires `BF(N; resampler=Multinomial())` (or a guided filter with the
-same resampler). Systematic/stratified
-conditional resampling is rejected: pinning one unconditional draw does not implement their
-conditional laws. These resamplers remain available for ordinary particle filtering.
+Conditional SMC requires a resampler that implements a conditional law:
+`Multinomial()`, `Systematic()` and `Stratified()` all do, following Finke, Johansen, Lee
+& Murray, "Resampling in conditional SMC algorithms" (arXiv:2606.25603). `Metropolis()`
+and `Rejection()` are rejected, because that reference derives no index distribution for
+them; they remain available for ordinary particle filtering. Custom resamplers opt in by
+implementing `conditional_sample_ancestors` and `supports_conditional`.
 
-`AuxiliaryParticleFilter` supports conditional SMC with `NoRefreshment()` only. Its
-ancestor-sampling and backward-simulation integrations are not implemented and reject
-those combinations explicitly. Ancestor sampling on ordinary PF/RBPF resamples every
-step, independently of the configured ESS threshold.
+Conditioning is no longer applied by overwriting one index of an unconditional draw. That
+shortcut works for independent multinomial draws; it is not a valid general
+conditional law for dependent schemes.
+
+`AuxiliaryParticleFilter` supports `NoRefreshment()`, `AncestorSampling()` and
+`BackwardSimulation()`, including wrapped RBPFs. Lookahead weights affect ordinary ancestor
+selection; backward weights use the corrected filtering weights. A selected reference
+ancestor receives its own inverse-lookahead correction.
+
+Ancestor sampling now respects the ESS threshold. The implemented schedule refreshes the
+reference ancestor **at resampling events**; when population resampling is skipped, it keeps
+ancestors and accumulated filtering weights. This does not implement every-step ancestor
+refreshment alongside skipped population resampling. Conditional systematic/stratified
+resampling draws the entire offspring law conditional on the selected reference ancestor.
 
 RB ancestor sampling and backward simulation require an analytical backward predictor.
-They reject Kalman covariance repair, because the backward formulas describe the unrepaired
-model. Nonzero backward-predictor jitter is also rejected by exact RB backward methods.
-`NoRepair()` is the default. A repair also changes the computed likelihood and can
-introduce nondifferentiable thresholds; it is not a substitute for a valid covariance model.
+`KF()` and `SRKF()` now default to `SqrtBackwardInformationPredictor()`, which represents
+backward likelihoods as factored Gaussian residuals and uses QR and triangular solves.
+The explicit legacy `BackwardInformationPredictor()` remains available; its scalar
+precision-cancellation defect is fixed, but the factored predictor is recommended for
+ill-conditioned models.
 
-The default Gaussian backward predictor also factorises the process noise, observation
-noise and predictive state covariances, so those matrices must be positive definite.
-The forward Kalman likelihood can handle some singular inner covariances when its
-innovation covariance remains positive definite. Such models can use `NoRefreshment()`
-or provide a suitable custom analytical backward predictor.
+Use `SRKF()` for square-root forward filtering as well. `CovarianceFactor(F)` represents
+`F * F'` without adding noise; supplied prior and process factors may be rectangular or
+rank deficient. Ordinary covariance matrices still require Cholesky factorization on this
+route. Observation noise must be positive definite. A singular Gaussian does not acquire
+a full-dimensional `logpdf` merely because its filtering factors are supported.
+
+Exact RB AS/BS continue to reject filtering-state covariance repair and nonzero backward
+jitter: their analytical messages must match the forward likelihood. If regularization is
+needed, define it explicitly in the model's covariance atoms, consistently for filtering,
+refreshment, simulation and HMC. Square-root evaluation changes the numerical representation,
+not the statistical target. Adaptive clipping of a filtered covariance is a different
+operation and generally does not admit the same shared backward message.
 
 GPU resampling remains optional and needs CUDA hardware for execution. CPU release tests do
 not establish GPU runtime correctness. Automatic activity probing and reusable trajectory/AD

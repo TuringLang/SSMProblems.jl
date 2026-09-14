@@ -16,8 +16,16 @@ Julia 1.12.7 and the current Turing 0.46 / DynamicPPL 0.42 integration.
   marginalised trajectory objective and handles constrained parameters.
 - Support ForwardDiff and a Mooncake reverse rule for static-array Kalman likelihoods.
   Observation sensitivities and eigenvalue-clipping sensitivities are propagated.
-- Reject unsupported conditional systematic/stratified resampling and repaired-Kalman
-  backward sampling rather than apply mathematically incompatible backward weights.
+- Implement conditional multinomial/systematic/stratified resampling, conditioning the
+  entire offspring law on the chosen ancestor. AS respects ESS and refreshes ancestors
+  at resampling events.
+- Support auxiliary particle filters with ancestor sampling and backward simulation,
+  including Turing parameter updates for wrapped RBPFs.
+- Use QR-based square-root Gaussian backward messages by default; fix catastrophic
+  cancellation in the legacy information predictor. Explicit covariance factors support
+  rank-deficient prior/process noise with SRKF.
+- Reject filtering-state covariance repair with analytical backward sampling; explicit
+  model regularization must be shared by forward, backward and parameter updates.
 - Stabilise finite-state filtering and smoothing at extreme likelihoods and unreachable states.
 - Correct CUDA resampling sample counts, RNG handling and stored trajectory element types.
 - Replace callbacks with explicit filtering loops or CSMC history storage.

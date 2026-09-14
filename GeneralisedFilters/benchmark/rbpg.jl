@@ -2,6 +2,9 @@
 # julia --project=<environment> GeneralisedFilters/benchmark/rbpg.jl
 # Reports warm evaluation cost separately from gradient preparation. This is a
 # baseline measurement, not an allocation assertion or a full Turing Gibbs benchmark.
+# To compare the stable route including trajectory updates:
+# include("GeneralisedFilters/benchmark/rbpg.jl")
+# run_benchmarks(; analytical_filter=SRKF(), benchmark_refreshment=true)
 using GeneralisedFilters
 using StaticArrays
 using Random
@@ -26,7 +29,9 @@ function measure(label, f; repetitions=10)
     return nothing
 end
 
-function run_benchmarks(; horizon=100, particles=100)
+function run_benchmarks(;
+    horizon=100, particles=100, analytical_filter=KF(), benchmark_refreshment=false
+)
     rng = MersenneTwister(123)
     # Stable dynamics keep a long trajectory in a representative numeric range.
     outer_prior = GaussianPrior(SA[0.0], SMatrix{1,1}(0.5))
@@ -44,7 +49,7 @@ function run_benchmarks(; horizon=100, particles=100)
     model = build(θ)
     s0, ss, ys = simulate(rng, model, horizon)
     xs = ReferenceTrajectory(s0.x, getproperty.(ss, :x))
-    algo = RBPF(BF(particles), KF())
+    algo = RBPF(BF(particles), analytical_filter)
     particle = GeneralisedFilters.initialise_particle(rng, model.prior, algo, nothing)
     println(
         "Julia ",
@@ -73,7 +78,18 @@ function run_benchmarks(; horizon=100, particles=100)
         ),
     )
     measure("RBPF full trajectory", () -> GeneralisedFilters.filter(rng, model, algo, ys))
-    objective = θ -> trajectory_logdensity(build(θ), KF(), xs, ys)
+    objective = θ -> trajectory_logdensity(build(θ), analytical_filter, xs, ys)
+    println("Analytical filter: ", typeof(analytical_filter))
+    measure("Conditional trajectory log-density", () -> objective(θ))
+    if benchmark_refreshment
+        for strategy in (AncestorSampling(), BackwardSimulation())
+            sampler = ConditionalSMC(algo, strategy)
+            measure(
+                "$(typeof(strategy)) sweep",
+                () -> GeneralisedFilters._csmc_sample(rng, model, sampler, ys, xs),
+            )
+        end
+    end
     for backend in (AutoForwardDiff(), AutoMooncake(; config=nothing))
         preparation = @timed prepare_gradient(objective, backend, θ)
         println(
@@ -91,4 +107,6 @@ function run_benchmarks(; horizon=100, particles=100)
     end
 end
 
-run_benchmarks()
+if abspath(PROGRAM_FILE) == @__FILE__
+    run_benchmarks()
+end
