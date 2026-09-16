@@ -109,14 +109,14 @@ function backward_gradient_update(
     # NLL local derivatives (standard convention with 1/2 factor)
     S_inv_z = S \ z
     ∂l_∂μ_pred = -H' * S_inv_z
-    ∂l_∂Σ_pred = 0.5 * (H' * (S \ H) - H' * (S_inv_z * S_inv_z') * H)
+    ∂l_∂Σ_pred = (H' * (S \ H) - H' * (S_inv_z * S_inv_z') * H) / 2
 
     # Equation 8: ∂L/∂μ_pred = (I-KH)' * ∂L/∂μ_filt + ∂l/∂μ_pred
     ∂μ_pred = I_KH' * ∂μ_filt + ∂l_∂μ_pred
 
     # Equation 9: ∂L/∂Σ_pred = (I-KH)' * [∂L/∂Σ_filt + cross_term] * (I-KH) + ∂l/∂Σ_pred
     R_inv_z = R \ z
-    cross_term = 0.5 * (∂μ_filt * (R_inv_z' * H) + (H' * R_inv_z) * ∂μ_filt')
+    cross_term = (∂μ_filt * (R_inv_z' * H) + (H' * R_inv_z) * ∂μ_filt') / 2
     inner = ∂Σ_filt + cross_term
     ∂Σ_pred = I_KH' * inner * I_KH + ∂l_∂Σ_pred
 
@@ -171,10 +171,10 @@ function gradient_R(
     S_inv_z = S \ z
 
     # Local NLL derivative: ∂l/∂R = 0.5 * (S⁻¹ - S⁻¹zz'S⁻¹)
-    ∂l_∂R = 0.5 * (inv(S) - S_inv_z * S_inv_z')
+    ∂l_∂R = (inv(S) - S_inv_z * S_inv_z') / 2
 
     # Equation 14: ∂L/∂R = K'*∂L/∂Σ_filt*K - cross_term + ∂l/∂R
-    cross_term = 0.5 * (K' * ∂μ_filt * S_inv_z' + S_inv_z * ∂μ_filt' * K)
+    cross_term = (K' * ∂μ_filt * S_inv_z' + S_inv_z * ∂μ_filt' * K) / 2
     return K' * ∂Σ_filt * K - cross_term + ∂l_∂R
 end
 

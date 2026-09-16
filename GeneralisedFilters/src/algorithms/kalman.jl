@@ -14,7 +14,8 @@ end
 
 function _kalman_state(μ, Σ)
     state = MvNormal(μ, Σ)
-    return MvNormal(state.μ, _state_covariance(state.μ, state.Σ))
+    μ = state.μ isa StaticVector ? state.μ : convert(Vector{eltype(state.μ)}, state.μ)
+    return MvNormal(μ, _state_covariance(μ, state.Σ))
 end
 
 _information_state(λ, Ω) = InformationLikelihood(λ, _state_covariance(λ, Ω))
