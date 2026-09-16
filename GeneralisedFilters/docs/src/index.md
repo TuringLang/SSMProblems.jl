@@ -15,4 +15,4 @@ the optimised reverse rule applies to immutable floating-point static arrays. Mo
 must preserve the numeric types supplied by AD.
 
 See [Models and conditioning](models/linear-gaussian.md),
-[Particle Gibbs and Turing](inference.md), and [Migrating to 0.6](migration.md).
+[Particle Gibbs and Turing](inference.md), and [Migrating to 0.5](migration.md).

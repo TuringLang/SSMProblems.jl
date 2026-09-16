@@ -45,10 +45,10 @@ exact RB backward methods require an unrepaired analytical filter.
 
 - [Models and conditioning](GeneralisedFilters/docs/src/models/linear-gaussian.md)
 - [Particle Gibbs and Turing](GeneralisedFilters/docs/src/inference.md)
-- [Migrating from 0.5](GeneralisedFilters/docs/src/migration.md)
+- [Migrating from 0.4.2](GeneralisedFilters/docs/src/migration.md)
 - [Release notes](GeneralisedFilters/CHANGELOG.md)
 
-Version 0.6 replaces the `calc_*`/keyword-conditioning interface with whole-component
+Version 0.5 replaces the `calc_*`/keyword-conditioning interface with whole-component
 closures, plain Gaussian states, and explicit conditional models. Reference trajectories
 contain outer states only; rebuild conditional views after changing a trajectory or θ.
 

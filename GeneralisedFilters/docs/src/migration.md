@@ -1,7 +1,7 @@
-# Migrating to 0.6
+# Migrating from 0.4.2 to 0.5
 
-Version 0.6 changes the model interface and therefore is not a backwards-compatible patch
-release of 0.5.
+Version 0.5 changes the model interface and therefore is not a backwards-compatible patch
+release of 0.4.2.
 
 This research release targets current stable dependencies: Julia 1.12.7 or later,
 Turing 0.47 or 0.48, DynamicPPL 0.42.11 or later within 0.42, and Mooncake 0.5.53 or later
@@ -10,7 +10,7 @@ within 0.5. Older Julia and Turing interfaces are no longer supported.
 GeneralisedFilters re-exports the process types, model container and generics from
 SSMProblems 0.7. Models defined against that interface can be used directly with
 GeneralisedFilters; atoms, conditioning and inference remain in GeneralisedFilters.
-SSMProblems 0.7 must be released before GeneralisedFilters 0.6. For a checkout of this
+SSMProblems 0.7 must be released before GeneralisedFilters 0.5. For a checkout of this
 repository, develop both packages together:
 
 ```julia
@@ -22,7 +22,7 @@ Turing 0.46 is excluded because its AdvancedPS dependency requires SSMProblems 0
 Turing 0.47 and 0.48 do not have that dependency. This does not provide compatibility
 with AdvancedPS's separate state-space model integration.
 
-| Previous interface | 0.6 interface |
+| 0.4.2 interface | 0.5 interface |
 |:--|:--|
 | SSMProblems process types/generics with keyword threading | Unparameterised process abstracts and shared generics from SSMProblems 0.7, without keywords |
 | `HomogeneousGaussianPrior` | `GaussianPrior(μ, Σ)` |

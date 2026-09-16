@@ -12,7 +12,7 @@ makedocs(;
         "Overview" => "index.md",
         "Models and conditioning" => "models/linear-gaussian.md",
         "Particle Gibbs and Turing" => "inference.md",
-        "Migrating to 0.6" => "migration.md",
+        "Migrating to 0.5" => "migration.md",
         "API" => "api.md",
     ],
     checkdocs=:exports,
