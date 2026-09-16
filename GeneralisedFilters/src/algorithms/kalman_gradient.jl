@@ -16,10 +16,11 @@ function _kalman_update_cached(state::MvNormal, H, c, R, y, jitter)
     K = _compute_kalman_gain(Σ_pred, H, S)
     I_KH, Σ_filt_raw = _compute_joseph_update(Σ_pred, K, H, R)
     μ_filt = μ_pred + K * z
-    Σ_filt = _apply_jitter_and_wrap(Σ_filt_raw, jitter)
+    state = _kalman_state(μ_filt, _apply_jitter_and_wrap(Σ_filt_raw, jitter))
+    μ_filt, Σ_filt = params(state)
     ll = logpdf(MvNormal(z, S), zero(z))
     cache = KalmanGradientCache(μ_pred, Σ_pred, μ_filt, Σ_filt, S, K, z, I_KH)
-    return MvNormal(μ_filt, Σ_filt), ll, cache
+    return state, ll, cache
 end
 
 function kalman_update(state, obs_params, observation, jitter)

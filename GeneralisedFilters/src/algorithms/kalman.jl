@@ -1,5 +1,22 @@
 import PDMats: PDMat, X_A_Xt, Xt_A_X, X_invA_Xt, Xt_invA_X
-import LinearAlgebra: Symmetric
+import LinearAlgebra: Symmetric, Cholesky
+
+_covariance_type(::AbstractVector{T}) where {T} = Matrix{T}
+_covariance_type(::StaticVector{N,T}) where {N,T} = SMatrix{N,N,T,N * N}
+
+# Internal covariance storage follows the state vector, independently of parameter storage.
+function _state_covariance(μ, Σ::AbstractPDMat)
+    M = _covariance_type(μ)
+    A = Σ isa PDMat ? Σ.mat : Σ
+    return PDMat(convert(M, A), convert(Cholesky{eltype(μ),M}, cholesky(Σ)))
+end
+
+function _kalman_state(μ, Σ)
+    state = MvNormal(μ, Σ)
+    return MvNormal(state.μ, _state_covariance(state.μ, state.Σ))
+end
+
+_information_state(λ, Ω) = InformationLikelihood(λ, _state_covariance(λ, Ω))
 
 export KalmanFilter, KF, KalmanSmoother, KS
 export BackwardInformationPredictor
@@ -22,7 +39,7 @@ KF() = KalmanFilter()
 
 function initialise(rng::AbstractRNG, prior::GaussianPrior, filter::KalmanFilter; kwargs...)
     μ0, Σ0 = calc_initial(prior; kwargs...)
-    return MvNormal(μ0, Σ0)
+    return _kalman_state(μ0, Σ0)
 end
 
 function predict(
@@ -45,7 +62,7 @@ function kalman_predict(state, dyn_params)
 
     μ̂ = A * μ + b
     Σ̂ = X_A_Xt(Σ, A) + Q
-    return MvNormal(μ̂, Σ̂)
+    return _kalman_state(μ̂, Σ̂)
 end
 
 _compute_innovation(μ, H, c, y) = y - H * μ - c
@@ -123,7 +140,7 @@ function backward_smooth(
     # Force symmetry and wrap in PDMat
     Σ_smooth = PDMat(Symmetric(Σ_smooth))
 
-    return MvNormal(μ_smooth, Σ_smooth)
+    return _kalman_state(μ_smooth, Σ_smooth)
 end
 
 mutable struct StateCallback <: AbstractCallback
@@ -282,7 +299,7 @@ function backward_initialise(
     end
     Ω = PDMat(Symmetric(Ω))
 
-    return InformationLikelihood(λ, Ω)
+    return _information_state(λ, Ω)
 end
 
 """
@@ -319,7 +336,7 @@ function backward_predict(
     end
     Ω̂ = PDMat(Symmetric(Ω̂))
 
-    return InformationLikelihood(λ̂, Ω̂)
+    return _information_state(λ̂, Ω̂)
 end
 
 """
@@ -342,7 +359,7 @@ function backward_update(
     λ̂ = λ + H' * R_inv * (y - c)
     Ω̂ = PDMat(Ω + Xt_A_X(R_inv, H))
 
-    return InformationLikelihood(λ̂, Ω̂)
+    return _information_state(λ̂, Ω̂)
 end
 
 ## TWO-FILTER SMOOTHING ####################################################################
@@ -366,5 +383,5 @@ function two_filter_smooth(filtered::MvNormal, backward_lik::InformationLikeliho
     Σ_smooth = inv(Ω_smooth)
     μ_smooth = Σ_smooth * λ_smooth
 
-    return MvNormal(μ_smooth, Σ_smooth)
+    return _kalman_state(μ_smooth, Σ_smooth)
 end

@@ -25,9 +25,9 @@ function ChainRulesCore.rrule(
     T = length(ys)
 
     # Forward pass with caching
-    state = MvNormal(μ0, Σ0)
-    μ_prevs = Vector{typeof(μ0)}(undef, T)
-    Σ_prevs = Vector{typeof(Σ0)}(undef, T)
+    state = _kalman_state(μ0, Σ0)
+    μ_prevs = Vector{typeof(state.μ)}(undef, T)
+    Σ_prevs = Vector{typeof(state.Σ)}(undef, T)
     ll = zero(eltype(μ0))
 
     # Compute first cache to get concrete type, then allocate typed vector
