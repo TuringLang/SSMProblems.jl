@@ -1,5 +1,32 @@
 """Unit tests for Kalman filter and smoother algorithms."""
 
+@testitem "Kalman covariance storage" begin
+    using GeneralisedFilters
+    using LinearAlgebra
+    using PDMats
+    using StaticArrays
+
+    for T in (Float32, Float64)
+        A = T[2 0.5; 0.5 1]
+        for μ in (zeros(T, 2), zero(SVector{2,T})),
+            B in (A, SMatrix{2,2}(A), SizedMatrix{2,2}(A)),
+            uplo in (:U, :L)
+
+            Σ = PDMat(Symmetric(B, uplo))
+            result = GeneralisedFilters._state_covariance(μ, Σ)
+            M = μ isa StaticVector ? SMatrix{2,2,T,4} : Matrix{T}
+            @test result.mat isa M
+            @test result.chol.factors isa M
+            @test result.mat ≈ A
+            @test Matrix(result.chol) ≈ A
+            @test result.chol.uplo == Σ.chol.uplo
+            if Σ.chol.factors isa M
+                @test result.chol.factors === Σ.chol.factors
+            end
+        end
+    end
+end
+
 ## Forward Filtering ########################################################################
 
 @testitem "Kalman filter" begin
