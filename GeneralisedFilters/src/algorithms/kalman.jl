@@ -8,7 +8,8 @@ _covariance_type(::StaticVector{N,T}) where {N,T} = SMatrix{N,N,T,N * N}
 function _state_covariance(μ, Σ::AbstractPDMat)
     M = _covariance_type(μ)
     A = Σ isa PDMat ? Σ.mat : Σ
-    return PDMat(convert(M, A), convert(Cholesky{eltype(μ),M}, cholesky(Σ)))
+    C = cholesky(Σ)
+    return PDMat(convert(M, A), Cholesky(convert(M, C.factors), C.uplo, C.info))
 end
 
 function _kalman_state(μ, Σ)
