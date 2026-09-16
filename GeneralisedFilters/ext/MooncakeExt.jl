@@ -15,6 +15,7 @@ using GeneralisedFilters:
     GeneralisedFilters,
     kf_loglikelihood,
     kalman_predict,
+    _kalman_state,
     _kalman_update_cached,
     gradient_c,
     gradient_H,
@@ -25,9 +26,9 @@ using GeneralisedFilters:
     backward_gradient_update,
     backward_gradient_predict
 
-using Distributions: MvNormal, params
+using Distributions: params
 using PDMats: AbstractPDMat, PDMat, PDiagMat
-using LinearAlgebra: diag
+using LinearAlgebra: diag, Diagonal, Symmetric, triu, tril
 
 using Mooncake: Mooncake, @is_primitive, CoDual, primal, tangent
 using Mooncake: NoFData, NoRData, RData, Tangent, FData
@@ -50,6 +51,12 @@ this extracts the relevant components (e.g., diagonal).
 _project_to_param(grad, primal) = grad
 _project_to_param(grad::AbstractMatrix, ::PDMat) = grad
 _project_to_param(grad::AbstractMatrix, ::PDiagMat) = diag(grad)
+function _project_to_param(grad::AbstractMatrix, primal::PDMat{<:Real,<:Symmetric})
+    upper = primal.mat.uplo == 'U'
+    # Each stored off-diagonal entry controls both triangles of the covariance.
+    data = (upper ? triu(grad + grad', 1) : tril(grad + grad', -1)) + Diagonal(diag(grad))
+    return Symmetric(data, upper ? :U : :L)
+end
 
 # TODO: Add ScalMat support if needed:
 # _project_to_param(grad::AbstractMatrix, ::ScalMat) = sum(diag(grad))
@@ -158,8 +165,9 @@ Update mutable fdata in-place with the gradient. Used for standalone (non-vector
 """
 function _update_fdata!(fdata::FData, grad_matrix, primal_value::AbstractPDMat)
     grad_param = _project_to_param(grad_matrix, primal_value)
-    param_fdata = _param_tangent(fdata, primal_value)
-    primal_to_tangent!!(param_fdata, grad_param)
+    param_value = _get_param_value(primal_value)
+    grad_tangent = primal_to_tangent!!(zero_tangent(param_value), grad_param)
+    increment!!(_param_tangent(fdata, primal_value), Mooncake.fdata(grad_tangent))
     return nothing
 end
 
@@ -204,9 +212,9 @@ function Mooncake.rrule!!(
     n = length(ys_p)
 
     # Forward pass with caching
-    state = MvNormal(μ0_p, Σ0_p)
-    μ_prevs = Vector{typeof(μ0_p)}(undef, n)
-    Σ_prevs = Vector{typeof(Σ0_p)}(undef, n)
+    state = _kalman_state(μ0_p, Σ0_p)
+    μ_prevs = Vector{typeof(state.μ)}(undef, n)
+    Σ_prevs = Vector{typeof(state.Σ)}(undef, n)
     ll = zero(eltype(μ0_p))
 
     # First step to get concrete cache type

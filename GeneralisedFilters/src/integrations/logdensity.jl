@@ -148,7 +148,7 @@ Total log-likelihood: log p(y₁:T) = Σ_t log p(yₜ | y₁:ₜ₋₁)
 """
 function kf_loglikelihood(μ0, Σ0, As, bs, Qs, Hs, cs, Rs, ys, jitter=nothing)
     T = length(ys)
-    state = MvNormal(μ0, Σ0)
+    state = _kalman_state(μ0, Σ0)
     ll = zero(eltype(μ0))
 
     for t in 1:T
