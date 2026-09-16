@@ -1,92 +1,18 @@
+# The process abstracts, the `distribution`/`simulate`/`logdensity` generics and the
+# `StateSpaceModel` container come from SSMProblems. They are re-exported so that
+# `using GeneralisedFilters` remains self-sufficient, and so that loading both packages
+# does not produce ambiguous bindings.
+using SSMProblems: SSMProblems, StatePrior, LatentDynamics, ObservationProcess
+using SSMProblems: simulate_from_dist
+# `import` rather than `using`: these are extended by this package — the generics
+# throughout, and `StateSpaceModel` by the hierarchical shorthand constructor.
+import SSMProblems: StateSpaceModel, distribution, simulate, logdensity
+
 export StatePrior, LatentDynamics, ObservationProcess
 export StateSpaceModel
 export distribution, simulate, logdensity, simulate_from_dist
 export TimeVaryingDynamics, TimeVaryingObservation
 export DistributionPrior, DistributionDynamics, DistributionObservation
-
-"""
-    StatePrior
-
-Initial state distribution of a state-space model. A concrete subtype should implement
-`simulate` and/or `logdensity`, or supply a `distribution(prior)` method from which both
-are derived. Which methods are required depends on the inference algorithm.
-"""
-abstract type StatePrior end
-
-"""
-    LatentDynamics
-
-Transition dynamics of a state-space model. A concrete subtype should implement `simulate`
-and/or `logdensity`, or supply a `distribution(dyn, t, x)` method from which both are
-derived. Which methods are required depends on the inference algorithm (e.g. a bootstrap
-filter needs only `simulate`, a guided proposal also needs `logdensity`).
-"""
-abstract type LatentDynamics end
-
-"""
-    ObservationProcess
-
-Emission process of a state-space model. A concrete subtype should implement `logdensity`
-(and optionally `simulate` for forward simulation), or supply a `distribution(obs, t, x)`
-method from which both are derived.
-"""
-abstract type ObservationProcess end
-
-"""
-    distribution(prior::StatePrior)
-    distribution(dyn::LatentDynamics, t::Integer, x)
-    distribution(obs::ObservationProcess, t::Integer, x)
-
-Return the distribution associated with a model component. Implementing this method derives
-`simulate` and `logdensity` for free; components may instead implement those directly when
-no tractable distribution object is available.
-"""
-function distribution end
-
-"""
-    simulate_from_dist(rng::AbstractRNG, d)
-
-Draw a sample from a distribution object. Defaults to `rand(rng, d)`; specialise it to
-return static arrays or otherwise control the sample type.
-"""
-simulate_from_dist(rng::AbstractRNG, d) = rand(rng, d)
-
-# Preserve static-array types when sampling from an MvNormal with a static mean.
-function simulate_from_dist(rng::AbstractRNG, d::MvNormal{T,S,SVector{D,T}}) where {T,S,D}
-    z = @SVector randn(rng, T, D)
-    return mean(d) + cholesky(cov(d)).L * z
-end
-
-function simulate end
-function logdensity end
-
-simulate(rng::AbstractRNG, prior::StatePrior) = simulate_from_dist(rng, distribution(prior))
-function simulate(rng::AbstractRNG, dyn::LatentDynamics, t::Integer, x)
-    return simulate_from_dist(rng, distribution(dyn, t, x))
-end
-function simulate(rng::AbstractRNG, obs::ObservationProcess, t::Integer, x)
-    return simulate_from_dist(rng, distribution(obs, t, x))
-end
-
-logdensity(prior::StatePrior, x0) = logpdf(distribution(prior), x0)
-function logdensity(dyn::LatentDynamics, t::Integer, x_prev, x_new)
-    return logpdf(distribution(dyn, t, x_prev), x_new)
-end
-function logdensity(obs::ObservationProcess, t::Integer, x, y)
-    return logpdf(distribution(obs, t, x), y)
-end
-
-"""
-    StateSpaceModel(prior, dyn, obs)
-
-A state-space model composed of an initial state prior, latent dynamics, and an observation
-process.
-"""
-struct StateSpaceModel{P<:StatePrior,D<:LatentDynamics,O<:ObservationProcess}
-    prior::P
-    dyn::D
-    obs::O
-end
 
 ## CONDITIONING ############################################################################
 
@@ -169,24 +95,3 @@ end
 distribution(p::DistributionPrior) = p.dist
 distribution(d::DistributionDynamics, t::Integer, x) = d.f(t, x)
 distribution(o::DistributionObservation, t::Integer, x) = o.f(t, x)
-
-## FORWARD SIMULATION ######################################################################
-
-"""
-    simulate([rng,] model::StateSpaceModel, T::Integer)
-
-Simulate a trajectory of length `T`, returning `(x0, xs, ys)` where `x0` is the initial
-state, `xs` the states at times `1:T`, and `ys` the observations at times `1:T`.
-"""
-function simulate(rng::AbstractRNG, model::StateSpaceModel, T::Integer)
-    T >= 0 || throw(ArgumentError("simulation length must be nonnegative"))
-    x0 = simulate(rng, model.prior)
-    T == 0 && return (x0, typeof(x0)[], Any[])
-    xs = fill(simulate(rng, model.dyn, 1, x0), T)
-    for t in 2:T
-        xs[t] = simulate(rng, model.dyn, t, xs[t - 1])
-    end
-    ys = map(t -> simulate(rng, model.obs, t, xs[t]), 1:T)
-    return x0, xs, ys
-end
-simulate(model::StateSpaceModel, T::Integer) = simulate(default_rng(), model, T)

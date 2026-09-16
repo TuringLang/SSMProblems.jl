@@ -10,9 +10,13 @@ In the `julia` REPL:
 
 ## Documentation
 
-`SSMProblems` defines a generic interface for _state space models_ (SSMs). Its
-main objective is to provide a consistent interface for filtering and smoothing
-algorithms to interact with.
+`SSMProblems` defines a minimal interface for _state space models_ (SSMs). It owns only
+the substrate that filtering and smoothing algorithms agree on: three process abstract
+types, the `distribution`/`simulate`/`logdensity` generics, and a plain model container.
+Inference packages such as
+[GeneralisedFilters](https://github.com/TuringLang/GeneralisedFilters.jl) build their
+algorithms, parameter types and conditioning mechanisms on top of it, so a model written
+against this interface can be handed to any of them.
 
 Consider a standard (Markovian) state-space model from[^Murray]:
 ![state space model](images/state_space_model.png)
@@ -49,67 +53,66 @@ We can consider a state space model as being made up of two components:
 
 Through this lens, we see that the distributions ``f_0``, ``f`` fully describe the latent Markov chain, whereas ``g`` describes the observation process.
 
-A user of `SSMProblems` may define these three distributions directly.
-Alternatively, they can define a subset of methods for sampling and evaluating
-log-densities of the distributions, depending on the requirements of the
-filtering/smoothing algorithms they intend to use.
+A user of `SSMProblems` may define these three distributions directly. Alternatively, they
+can define a subset of methods for sampling and evaluating log-densities of the
+distributions, depending on the requirements of the filtering/smoothing algorithms they
+intend to use.
 
 Using the first approach, we can define a simple linear state space model as follows:
 
 ```julia
 using Distributions
+using Random
 using SSMProblems
+
+struct SimplePrior <: StatePrior end
+
+SSMProblems.distribution(::SimplePrior) = Normal(0.0, 1.0)
 
 struct SimpleLatentDynamics <: LatentDynamics end
 
-function distribution(rng::AbstractRNG, dyn::SimpleLatentDynamics; kwargs...)
-    return Normal(0.0, 1.0)
-end
-
-function distribution(rng::AbstractRNG, dyn::SimpleLatentDynamics, step::Int, state::Float64; kwargs...)
-    return Normal(state, 0.1)
-end
+SSMProblems.distribution(::SimpleLatentDynamics, step::Int, state) = Normal(state, 0.1)
 
 struct SimpleObservationProcess <: ObservationProcess end
 
-function distribution(
-    obs::SimpleObservationPRocess, step::Int, state::Float64, observation::Float64; kwargs...
-)
-    return Normal(state, 0.5)
-end
+SSMProblems.distribution(::SimpleObservationProcess, step::Int, state) = Normal(state, 0.5)
 
 # Construct an SSM from the components
-dyn = SimpleLatentDynamics()
-obs = SimpleObservationProcess()
-model = StateSpaceModel(dyn, obs)
+model = StateSpaceModel(
+    SimplePrior(), SimpleLatentDynamics(), SimpleObservationProcess()
+)
+
+# Forward simulate a trajectory of length 10
+x0, xs, ys = simulate(model, 10)
 ```
 
 There are a few things to note here:
 
-- Two methods must be defined for the `LatentDynamics`, one containing
-  `step`/`state` arguments and used for transitioning, and one without these,
-  used for initialisation.
-- Every function should accept keyword arguments. This is key feature of
-  `SSMProblems` that allows it to flexibly represent more exotic models without
-  any performance penalty. You can read more about it [here](kwargs.md).
-- If your latent dynamics and observation process cannot be represented as a
-  `Distribution` object, you may implement specific methods for sampling and
-  log-density evaluation as documented below.
+- The prior takes no `step`/`state` arguments; the dynamics and observation process take
+  both.
+- No method takes keyword arguments. Anything a component depends on — parameters,
+  controls, exogenous inputs — is stored in the component itself and indexed by `step`.
+  Building components per step is the job of the inference package, which can then express
+  the dependence in whatever way suits its algorithms and its automatic differentiation.
+- If your latent dynamics or observation process cannot be represented as a `Distribution`
+  object, implement `simulate` and/or `logdensity` directly instead, as documented below.
 
-These distribution definitions are used to define `simulate` and `logdensity`
-methods for the latent dynamics and observation process. Package users can then interact with the state space model through these functions.
+These distribution definitions are used to derive the `simulate` and `logdensity` methods
+for each component. Package users then interact with the state space model through those
+functions.
 
-For example, a bootstrap filter targeting the filtering distribution ``p(x_t | y_{0:t})`` using `N` particles would roughly follow:
+For example, a bootstrap filter targeting the filtering distribution ``p(x_t | y_{0:t})``
+using `N` particles would roughly follow:
 
 ```julia
 dyn, obs = model.dyn, model.obs
 
-for (i, observation) in enumerate(observations)
+for (t, observation) in enumerate(observations)
     idx = resample(rng, log_weights)
     particles = particles[idx]
     for i in 1:N
-        particles[i] = simulate(rng, dyn, i, particles[i])
-        log_weights[i] += logdensity(obs, i, particles[i], observation)
+        particles[i] = simulate(rng, dyn, t, particles[i])
+        log_weights[i] += logdensity(obs, t, particles[i], observation)
     end
 end
 ```

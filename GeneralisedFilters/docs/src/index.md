@@ -7,7 +7,8 @@ conditional marginal likelihood using ForwardDiff or Mooncake.
 
 Install with `import Pkg; Pkg.add("GeneralisedFilters")`. Load `Mooncake` to enable the
 handwritten reverse rule, or `Turing` for the Gibbs integration. These packages are optional.
-The package defines its own model interface; importing SSMProblems is no longer required.
+The model interface comes from SSMProblems, whose process types and generics are
+re-exported here, so importing it separately is not required.
 
 Small, fixed-dimensional states can use StaticArrays. Ordinary arrays remain supported;
 the optimised reverse rule applies to immutable floating-point static arrays. Model builders

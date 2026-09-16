@@ -26,7 +26,7 @@ jobs:
         pkg:
           - name: GeneralisedFilters
             dir: './GeneralisedFilters'
-            additional_paths: ""
+            additional_paths: "./SSMProblems"
           - name: SSMProblems
             dir: './SSMProblems'
             additional_paths: ""
@@ -42,7 +42,10 @@ jobs:
           julia --project=${{ matrix.pkg.dir }}/docs/ --color=yes -e '
           using Pkg;
           Pkg.Registry.update();
-          Pkg.develop(PackageSpec(path="${{ matrix.pkg.dir }}"));
+          paths = ["${{ matrix.pkg.dir }}"];
+          extra = "${{ matrix.pkg.additional_paths }}";
+          isempty(extra) || push!(paths, extra);
+          Pkg.develop([PackageSpec(; path) for path in paths]);
           Pkg.instantiate();'
       - name: Build and deploy
         uses: TuringLang/actions/DocsDocumenter@main

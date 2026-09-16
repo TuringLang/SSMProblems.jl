@@ -30,13 +30,16 @@ jobs:
         pkg:
           - name: SSMProblems
             dir: './SSMProblems'
+            local_dep: ''
           - name: GeneralisedFilters
             dir: './GeneralisedFilters'
+            local_dep: './SSMProblems'
         exclude:
           - version: 'lts'
             pkg:
               name: GeneralisedFilters
               dir: './GeneralisedFilters'
+              local_dep: './SSMProblems'
 
     steps:
       - uses: actions/checkout@v4
@@ -55,6 +58,8 @@ jobs:
           julia --project=${{ matrix.pkg.dir }}/ --color=yes -e '
           using Pkg;
           Pkg.Registry.update();
+          path = "${{ matrix.pkg.local_dep }}";
+          isempty(path) || Pkg.develop(PackageSpec(; path));
           Pkg.instantiate();'
 
       - name: Run tests
@@ -98,6 +103,7 @@ jobs:
           julia --project=GeneralisedFilters --color=yes -e '
             using Pkg;
             Pkg.Registry.update();
+            Pkg.develop(PackageSpec(path="SSMProblems"));
             Pkg.instantiate();'
 
       - name: Check CUDA extension loading

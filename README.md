@@ -1,9 +1,9 @@
 # GeneralisedFilters.jl
 
 Composable state-space filtering and smoothing, with Rao–Blackwellised particle Gibbs and
-HMC parameter updates. GeneralisedFilters defines its own model interface and integrates
-with Turing.jl. The neighbouring `SSMProblems/` package is retained independently; it is no
-longer a GeneralisedFilters dependency.
+HMC parameter updates. The model interface comes from the neighbouring `SSMProblems/`
+package, which owns the process types and generics; GeneralisedFilters adds parameter
+atoms, conditioning and the algorithms, and integrates with Turing.jl.
 
 ## Conditional marginalisation
 
@@ -52,5 +52,12 @@ Version 0.6 replaces the `calc_*`/keyword-conditioning interface with whole-comp
 closures, plain Gaussian states, and explicit conditional models. Reference trajectories
 contain outer states only; rebuild conditional views after changing a trajectory or θ.
 
-Run package tests with `julia --project=GeneralisedFilters -e 'using Pkg; Pkg.test()'`.
+From the repository root, develop the shared dependency before running package tests:
+
+```sh
+julia --project=GeneralisedFilters -e 'using Pkg; Pkg.develop(path="SSMProblems"); Pkg.test()'
+```
+
+The package split requires SSMProblems 0.7 and Turing 0.47 or 0.48; see the migration
+notes for compatibility and release order.
 CPU tests include the AD and Turing integrations. GPU runtime tests require CUDA hardware.

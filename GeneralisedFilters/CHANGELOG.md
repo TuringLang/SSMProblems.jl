@@ -3,10 +3,10 @@
 ## 0.6.0
 
 This release changes the model interface and requires migration from 0.5. It targets
-Julia 1.12.7 and the current Turing 0.46 / DynamicPPL 0.42 integration.
+Julia 1.12.7 and the Turing 0.47–0.48 / DynamicPPL 0.42 integration.
 
 - Define models with Gaussian/discrete atoms and conditioning closures. GeneralisedFilters
-  owns the process interface; SSMProblems and PDMats are no longer runtime dependencies.
+  builds on the shared process interface in SSMProblems 0.7; PDMats is no longer a runtime dependency.
 - Use `condition_inner` to expose a hierarchical model's conditional inner SSM. One
   analytical likelihood evaluator serves both ordinary and conditional models.
 - Share inner component resolution between simulation, densities and Rao–Blackwellised
