@@ -24,7 +24,6 @@ using GeneralisedFilters:
     backward_gradient_update,
     backward_gradient_predict
 
-using Distributions: params
 using PDMats: PDMat, PDiagMat, ScalMat
 using LinearAlgebra: diag, Diagonal, Symmetric, Hermitian, triu, tril, tr
 using StaticArrays: StaticArray, SVector
@@ -116,7 +115,10 @@ function Mooncake.rrule!!(
     # Forward pass with caching
     state = _kalman_state(μ0_p, Σ0_p)
     μ_prevs = Vector{typeof(state.μ)}(undef, n)
-    Σ_prevs = Vector{typeof(state.Σ)}(undef, n)
+    # The state switches between dense and static storage when the prior and the dynamics
+    # disagree on it, and `Cholesky` has no conversion between the two before Julia 1.12.
+    # Only `∂Σ_pred * A * Σ_prev` reads this, so store the bare matrix.
+    Σ_prevs = Vector{typeof(state.Σ.mat)}(undef, n)
     ll = zero(eltype(μ0_p))
 
     if n == 0
@@ -127,7 +129,7 @@ function Mooncake.rrule!!(
     end
 
     # First step to get concrete cache type
-    μ_prevs[1], Σ_prevs[1] = params(state)
+    μ_prevs[1], Σ_prevs[1] = state.μ, state.Σ.mat
     state = kalman_predict(state, (As_p[1], bs_p[1], Qs_p[1]))
     state, ll_inc, first_cache = _kalman_update_cached(
         state, Hs_p[1], cs_p[1], Rs_p[1], ys_p[1], jitter_p
@@ -137,7 +139,7 @@ function Mooncake.rrule!!(
     caches[1] = first_cache
 
     for t in 2:n
-        μ_prevs[t], Σ_prevs[t] = params(state)
+        μ_prevs[t], Σ_prevs[t] = state.μ, state.Σ.mat
         state = kalman_predict(state, (As_p[t], bs_p[t], Qs_p[t]))
         state, ll_inc, caches[t] = _kalman_update_cached(
             state, Hs_p[t], cs_p[t], Rs_p[t], ys_p[t], jitter_p
