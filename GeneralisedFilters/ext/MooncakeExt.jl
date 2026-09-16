@@ -35,10 +35,10 @@ using Mooncake: zero_tangent, zero_rdata, rdata, primal_to_tangent!!, increment!
 
 _tangent_array(t, p::Array) = t
 function _tangent_array(t, p::SubArray)
-    view(_tangent_array(t.fields.parent, parent(p)), parentindices(p)...)
+    return view(_tangent_array(t.fields.parent, parent(p)), parentindices(p)...)
 end
 function _tangent_array(t, p)
-    throw(ArgumentError("Unsupported Mooncake array representation: $(typeof(p))"))
+    return throw(ArgumentError("Unsupported Mooncake array representation: $(typeof(p))"))
 end
 
 function _accumulate!!(t, grad, p::AbstractArray)
