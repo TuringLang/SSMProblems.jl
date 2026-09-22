@@ -1,63 +1,54 @@
 # GeneralisedFilters.jl
 
-Composable state-space filtering and smoothing, with Rao–Blackwellised particle Gibbs and
-HMC parameter updates. The model interface comes from the neighbouring `SSMProblems/`
-package, which owns the process types and generics; GeneralisedFilters adds parameter
-atoms, conditioning and the algorithms, and integrates with Turing.jl.
+GeneralisedFilters is a flexible, modular framework for state-space inference in Julia.
+State-space models describe an unobserved process that evolves over time and is measured
+through noisy observations. The package provides filtering to estimate the current state,
+smoothing to infer past states, and particle Gibbs to jointly infer state trajectories and
+model parameters.
 
-## Conditional marginalisation
+Models and inference algorithms are defined separately. You can combine prior, transition
+and observation models, then choose an analytical filter, a particle filter, or a combination
+of the two. Custom processes and algorithms can extend the same interface.
+
+## Rao–Blackwellised inference
+
+Many models have a part that is difficult to integrate out and another part that becomes
+linear and Gaussian once the first is known. For example, a model of inflation might have
+an unknown trend and changing volatility. Given the volatility trajectory, a Kalman filter
+can integrate out the trend.
+
+A Rao–Blackwellised particle filter uses this structure: particles sample the volatility,
+while each particle carries a conditional Gaussian distribution for the trend. This reduces
+the number of states that must be sampled and can give more accurate estimates for a given
+number of particles.
+
+This combination is a particular focus of GeneralisedFilters. A particle filter and an
+analytical filter can be composed directly:
 
 ```julia
-using GeneralisedFilters, StaticArrays, Distributions
+using GeneralisedFilters
 
-function build(θ)
-    Q = exp(θ[1]) * SMatrix{1,1}(1.0)
-    inner_dyn((; t, x_prev, x_new)) = LinearGaussianDynamics(
-        SMatrix{1,1}(0.8), SA[0.1x_prev + 0.2x_new], Q,
-    )
-    StateSpaceModel(
-        DistributionPrior(Normal()),
-        DistributionDynamics((t, x) -> Normal(0.9x, 0.3)),
-        GaussianPrior(SA[0.0], SMatrix{1,1}(1.0)),
-        inner_dyn,
-        LinearGaussianObservation(SMatrix{1,1}(1.0), SA[0.0], SMatrix{1,1}(0.2)),
-    )
-end
-
-xs = ReferenceTrajectory(0.1, [0.2, -0.3, 0.4])
-ys = [SA[0.2], SA[-0.1], SA[0.3]]
-inner = condition_inner(build([-1.0]), xs)
-ll = marginal_loglikelihood(inner, KF(), ys)
-objective(θ) = trajectory_logdensity(build(θ), KF(), xs, ys)
+pf = RBPF(BF(100), KF())  # 100 outer particles, each with an inner Kalman filter
 ```
 
-The conditional view shares the same evaluator as an ordinary analytical SSM. The complete
-trajectory objective includes outer densities and marginalises inner states. Add parameter
-priors once through the host inference system. ForwardDiff differentiates the generic primal;
-loading Mooncake enables the static-array Kalman reverse rule.
+For joint state and parameter inference, particle Gibbs alternates trajectory updates with
+parameter updates. The Turing.jl integration lets you specify parameter priors in a Turing
+model and use HMC or NUTS for the parameter update. ForwardDiff and Mooncake provide forward
+and reverse mode differentiation of the likelihood after integrating out the Gaussian states.
+StaticArrays are supported for small, fixed-dimensional states.
 
-For particle Gibbs, construct `ConditionalSMC(RBPF(BF(N), KF()), AncestorSampling())` and use
-it through the standalone `ParticleGibbs` sampler or the Turing adapter. Conditional
-SMC requires a resampler with a conditional law (multinomial, systematic or stratified);
-exact RB backward methods require an unrepaired analytical filter.
+## Getting started
 
-## Documentation and migration
+The [documentation overview](GeneralisedFilters/docs/src/index.md) introduces the model
+and algorithm interface with a complete filtering example. From there:
 
-- [Models and conditioning](GeneralisedFilters/docs/src/models/linear-gaussian.md)
-- [Particle Gibbs and Turing](GeneralisedFilters/docs/src/inference.md)
-- [Migrating from 0.4.2](GeneralisedFilters/docs/src/migration.md)
-- [Release notes](GeneralisedFilters/CHANGELOG.md)
+- [Models and conditioning](GeneralisedFilters/docs/src/models/linear-gaussian.md) explains
+  how to define models and their Rao–Blackwellised structure.
+- [Particle Gibbs and Turing](GeneralisedFilters/docs/src/inference.md) covers joint inference
+  for trajectories and parameters.
+- The [trend inflation example](GeneralisedFilters/examples/trend-inflation/script.jl)
+  applies Rao–Blackwellised filtering to a model with stochastic volatility.
 
-Version 0.5 replaces the `calc_*`/keyword-conditioning interface with whole-component
-closures, plain Gaussian states, and explicit conditional models. Reference trajectories
-contain outer states only; rebuild conditional views after changing a trajectory or θ.
-
-From the repository root, develop the shared dependency before running package tests:
-
-```sh
-julia --project=GeneralisedFilters -e 'using Pkg; Pkg.develop(path="SSMProblems"); Pkg.test()'
-```
-
-The package split requires SSMProblems 0.7 and Turing 0.47–0.49; see the migration
-notes for compatibility and release order.
-CPU tests include the AD and Turing integrations. GPU runtime tests require CUDA hardware.
+This repository contains both GeneralisedFilters and SSMProblems, which supplies the shared
+state-space model interface. GeneralisedFilters re-exports that interface, so most users
+only need to load GeneralisedFilters.

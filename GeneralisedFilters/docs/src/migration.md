@@ -1,87 +1,100 @@
 # Migrating from 0.4.2 to 0.5
 
-Version 0.5 changes the model interface and therefore is not a backwards-compatible patch
-release of 0.4.2.
+Version 0.5 replaces the model interface used in 0.4.2. This guide describes the
+changes needed to update an existing model or inference script. If you are new to
+the package, start with the [model guide](models/linear-gaussian.md) instead.
 
-This research release targets current stable dependencies: Julia 1.12.7 or later,
-Turing 0.47–0.49, DynamicPPL 0.42.11 or later within 0.42, and Mooncake 0.5.53 or later
-within 0.5. Older Julia and Turing interfaces are no longer supported.
+## Dependencies
 
-GeneralisedFilters re-exports the process types, model container and generics from
-SSMProblems 0.7. Models defined against that interface can be used directly with
-GeneralisedFilters; atoms, conditioning and inference remain in GeneralisedFilters.
-SSMProblems 0.7 must be released before GeneralisedFilters 0.5. For a checkout of this
-repository, develop both packages together:
+GeneralisedFilters 0.5 requires Julia 1.12.7 or later and SSMProblems 0.7. Its Turing
+integration supports Turing 0.47–0.49 and DynamicPPL 0.42.11 or later within 0.42.
+Reverse-mode differentiation uses Mooncake 0.5.53 or later within 0.5.
 
-```julia
-using Pkg
-Pkg.develop([PackageSpec(path="SSMProblems"), PackageSpec(path="GeneralisedFilters")])
-```
+Turing 0.46 depends on SSMProblems 0.6 through AdvancedPS and cannot be used with
+this release. GeneralisedFilters provides its own particle Gibbs integration with
+Turing. Models written for AdvancedPS's state-space integration need to be adapted
+to this interface.
 
-Turing 0.46 is excluded because its AdvancedPS dependency requires SSMProblems 0.6.
-Turing 0.47–0.49 do not have that dependency. This does not provide compatibility
-with AdvancedPS's separate state-space model integration.
+## Model definitions
+
+GeneralisedFilters now re-exports the process types, model container and generic
+functions from SSMProblems 0.7. Define model processes using these shared types.
+GeneralisedFilters supplies the Gaussian model components, conditioning operations and
+inference algorithms.
 
 | 0.4.2 interface | 0.5 interface |
 |:--|:--|
-| SSMProblems process types/generics with keyword threading | Unparameterised process abstracts and shared generics from SSMProblems 0.7, without keywords |
+| Parameterised process types and methods with forwarded keywords | Unparameterised process types and methods without forwarded keywords |
 | `HomogeneousGaussianPrior` | `GaussianPrior(μ, Σ)` |
 | `HomogeneousLinearGaussianLatentDynamics` | `LinearGaussianDynamics(A, b, Q)` |
 | `HomogeneousLinearGaussianObservationProcess` | `LinearGaussianObservation(H, c, R)` |
-| Per-field `calc_*` methods and forwarded keywords | Closures returning whole atoms from an explicit context |
-| MvNormal/PDMat filtering states | `GaussianState`, with `mean`, `cov` and optional `MvNormal(state)` conversion |
+| Per-field `calc_*` methods | Closures that return a whole Gaussian component from a context |
+| `MvNormal`/`PDMat` filtering states | `GaussianState`, accessed with `mean` and `cov` |
 | Separate materialised Kalman likelihood | `marginal_loglikelihood(condition_inner(model, xs), KF(), ys)` |
 | `KalmanFilter(jitter=ε)` | `KalmanFilter(repair=Jitter(ε))` |
-| Callback-based history collection | Explicit `initialise`/`step` loop or CSMC history storage |
-| Persistent RB reference beliefs | Outer-only `ReferenceTrajectory`; recompute inner beliefs each sweep |
+| Callback-based history collection | An explicit `initialise`/`step` loop or CSMC history storage |
+| RB references containing stored Gaussian beliefs | Outer-only `ReferenceTrajectory` objects |
 
-Conditional SMC requires a resampler that implements a conditional law:
-`Multinomial()`, `Systematic()` and `Stratified()` all do, following Finke, Johansen, Lee
-& Murray, "Resampling in conditional SMC algorithms" (arXiv:2606.25603). `Metropolis()`
-and `Rejection()` are rejected, because that reference derives no index distribution for
-them; they remain available for ordinary particle filtering. Custom resamplers opt in by
-implementing `conditional_sample_ancestors` and `supports_conditional`.
+For time-varying or parameter-dependent Gaussian processes, move the construction
+of their matrices and offsets into a closure. The closure receives the time index
+and any outer states needed by that process. See the [model guide](models/linear-gaussian.md)
+for the context fields and examples.
 
-Conditioning is no longer applied by overwriting one index of an unconditional draw. That
-shortcut works for independent multinomial draws; it is not a valid general
-conditional law for dependent schemes.
+Filtering results use `GaussianState` rather than a distribution with a cached
+factorisation. Use `mean(state)` and `cov(state)` to inspect a result, or
+`MvNormal(state)` when a distribution is needed. Structured covariance parameters
+can still be supplied to Gaussian model components. The filter converts them to dense or
+static covariance storage for its calculations.
 
-`AuxiliaryParticleFilter` supports `NoRefreshment()`, `AncestorSampling()` and
-`BackwardSimulation()`, including wrapped RBPFs. Lookahead weights affect ordinary ancestor
-selection; backward weights use the corrected filtering weights. A selected reference
-ancestor receives its own inverse-lookahead correction.
+## Conditional SMC and particle Gibbs
 
-Ancestor sampling now respects the ESS threshold. The implemented schedule refreshes the
-reference ancestor **at resampling events**; when population resampling is skipped, it keeps
-ancestors and accumulated filtering weights. This does not implement every-step ancestor
-refreshment alongside skipped population resampling. Conditional systematic/stratified
-resampling draws the entire offspring law conditional on the selected reference ancestor.
+Store only the outer trajectory in an RB particle Gibbs reference. Inner Gaussian
+beliefs are recomputed on each sweep, so a reference remains usable after model
+parameters change.
 
-RB ancestor sampling and backward simulation require an analytical backward predictor.
-`KF()` and `SRKF()` now default to `SqrtBackwardInformationPredictor()`, which represents
-backward likelihoods as factored Gaussian residuals and uses QR and triangular solves.
-The explicit legacy `BackwardInformationPredictor()` remains available; its scalar
-precision-cancellation defect is fixed, but the factored predictor is recommended for
-ill-conditioned models.
+Conditional SMC now requires a resampler with an implemented conditional law.
+`Multinomial()`, `Systematic()` and `Stratified()` are supported. `Metropolis()`
+and `Rejection()` remain available for ordinary particle filtering, but cannot be
+used with conditional SMC. Custom resamplers must implement
+`conditional_sample_ancestors` and opt in through `supports_conditional`.
 
-Use `SRKF()` for square-root forward filtering as well. `CovarianceFactor(F)` represents
-`F * F'` without adding noise; supplied prior and process factors may be rectangular or
-rank deficient. Ordinary covariance matrices still require Cholesky factorization on this
-route. Observation noise must be positive definite. A singular Gaussian does not acquire
-a full-dimensional `logpdf` merely because its filtering factors are supported.
+The conditional sampler draws all offspring subject to the reference constraint.
+It no longer draws unconditionally and overwrites a single index, which does not
+produce the required law for dependent resampling schemes.
 
-Exact RB AS/BS continue to reject filtering-state covariance repair and nonzero backward
-jitter: their analytical messages must match the forward likelihood. If regularization is
-needed, define it explicitly in the model's covariance atoms, consistently for filtering,
-refreshment, simulation and HMC. Square-root evaluation changes the numerical representation,
-not the statistical target. Adaptive clipping of a filtered covariance is a different
-operation and generally does not admit the same shared backward message.
+Ancestor sampling respects the ESS threshold: it refreshes the reference ancestor
+when the particle population is resampled. When resampling is skipped, ancestors
+and accumulated filtering weights are retained. There is currently no option to
+refresh the reference ancestor at those skipped steps.
 
-GPU resampling remains optional and needs CUDA hardware for execution. CPU release tests do
-not establish GPU runtime correctness. Automatic activity probing and reusable trajectory/AD
-preparation are deferred until benchmark evidence motivates them.
+`AuxiliaryParticleFilter` now supports `NoRefreshment()`, `AncestorSampling()` and
+`BackwardSimulation()`, including when wrapping an RBPF. Lookahead weights are
+accounted for in ancestor selection and filtering-weight corrections.
 
-With this DynamicPPL version, Julia 1.12 source loading with `--compiled-modules=no`
-triggers an upstream generated-function binding error. Use Julia's normal precompiled
-package loading. The ordinary loading path is verified separately from that source-only
-failure; GeneralisedFilters does not override DynamicPPL internals to suppress it.
+## Covariance handling and backward sampling
+
+For RB ancestor sampling and backward simulation, `KF()` and `SRKF()` now use
+`SqrtBackwardInformationPredictor()` by default. It represents backward
+likelihoods as factored Gaussian residuals and evaluates them with QR
+factorisations and triangular solves. The older `BackwardInformationPredictor()`
+remains available, with its scalar precision-cancellation defect corrected.
+
+Use `SRKF()` if you also want square-root forward filtering.
+`CovarianceFactor(F)` supplies a covariance as `F * F'`. Prior and process factors
+may be rectangular or rank deficient. Covariances supplied as ordinary matrices
+still need a Cholesky factorisation on this route, and observation noise must be
+positive definite. Support for a singular filtering covariance does not imply
+support for a full-dimensional Gaussian `logpdf` of that state.
+
+Exact RB ancestor sampling and backward simulation reject filtering-state
+covariance repair and nonzero backward jitter. Their backward likelihoods must
+agree with the forward model. If regularisation is needed, include it in the
+model's covariance parameters so that filtering, backward sampling, simulation and
+parameter updates all use the same model. Square-root filtering can improve
+numerical stability without changing these covariances.
+
+## Loading packages
+
+Use Julia's normal precompiled package loading. With the supported DynamicPPL
+version, source loading under Julia 1.12 with `--compiled-modules=no` encounters
+an upstream generated-function binding error.

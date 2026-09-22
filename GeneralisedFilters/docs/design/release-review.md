@@ -83,3 +83,30 @@ guide and are not claims of future compatibility.
    registered installation enables that check.
 
 Release tags and registration are separate from preparing and pushing this branch.
+
+## Numerical-method development notes
+
+The following records possible future changes for maintainers. It does not describe
+additional user-facing options in this release.
+
+### Numerical failures
+
+This release propagates numerical exceptions from likelihood evaluation. It does not yet
+provide a policy that converts factorisation failures to `-Inf` or automatically rejects a
+CSMC sweep. Use consistent model regularisation and the square-root filter where needed.
+An opt-in policy treating numerical failures as zero likelihood is deferred; it will need
+to cover the parameter objective and trajectory update consistently.
+
+### Possible MH correction of approximate backward weights
+
+A future fallback could use approximate backward scores to propose an ancestor and apply
+an MH correction with the target scores of only the current and proposed ancestors. With
+a fixed number of proposals per step, suffix evaluation would cost `O(T^2)` in total,
+alongside `O(NT)` particle/proposal work. This is the MH-within-PGAS construction in
+[Lindsten et al., §6.1](https://jmlr.org/papers/volume15/lindsten14a/lindsten14a.pdf).
+It is not currently an implemented refreshment strategy.
+
+One global MH correction after an arbitrary approximate particle sweep is not automatically
+valid: it requires the reverse proposal law, or a proven reversible proposal kernel for an
+evaluable surrogate target. All target evaluations, including HMC, must remain consistent.
+An MH correction still requires a stable target likelihood evaluator.

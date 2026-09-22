@@ -66,10 +66,10 @@ makedocs(;
         "Overview" => "index.md",
         "Models and conditioning" => "models/linear-gaussian.md",
         "Particle Gibbs and Turing" => "inference.md",
-        "Migrating to 0.5" => "migration.md",
         "Examples" =>
             [joinpath("examples", f) for f in readdir(EXAMPLES_OUT) if endswith(f, ".md")],
-        "API" => "api.md",
+        "API reference" => "api.md",
+        "Upgrading from 0.4.2" => "migration.md",
     ],
     checkdocs=:exports,
 )
