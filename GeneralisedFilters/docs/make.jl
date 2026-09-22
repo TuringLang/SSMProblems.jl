@@ -56,7 +56,8 @@ DocMeta.setdocmeta!(
 makedocs(;
     sitename="GeneralisedFilters",
     modules=[GeneralisedFilters],
-    format=Documenter.HTML(),
+    # Executed tutorials embed plot output; retain the upstream example-page budget.
+    format=Documenter.HTML(; size_threshold=1000 * 2^11),
     pages=[
         "Overview" => "index.md",
         "Models and conditioning" => "models/linear-gaussian.md",
