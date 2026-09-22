@@ -1,9 +1,23 @@
 # Models and conditioning
 
-A model consists of a prior, dynamics, and observations. Linear-Gaussian atoms store plain
-arrays; filtering states store means and covariances in `GaussianState` without eager
-factorisation. Covariances must be symmetric, and innovation covariances must be positive
-definite for the Kalman likelihood.
+A model consists of a prior, dynamics, and observations. Linear-Gaussian atoms retain
+parameter arrays, including `Diagonal` and `Symmetric` covariance representations.
+Kalman filtering states store full covariances in `GaussianState` without eager
+factorisation: `SVector` means use `SMatrix` covariances, while dynamic means use ordinary
+vectors and matrices. Conversion respects the selected triangle of `Symmetric` and promotes
+the mean and covariance scalar types together, including ForwardDiff Dual values.
+Model parameter objects are preserved. Covariances must be symmetric, and innovation
+covariances must be positive definite for the Kalman likelihood.
+
+The smoother establishes history storage after the first update, allowing initial scalar
+promotion; subsequent states must retain that storage and scalar type. `marginal_loglikelihood`
+accumulates in at least Float64 precision, retaining wider and AD scalar types. This gives
+Float32/Float64 models a consistent scalar return type for empty and nonempty data without
+forcing Float32 filtering states or individual likelihood increments to Float64.
+
+Structured covariance gradients currently use ordinary AD through their parameterisation;
+only the existing plain-static Kalman step uses the handwritten numerical rule. Direct
+structured-gradient optimisations remain deferred.
 
 ```@example models
 using GeneralisedFilters, StaticArrays

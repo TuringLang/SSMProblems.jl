@@ -16,6 +16,10 @@ Julia 1.12.7 and the Turing 0.47–0.48 / DynamicPPL 0.42 integration.
   marginalised trajectory objective and handles constrained parameters.
 - Support ForwardDiff and a Mooncake reverse rule for static-array Kalman likelihoods.
   Observation sensitivities and eigenvalue-clipping sensitivities are propagated.
+- Normalise Kalman state storage independently of structured covariance parameters; fix
+  smoother histories after scalar promotion and reverse AD for shared structured covariances.
+  Kalman marginal likelihoods accumulate in at least Float64 precision to avoid a mixed
+  Float32/Float64 scalar return type for empty versus nonempty observations.
 - Implement conditional multinomial/systematic/stratified resampling, conditioning the
   entire offspring law on the chosen ancestor. AS respects ESS and refreshes ancestors
   at resampling events.

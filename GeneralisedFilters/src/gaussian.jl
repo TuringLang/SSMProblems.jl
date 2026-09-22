@@ -12,6 +12,18 @@ struct GaussianState{TM<:AbstractVector,TS<:AbstractMatrix}
     Σ::TS
 end
 
+# Computational Kalman states use full covariance storage, independently of the
+# parameter representation. Scalar promotion must include the covariance: its
+# entries may carry Dual values even when the mean is constant.
+function _kalman_state(μ::SVector{N}, Σ::AbstractMatrix) where {N}
+    T = promote_type(eltype(μ), eltype(Σ))
+    return GaussianState(SVector{N,T}(μ), SMatrix{N,N,T}(Σ))
+end
+function _kalman_state(μ::AbstractVector, Σ::AbstractMatrix)
+    T = promote_type(eltype(μ), eltype(Σ))
+    return GaussianState(convert(Vector{T}, μ), convert(Matrix{T}, Σ))
+end
+
 Statistics.mean(g::GaussianState) = g.μ
 Distributions.mode(g::GaussianState) = g.μ
 Statistics.cov(g::GaussianState) = g.Σ

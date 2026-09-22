@@ -15,7 +15,7 @@ KalmanFilter(; repair=NoRepair()) = KalmanFilter(repair)
 KF() = KalmanFilter()
 
 function initialise(::AbstractRNG, prior::GaussianPrior, ::KalmanFilter; ref_state=nothing)
-    return GaussianState(prior.μ0, prior.Σ0)
+    return _kalman_state(prior.μ0, prior.Σ0)
 end
 
 function predict(
@@ -40,20 +40,38 @@ end
 Marginal log-likelihood `log p(y_{1:T})` of a linear-Gaussian model, computed through the
 fused Kalman step. Conditional inner models returned by `condition_inner` use this same
 evaluator. Observations must be one-based and match the conditional trajectory horizon.
-An empty observation sequence has zero marginal log-likelihood.
+An empty observation sequence has zero marginal log-likelihood. The likelihood accumulator
+uses at least Float64 precision (while preserving wider and AD scalar types); filtering
+states and individual increments retain their own promoted scalar types.
 """
 function marginal_loglikelihood(
     model::StateSpaceModel, af::KalmanFilter, ys::AbstractVector
 )
     _validate_observations(model, ys)
     p = model.prior::GaussianPrior
-    state = GaussianState(p.μ0, p.Σ0)
-    ll = zero(eltype(p.μ0))
-    for t in eachindex(ys)
-        d = resolve(model.dyn, (; t))
-        o = resolve(model.obs, (; t))
-        state, inc = kalman_step(state, d, o, ys[t])
-        state = GaussianState(state.μ, repair_covariance(af.repair, state.Σ))
+    # A Float64 floor gives Float32/Float64 models the same scalar return type
+    # for empty and nonempty data. A Union{Float32,Float64} return prevents
+    # Mooncake from constructing the objective's scalar tangent.
+    ll = zero(promote_type(Float64, eltype(p.μ0), eltype(p.Σ0)))
+    isempty(ys) && return ll
+    state = _kalman_state(p.μ0, p.Σ0)
+    state, inc = _kalman_likelihood_step(model, af, state, 1, ys[1])
+    ll += inc
+    # The first observation/transition may promote the initial state's scalar type.
+    # Start a separately specialised loop with that promoted state and increment.
+    return _kalman_likelihood_tail(model, af, ys, state, ll)
+end
+
+function _kalman_likelihood_step(model, af, state, t, y)
+    d = resolve(model.dyn, (; t))
+    o = resolve(model.obs, (; t))
+    state, inc = kalman_step(state, d, o, y)
+    return _kalman_state(state.μ, repair_covariance(af.repair, state.Σ)), inc
+end
+
+Base.@noinline function _kalman_likelihood_tail(model, af, ys, state, ll)
+    for t in 2:length(ys)
+        state, inc = _kalman_likelihood_step(model, af, state, t, ys[t])
         ll += inc
     end
     return ll
@@ -78,16 +96,25 @@ function smooth(
     T = length(ys)
 
     state = initialise(rng, model.prior, kf)
-    GS = typeof(state)
-    predicted = Vector{GS}(undef, T)
-    filtered = Vector{GS}(undef, T)
+    pred = predict(rng, model.dyn, kf, 1, state, ys[1])
+    state, total_ll = update(model.obs, kf, 1, pred, ys[1])
+    # The first update may promote both precision and storage (e.g. a Float32
+    # prior with Float64 observations). Store its prediction in the promoted
+    # representation too, without changing its values or the model parameters.
+    first_pred = GaussianState(typeof(state.μ)(pred.μ), typeof(state.Σ)(pred.Σ))
+    predicted = Vector{typeof(first_pred)}(undef, T)
+    filtered = Vector{typeof(state)}(undef, T)
+    predicted[1], filtered[1] = first_pred, state
 
-    total_ll = zero(eltype(state))
-    for t in 1:T
+    for t in 2:T
         pred = predict(rng, model.dyn, kf, t, state, ys[t])
-        predicted[t] = pred
         state, ll = update(model.obs, kf, t, pred, ys[t])
-        filtered[t] = state
+        (typeof(pred) === eltype(predicted) && typeof(state) === eltype(filtered)) || throw(
+            ArgumentError(
+                "Kalman smoothing requires stable state storage and scalar types after the first update",
+            ),
+        )
+        predicted[t], filtered[t] = pred, state
         total_ll += ll
     end
 

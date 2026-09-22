@@ -19,6 +19,12 @@ using LinearAlgebra: Symmetric, Diagonal, eigen, triu, diag
 using StaticArrays: SVector, SMatrix
 import Mooncake as MC
 
+# Julia's small dense matrix kernels inspect a structural wrapper flag through
+# isuppercase. Its Unicode foreigncall has no numerical derivative; keep the
+# matrix arithmetic itself on Mooncake's ordinary derived path. In particular,
+# this preserves selected-triangle and shared-parent accumulation semantics.
+MC.@zero_derivative MC.DefaultCtx Tuple{typeof(isuppercase),LinearAlgebra.WrapperChar}
+
 ## TANGENT HELPERS #########################################################################
 
 # Rebuild a static array from the `data` field of its Mooncake tangent.
