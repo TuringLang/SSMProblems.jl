@@ -12,8 +12,8 @@ mkpath(EXAMPLES_OUT)
 # Install and precompile all packages
 # Workaround for https://github.com/JuliaLang/Pkg.jl/issues/2219
 examples = filter!(isdir, readdir(joinpath(@__DIR__, "..", "examples"); join=true))
-above = joinpath(@__DIR__, "..")
-let script = "using Pkg; Pkg.activate(ARGS[1]); Pkg.develop(path=\"$(above)\"); Pkg.instantiate()"
+# Keep the example's declared relative source path portable across checkouts.
+let script = "using Pkg; Pkg.activate(ARGS[1]); Pkg.resolve(); Pkg.instantiate()"
     for example in examples
         if !success(
             pipeline(
