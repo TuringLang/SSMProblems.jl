@@ -146,8 +146,16 @@ jointly, without forming those intervals explicitly.
 function _reference_offset(
     rng::AbstractRNG, vs::AbstractVector{WT}, ref_idx::Integer, n::Integer
 ) where {WT<:Real}
+    return _reference_offset(rand(rng, WT), vs, ref_idx, n)
+end
+
+# Separate the uniform draw from the law so device RNGs can supply a host scalar
+# without requiring Random's scalar sampling API.
+function _reference_offset(
+    u::Real, vs::AbstractVector{WT}, ref_idx::Integer, n::Integer
+) where {WT<:Real}
     lower = ref_idx == 1 ? zero(WT) : vs[ref_idx - 1]
-    v = lower + (vs[ref_idx] - lower) * rand(rng, WT)
+    v = lower + (vs[ref_idx] - lower) * u
     # `min` guards against weights that sum to marginally more than one.
     K = min(floor(Int, v) + 1, n)
     return v - (K - 1), K

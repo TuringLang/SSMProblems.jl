@@ -21,8 +21,9 @@ mean_path(paths, states) = _mean_path(identity, paths, states)
 function mean_path(
     paths::AbstractVector{<:AbstractVector{<:GeneralisedFilters.RBState}}, states
 )
-    zs = _mean_path(s -> getproperty.(getproperty.(s, :z), :μ), paths, states)
-    xs = _mean_path(s -> getproperty.(s, :x), paths, states)
+    trajectories = map(collect, paths)
+    zs = _mean_path(s -> getproperty.(getproperty.(s, :z), :μ), trajectories, states)
+    xs = _mean_path(s -> getproperty.(s, :x), trajectories, states)
     return zs, xs
 end
 
@@ -50,7 +51,7 @@ function plot_ucsv(trend, volatilities, fred_data)
         xtickformat=dateticks,
     )
 
-    lines!(fig[1:2, 1], vcat(0, fred_data.value...); color=:red, linestyle=:dash)
+    lines!(trend_ax, vcat(0, fred_data.value...); color=:red, linestyle=:dash)
     lines!(trend_ax, trend; color=:black)
 
     vol_ax_1 = Axis(fig[1, 2]; title="Volatility", xtickformat=dateticks)

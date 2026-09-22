@@ -21,6 +21,11 @@ using Random: AbstractRNG
 
 # Respect either a host RNG or a CUDA RNG; broadcasts below must use device arrays.
 _device_uniforms(rng::AbstractRNG, ::Type{T}, n::Int) where {T} = CuArray(rand(rng, T, n))
+_uniform_scalar(rng::AbstractRNG, ::Type{T}) where {T} = rand(rng, T)
+# CUDA 6 RNGs provide bulk draws but not Random's host scalar API.
+function _uniform_scalar(rng::CUDA.RNG, ::Type{T}) where {T}
+    return only(Array(_device_uniforms(rng, T, 1)))
+end
 
 function _validate_resampling_count(weights, n)
     n >= 0 || throw(ArgumentError("sample count must be nonnegative"))
@@ -73,7 +78,7 @@ function sample_offspring(
     n == 0 && return CUDA.zeros(Int, length(weights))
     W = cumsum(weights)
     Wn = CUDA.@allowscalar W[end]
-    u0 = CUDA.@allowscalar rand(rng, WT)
+    u0 = _uniform_scalar(rng, WT)
     r = n * W / Wn
     offspring = min.(n, floor.(Int, r .+ u0))
     return offspring
@@ -94,7 +99,8 @@ reference particle's own interval.
 function _conditional_offset(
     rng::AbstractRNG, r::CuVector{WT}, ref_idx::Integer, n::Int
 ) where {WT}
-    u, K = CUDA.@allowscalar GeneralisedFilters._reference_offset(rng, r, ref_idx, n)
+    uniform = _uniform_scalar(rng, WT)
+    u, K = CUDA.@allowscalar GeneralisedFilters._reference_offset(uniform, r, ref_idx, n)
     return one(WT) - u, K
 end
 
@@ -227,7 +233,7 @@ end
 
 ## GPU SPARSE PARTICLE STORAGE #############################################################
 
-mutable struct ParallelParticleTree{ST,M<:CUDA.AbstractMemory}
+mutable struct ParallelParticleTree{ST,M<:CUDA.DeviceMemory}
     states::ST
     parents::CuVector{Int64,M}
     leaves::CuVector{Int64,M}

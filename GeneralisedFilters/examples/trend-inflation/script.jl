@@ -4,6 +4,21 @@
 # Watson, 2016) using GeneralisedFilters to define a heirarchical model for use in Rao-
 # Blackwellised particle filtering.
 
+#nb # Install dependencies so the notebook runs on a fresh Colab runtime. GeneralisedFilters
+#nb # and SSMProblems are added from the repo's main branch (registered versions may be too
+#nb # old, e.g. lack ReferenceTrajectory):
+#nb import Pkg, Downloads
+#nb Downloads.download(
+#nb     "https://raw.githubusercontent.com/TuringLang/SSMProblems.jl/main/GeneralisedFilters/examples/trend-inflation/Project.toml",
+#nb     "Project.toml",
+#nb )
+#nb Pkg.activate(".")
+#nb Pkg.add([
+#nb     Pkg.PackageSpec(; url="https://github.com/TuringLang/SSMProblems.jl", subdir="GeneralisedFilters", rev="main"),
+#nb     Pkg.PackageSpec(; url="https://github.com/TuringLang/SSMProblems.jl", subdir="SSMProblems", rev="main"),
+#nb ])
+#nb Pkg.instantiate()
+
 using GeneralisedFilters
 using Distributions
 using Random
@@ -13,9 +28,16 @@ using StaticArrays
 
 const GF = GeneralisedFilters
 
-INFL_PATH = @__DIR__; #hide
-# INFL_PATH = joinpath(@__DIR__)
+INFL_PATH = joinpath(pkgdir(GeneralisedFilters), "examples", "trend-inflation"); #hide
 include(joinpath(INFL_PATH, "utilities.jl")); #hide
+#nb # Download the helper script and data so the notebook is self-contained on Colab:
+#nb using Downloads
+#nb INFL_URL = "https://raw.githubusercontent.com/TuringLang/SSMProblems.jl/main/GeneralisedFilters/examples/trend-inflation"
+#nb for f in ("utilities.jl", "data.csv")
+#nb     isfile(f) || Downloads.download("$(INFL_URL)/$(f)", f)
+#nb end
+#nb INFL_PATH = pwd()
+#nb include(joinpath(INFL_PATH, "utilities.jl"))
 
 # ## Model Definition
 

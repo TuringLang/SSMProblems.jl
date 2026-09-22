@@ -32,6 +32,7 @@ Julia 1.12.7 and the Turing 0.47–0.49 / DynamicPPL 0.42 integration.
   model regularization must be shared by forward, backward and parameter updates.
 - Stabilise finite-state filtering and smoothing at extreme likelihoods and unreachable states.
 - Correct CUDA resampling sample counts, RNG handling and stored trajectory element types.
+  Support CUDA 5 and 6, including bulk-only device RNGs; run GPU regressions in Buildkite.
 - Replace callbacks with explicit filtering loops or CSMC history storage.
 
 Automatic activity probing and persistent AD/trajectory workspaces remain deferred.
