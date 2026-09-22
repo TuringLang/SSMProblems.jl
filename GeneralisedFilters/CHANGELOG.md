@@ -3,7 +3,7 @@
 ## 0.5.0
 
 This release changes the model interface and requires migration from 0.4.2. It targets
-Julia 1.12.7 and the Turing 0.47–0.48 / DynamicPPL 0.42 integration.
+Julia 1.12.7 and the Turing 0.47–0.49 / DynamicPPL 0.42 integration.
 
 - Define models with Gaussian/discrete atoms and conditioning closures. GeneralisedFilters
   builds on the shared process interface in SSMProblems 0.7; PDMats is no longer a runtime dependency.

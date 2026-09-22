@@ -1,8 +1,8 @@
 # Structured covariance parameters and canonical filtering states
 
-Design review, 2026-09-22. This is a proposed implementation contract, not a description
-of functionality already implemented. It covers real-valued covariance-form Kalman AD;
-SRKF has a separate reverse path.
+Design review, 2026-09-22. The state-storage and AD correctness fixes below are implemented;
+the lazy structured-derivative optimisations remain a proposed implementation contract.
+This document covers real-valued covariance-form Kalman AD; SRKF has a separate reverse path.
 
 Implementation follow-up: canonical state storage, first-update history promotion, and
 mixed-precision likelihood handling are now implemented. Structured covariance AD keeps

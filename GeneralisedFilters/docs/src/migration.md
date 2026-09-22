@@ -4,7 +4,7 @@ Version 0.5 changes the model interface and therefore is not a backwards-compati
 release of 0.4.2.
 
 This research release targets current stable dependencies: Julia 1.12.7 or later,
-Turing 0.47 or 0.48, DynamicPPL 0.42.11 or later within 0.42, and Mooncake 0.5.53 or later
+Turing 0.47–0.49, DynamicPPL 0.42.11 or later within 0.42, and Mooncake 0.5.53 or later
 within 0.5. Older Julia and Turing interfaces are no longer supported.
 
 GeneralisedFilters re-exports the process types, model container and generics from
@@ -19,7 +19,7 @@ Pkg.develop([PackageSpec(path="SSMProblems"), PackageSpec(path="GeneralisedFilte
 ```
 
 Turing 0.46 is excluded because its AdvancedPS dependency requires SSMProblems 0.6.
-Turing 0.47 and 0.48 do not have that dependency. This does not provide compatibility
+Turing 0.47–0.49 do not have that dependency. This does not provide compatibility
 with AdvancedPS's separate state-space model integration.
 
 | 0.4.2 interface | 0.5 interface |

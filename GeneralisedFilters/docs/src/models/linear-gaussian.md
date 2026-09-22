@@ -1,10 +1,10 @@
 # Models and conditioning
 
 A model consists of a prior, dynamics, and observations. Linear-Gaussian atoms retain
-parameter arrays, including `Diagonal` and `Symmetric` covariance representations.
+parameter arrays, including `Diagonal`, `Symmetric` and real `Hermitian` covariance representations.
 Kalman filtering states store full covariances in `GaussianState` without eager
 factorisation: `SVector` means use `SMatrix` covariances, while dynamic means use ordinary
-vectors and matrices. Conversion respects the selected triangle of `Symmetric` and promotes
+vectors and matrices. Conversion respects the selected triangle of `Symmetric`/real `Hermitian` and promotes
 the mean and covariance scalar types together, including ForwardDiff Dual values.
 Model parameter objects are preserved. Covariances must be symmetric, and innovation
 covariances must be positive definite for the Kalman likelihood.

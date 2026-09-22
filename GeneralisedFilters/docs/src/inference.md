@@ -84,6 +84,14 @@ skipped steps. `BackwardSimulation()` performs its backward pass after the adapt
 sweep. APF lookahead weights guide ordinary ancestor selection without changing the target
 backward weights.
 
+## Numerical failures
+
+This release propagates numerical exceptions from likelihood evaluation. It does not yet
+provide a policy that converts factorisation failures to `-Inf` or automatically rejects a
+CSMC sweep. Use consistent model regularisation and the square-root filter where needed.
+An opt-in policy treating numerical failures as zero likelihood is deferred; it will need
+to cover the parameter objective and trajectory update consistently.
+
 ## Possible MH correction of approximate backward weights
 
 A future fallback could use approximate backward scores to propose an ancestor and apply

@@ -3,9 +3,11 @@ export GaussianState
 """
     GaussianState(μ, Σ)
 
-A multivariate Gaussian with mean `μ` and covariance `Σ`. `Σ` is stored as a plain matrix,
-symmetric by convention; positive-definiteness is not enforced. Serves both as the Kalman
-filtering state and as a lightweight distribution supporting `rand` and `logpdf`.
+A multivariate Gaussian with mean `μ` and covariance `Σ`, retaining the supplied array
+representations. Covariances are symmetric by convention; positive-definiteness is not
+enforced at construction. Kalman algorithms normalise their computational states to full
+matrix storage independently of model parameters. Supports `rand` and `logpdf` when the
+covariance meets the requirements of those operations.
 """
 struct GaussianState{TM<:AbstractVector,TS<:AbstractMatrix}
     μ::TM

@@ -34,6 +34,14 @@ jobs:
           - name: GeneralisedFilters
             dir: './GeneralisedFilters'
             local_dep: './SSMProblems'
+        include:
+          - version: '1.12.7' # Minimum supported GeneralisedFilters Julia version
+            os: ubuntu-latest
+            arch: x64
+            pkg:
+              name: GeneralisedFilters
+              dir: './GeneralisedFilters'
+              local_dep: './SSMProblems'
         exclude:
           - version: 'lts'
             pkg:

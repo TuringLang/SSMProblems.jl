@@ -358,7 +358,7 @@ end
 
 ## Joint NUTS: regular SSM with Mooncake #######################################################
 # Runs NUTS directly on (b, x₀:T) — no ParticleGibbs alternation. Mooncake handles the
-# in-place Cholesky inside logpdf(MvNormal, PDMat) that breaks Zygote on this path.
+# trajectory log-density including Gaussian factorisations.
 
 @testitem "Joint NUTS: regular SSM with Mooncake" tags = [:mooncake] begin
     using GeneralisedFilters
@@ -427,8 +427,8 @@ end
 end
 
 ## Joint NUTS: RB SSM with Mooncake ############################################################
-# Runs NUTS directly on (b, u₀:T) — no ParticleGibbs alternation. MooncakeExt provides a
-# native rrule!! for kf_loglikelihood that handles PDMat covariances correctly.
+# Runs NUTS directly on (b, u₀:T) — no ParticleGibbs alternation. Reverse AD traverses
+# conditional-model construction and the shared marginal likelihood evaluator.
 
 @testitem "Joint NUTS: RB SSM with Mooncake" tags = [:mooncake] begin
     using GeneralisedFilters

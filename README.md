@@ -58,6 +58,6 @@ From the repository root, develop the shared dependency before running package t
 julia --project=GeneralisedFilters -e 'using Pkg; Pkg.develop(path="SSMProblems"); Pkg.test()'
 ```
 
-The package split requires SSMProblems 0.7 and Turing 0.47 or 0.48; see the migration
+The package split requires SSMProblems 0.7 and Turing 0.47–0.49; see the migration
 notes for compatibility and release order.
 CPU tests include the AD and Turing integrations. GPU runtime tests require CUDA hardware.

@@ -43,7 +43,7 @@ y_t | x_t &\sim g(y_t | x_{t})
 and the joint law is,
 
 ```math
-p(x_{0:T}, y_{0:T}) = f_0(x_0) \prod_t g(y_t | x_t) f(x_t | x_{t-1}).
+p(x_{0:T}, y_{1:T}) = f_0(x_0) \prod_{t=1}^{T} g(y_t | x_t) f(x_t | x_{t-1}).
 ```
 
 We can consider a state space model as being made up of two components:

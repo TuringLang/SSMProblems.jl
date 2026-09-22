@@ -5,7 +5,8 @@ export create_homogeneous_linear_gaussian_model
 """
     GaussianPrior(μ0, Σ0)
 
-Gaussian initial-state prior with mean `μ0` and covariance `Σ0`, both plain arrays.
+Gaussian initial-state prior with mean `μ0` and covariance `Σ0`, retaining both array
+representations. Structured covariance matrices are supported.
 """
 struct GaussianPrior{TM<:AbstractVector,TS<:AbstractMatrix} <: StatePrior
     μ0::TM
@@ -15,8 +16,8 @@ end
 """
     LinearGaussianDynamics(A, b, Q)
 
-Linear-Gaussian transition `x_t = A x_{t-1} + b + w`, `w ~ N(0, Q)`, with plain-array
-parameters.
+Linear-Gaussian transition `x_t = A x_{t-1} + b + w`, `w ~ N(0, Q)`, with array
+parameters, retaining the representation of `Q`.
 """
 struct LinearGaussianDynamics{TA<:AbstractMatrix,Tb<:AbstractVector,TQ<:AbstractMatrix} <:
        LatentDynamics
@@ -28,7 +29,8 @@ end
 """
     LinearGaussianObservation(H, c, R)
 
-Linear-Gaussian emission `y_t = H x_t + c + v`, `v ~ N(0, R)`, with plain-array parameters.
+Linear-Gaussian emission `y_t = H x_t + c + v`, `v ~ N(0, R)`, with array parameters,
+retaining the representation of `R`.
 """
 struct LinearGaussianObservation{
     TH<:AbstractMatrix,Tc<:AbstractVector,TR<:AbstractMatrix
