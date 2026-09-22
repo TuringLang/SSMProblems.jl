@@ -16,11 +16,15 @@ mkpath(EXAMPLES_OUT)
 examples = filter(readdir(joinpath(@__DIR__, "..", "examples"); join=true)) do path
     return isdir(path) && isfile(joinpath(path, "script.jl"))
 end
-above = joinpath(@__DIR__, "..")
-ssmproblems_path = joinpath(above, "..", "SSMProblems")
-let script = "using Pkg; Pkg.activate(ARGS[1]); Pkg.develop(path=\"$(above)\"); Pkg.develop(path=\"$(ssmproblems_path)\"); Pkg.instantiate()"
+# Example projects declare relative [sources] for both local packages. Resolve
+# those directly: developing absolute paths here rewrites the tracked Project.toml.
+let script = "using Pkg; Pkg.activate(ARGS[1]); Pkg.resolve(); Pkg.instantiate()"
     for example in examples
-        if !success(`$(Base.julia_cmd()) -e $script $example`)
+        if !success(
+            pipeline(
+                `$(Base.julia_cmd()) -e $script $example`; stdout=stdout, stderr=stderr
+            ),
+        )
             error(
                 "project environment of example ",
                 basename(example),

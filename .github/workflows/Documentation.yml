@@ -53,6 +53,8 @@ jobs:
         run: julia --project=${{ matrix.pkg.dir }}/docs/ ${{ matrix.pkg.dir }}/docs/make.jl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check example projects remain portable
+        run: git diff --exit-code -- GeneralisedFilters/examples/*/Project.toml SSMProblems/examples/*/Project.toml
       - name: Insert navbar
         uses: TuringLang/actions/DocsNav@main
         with:
