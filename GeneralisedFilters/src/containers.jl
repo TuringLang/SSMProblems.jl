@@ -381,7 +381,7 @@ end
 function Base.push!(
     c::DenseParticleContainer{T0,T,WT}, states, weights, ancestors
 ) where {T0,T,WT}
-    throw(
+    return throw(
         ArgumentError(
             "Subsequent states/weights have type ($(eltype(states)), $(eltype(weights))) " *
             "but the container's subsequent state/weight types are ($T, $WT). If the " *
@@ -559,7 +559,7 @@ function Base.insert!(
 end
 
 function Base.insert!(tree::ParticleTree{T0,T}, states, ancestors) where {T0,T}
-    throw(
+    return throw(
         ArgumentError(
             "Subsequent particle states have type $(eltype(states)) but the tree's " *
             "subsequent-state type is $T. If the initial and subsequent types are " *

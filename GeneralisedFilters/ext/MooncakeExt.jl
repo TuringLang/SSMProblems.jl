@@ -49,9 +49,7 @@ end
 
 function _mc_state_tangent(state, g)
     return MC.build_tangent(
-        typeof(state),
-        _mc_static_tangent(g.μ0̄, state.μ),
-        _mc_static_tangent(g.Σ0̄, state.Σ),
+        typeof(state), _mc_static_tangent(g.μ0̄, state.μ), _mc_static_tangent(g.Σ0̄, state.Σ)
     )
 end
 
@@ -161,9 +159,7 @@ function MC.rrule!!(
         ε̄ = sum(diag(V' * Σ̄⁺ * V) .* (λ .<= clip.ε))
         clip_tangent = MC.build_tangent(typeof(clip), typeof(clip.ε)(ε̄))
         return (
-            MC.NoRData(),
-            MC.rdata(clip_tangent),
-            MC.rdata(_mc_static_tangent(Σ̄_storage, Σ)),
+            MC.NoRData(), MC.rdata(clip_tangent), MC.rdata(_mc_static_tangent(Σ̄_storage, Σ))
         )
     end
     return out_cd, repair_pullback!!

@@ -94,8 +94,9 @@ hierarchical operations and conditioned likelihoods use this component-level ope
 Longer history dependence requires an augmented outer state for consistent incremental
 reuse in particle filtering.
 """
-inner_dynamics(component, t::Integer, x_prev, x_new) =
-    resolve(component, (; t, x_prev, x_new))
+function inner_dynamics(component, t::Integer, x_prev, x_new)
+    return resolve(component, (; t, x_prev, x_new))
+end
 function inner_dynamics(d::HierarchicalDynamics, t::Integer, x_prev, x_new)
     return inner_dynamics(d.inner, t, x_prev, x_new)
 end

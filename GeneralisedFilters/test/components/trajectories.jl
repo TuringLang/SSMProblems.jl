@@ -2,10 +2,12 @@
     using GeneralisedFilters
     using StaticArrays
 
-    for r in (ReferenceTrajectory(10, [20, 30]),
-              ReferenceTrajectory(:initial, [20, 30]),
-              ReferenceTrajectory(SVector(0.0), [SVector(1.0), SVector(2.0)]),
-              ReferenceTrajectory(10, Int[]))
+    for r in (
+        ReferenceTrajectory(10, [20, 30]),
+        ReferenceTrajectory(:initial, [20, 30]),
+        ReferenceTrajectory(SVector(0.0), [SVector(1.0), SVector(2.0)]),
+        ReferenceTrajectory(10, Int[]),
+    )
         expected = [r.x0, r.xs...]
         @test size(r) == (length(expected),)
         @test firstindex(r) == 0

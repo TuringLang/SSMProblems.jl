@@ -27,8 +27,11 @@ SRKF() = SRKalmanFilter()
 
 Evaluate the deterministic square-root Kalman likelihood through the ordinary filter.
 """
-marginal_loglikelihood(model::StateSpaceModel, af::SRKalmanFilter, ys::AbstractVector) =
-    last(filter(model, af, ys))
+function marginal_loglikelihood(
+    model::StateSpaceModel, af::SRKalmanFilter, ys::AbstractVector
+)
+    return last(filter(model, af, ys))
+end
 
 function initialise(
     ::AbstractRNG, prior::GaussianPrior, ::SRKalmanFilter; ref_state=nothing

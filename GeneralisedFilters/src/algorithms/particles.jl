@@ -44,7 +44,7 @@ function initialise(
     N = num_particles(algo)
     particles = map(1:N) do i
         ref = !isnothing(ref_state) && i == 1 ? _trajectory_state(ref_state, 0) : nothing
-        initialise_particle(rng, prior, algo, ref)
+        return initialise_particle(rng, prior, algo, ref)
     end
 
     return ParticleDistribution(particles, TypelessZero())
@@ -66,7 +66,7 @@ function predict(
         else
             nothing
         end
-        predict_particle(rng, dyn, algo, iter, particle, observation, ref)
+        return predict_particle(rng, dyn, algo, iter, particle, observation, ref)
     end
 
     # Preserve the incoming weight normalizer; guided proposal corrections belong
@@ -86,7 +86,7 @@ function update(
     observation,
 )
     particles = map(state.particles) do particle
-        update_particle(obs, algo, iter, particle, observation)
+        return update_particle(obs, algo, iter, particle, observation)
     end
     new_state, ll_increment = marginalise!(state, particles)
 
@@ -312,7 +312,7 @@ function _step_resampler(
     rng, model, algo::AuxiliaryParticleFilter, iter, state, observation
 )
     log_ηs = map(state.particles) do particle
-        compute_logeta(
+        return compute_logeta(
             rng, algo.weight_strategy, model, algo.pf, iter, particle.state, observation
         )
     end

@@ -33,10 +33,7 @@ _Q_adjoint(::Val{true}, c, g) = _Q_adjoint(c, g)
 _Q_adjoint(::Val{false}, c, g) = zero(g.Σ̂̄)
 
 function _H_adjoint(c, g)
-    return -c.K' * g.ΔΣ * c.Σ̂ +
-           c.Si * g.K̄' * c.Σ̂ +
-           g.ŷ̄ * c.μ̂' +
-           (g.S̄ + g.S̄') * c.H * c.Σ̂
+    return -c.K' * g.ΔΣ * c.Σ̂ + c.Si * g.K̄' * c.Σ̂ + g.ŷ̄ * c.μ̂' + (g.S̄ + g.S̄') * c.H * c.Σ̂
 end
 _H_adjoint(::Val{true}, c, g) = _H_adjoint(c, g)
 _H_adjoint(::Val{false}, c, g) = zero(c.H)

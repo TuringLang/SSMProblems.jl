@@ -214,7 +214,7 @@ function construct_new_state(
 )
     new_particles = map(eachindex(state.particles)) do i
         particle = state.particles[idxs[i]]
-        resample_ancestor(particle, idxs[i], auxiliary_weights)
+        return resample_ancestor(particle, idxs[i], auxiliary_weights)
     end
 
     # calculate the baseline log-likelihood (not a fan, but it works...)
@@ -238,7 +238,7 @@ abstract type AbstractConditionalResampler <: AbstractResampler end
 
 function preserve_sample(state::ParticleDistribution)
     new_particles = map(eachindex(state.particles)) do i
-        set_ancestor(state.particles[i], i)
+        return set_ancestor(state.particles[i], i)
     end
     return ParticleDistribution(new_particles, state.ll_baseline)
 end

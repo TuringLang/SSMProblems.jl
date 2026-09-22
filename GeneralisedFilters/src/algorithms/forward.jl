@@ -44,8 +44,11 @@ end
 Evaluate a finite-state model's deterministic forward likelihood. Emission weights are
 normalised in log space; impossible observations return `-Inf`.
 """
-marginal_loglikelihood(model::StateSpaceModel, af::DiscreteFilter, ys::AbstractVector) =
-    last(filter(model, af, ys))
+function marginal_loglikelihood(
+    model::StateSpaceModel, af::DiscreteFilter, ys::AbstractVector
+)
+    return last(filter(model, af, ys))
+end
 
 ## BACKWARD DISCRETE PREDICTOR #############################################################
 
@@ -72,7 +75,7 @@ function backward_predict(
     P = d.P
     K = length(log_β_next)
     log_β = map(1:K) do i
-        logsumexp(log.(P[i, :]) .+ log_β_next)
+        return logsumexp(log.(P[i, :]) .+ log_β_next)
     end
     return DiscreteLikelihood(log_β)
 end
@@ -113,7 +116,7 @@ function _discrete_backward_step(
                 P[i, j] * smoothed_next[j] / predicted[j]
             end
         end
-        filtered[i] * correction
+        return filtered[i] * correction
     end
 end
 
