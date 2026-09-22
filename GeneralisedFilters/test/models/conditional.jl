@@ -105,8 +105,10 @@ end
     )
     ys0 = SVector{1,Float64}[]
     for initial_only in ([0.4], ReferenceTrajectory(0.4, Float64[]))
-        @test marginal_loglikelihood(condition_inner(model, initial_only), KF(), ys0) == 0
-        @test trajectory_logdensity(model, KF(), initial_only, ys0) ≈ logpdf(Normal(), 0.4)
+        @test_throws ArgumentError marginal_loglikelihood(
+            condition_inner(model, initial_only), KF(), ys0
+        )
+        @test_throws ArgumentError trajectory_logdensity(model, KF(), initial_only, ys0)
     end
 end
 

@@ -76,6 +76,8 @@
             @test eltype(smoothed.Σ) === Float64
             @test ll ≈ marginal_loglikelihood(model, KF(), obs)
         end
-        @test marginal_loglikelihood(model, KF(), Vector{typeof(v(ys[1]))}()) == 0
+        @test_throws ArgumentError marginal_loglikelihood(
+            model, KF(), Vector{typeof(v(ys[1]))}()
+        )
     end
 end

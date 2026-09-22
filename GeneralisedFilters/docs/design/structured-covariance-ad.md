@@ -9,8 +9,9 @@ mixed-precision likelihood handling are now implemented. Structured covariance A
 Mooncake's derived rules, with a narrow zero-derivative rule for Julia's non-numerical
 matrix-wrapper flag. No new handwritten structured covariance VJP is needed for these
 correctness fixes. Lazy contractions and first-step prior VJP optimisations remain proposals.
-The likelihood accumulator has a Float64 precision floor (preserving wider/AD types) to
-avoid the empty/nonempty Float32/Float64 return-type union rejected by Mooncake 0.5.57.
+The Kalman likelihood requires nonempty observations and initialises its accumulator from
+the first increment. This replaces the Float64 floor previously used to avoid an
+empty/nonempty return-type union in Mooncake, preserving the calculation's natural precision.
 
 ## Decision and corrections to the earlier proposal
 

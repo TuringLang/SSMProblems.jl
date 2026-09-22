@@ -92,7 +92,9 @@ end
     @test reverse ≈ ForwardDiff.gradient(objective, θ) rtol = 2e-6 atol = 1e-7
 end
 
-@testitem "AD: covariance-only promotion and empty Kalman likelihood" tags = [:mooncake] begin
+@testitem "AD: covariance-only promotion and natural likelihood precision" tags = [
+    :mooncake
+] begin
     using GeneralisedFilters
     using StaticArrays
     using LinearAlgebra
@@ -113,20 +115,18 @@ end
         )
         ys = fill(SA[0.4f0, -0.7f0], T)
         return marginal_loglikelihood(
-            model, KalmanFilter(; repair=Jitter(0.001exp(θ[1]))), ys
+            model, KalmanFilter(; repair=Jitter(oftype(θ[1], 0.001) * exp(θ[1]))), ys
         )
     end
-    for θ in (Float32[0.1, 0.2], [0.1, 0.2]), T in (0, 1, 3)
+    @test_throws ArgumentError objective(Float32[0.1, 0.2], 0)
+    @test_throws ArgumentError objective([0.1, 0.2], 0)
+    for θ in (Float32[0.1, 0.2], [0.1, 0.2]), T in (1, 3)
         f(x) = objective(x, T)
         cache = Mooncake.prepare_gradient_cache(f, θ)
         value, (_, reverse) = Mooncake.value_and_gradient!!(cache, f, θ)
-        @test value isa Float64
+        @test typeof(value) === eltype(θ)
         @test value ≈ f(θ)
         @test reverse ≈ ForwardDiff.gradient(f, θ) rtol = 2e-6 atol = 1e-7
-        if T == 0
-            @test value == 0
-            @test iszero(reverse)
-        end
     end
 end
 

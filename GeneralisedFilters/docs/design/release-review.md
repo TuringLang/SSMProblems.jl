@@ -32,7 +32,8 @@ corresponding defects without restoring that implementation.
 accumulation, observation sensitivities, input representations, jitter, empty sequences and
 precision. The new tests exercise repeated objectives, shared covariance/mean parameters,
 existing gradient contributions, cache reuse, views, static time containers, selected
-triangles of Symmetric/real Hermitian matrices, empty sequences and mixed precision.
+triangles of Symmetric/real Hermitian matrices, rejection of empty Kalman likelihood
+inputs, and mixed precision.
 They compare Mooncake with ForwardDiff; the structured covariance cases additionally
 compare with finite differences.
 

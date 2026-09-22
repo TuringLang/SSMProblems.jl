@@ -40,23 +40,18 @@ end
 Marginal log-likelihood `log p(y_{1:T})` of a linear-Gaussian model, computed through the
 fused Kalman step. Conditional inner models returned by `condition_inner` use this same
 evaluator. Observations must be one-based and match the conditional trajectory horizon.
-An empty observation sequence has zero marginal log-likelihood. The likelihood accumulator
-uses at least Float64 precision (while preserving wider and AD scalar types); filtering
-states and individual increments retain their own promoted scalar types.
+Observations must be nonempty. The likelihood total starts with the first increment and
+retains the scalar type determined by the Kalman calculations.
 """
 function marginal_loglikelihood(
     model::StateSpaceModel, af::KalmanFilter, ys::AbstractVector
 )
     _validate_observations(model, ys)
     p = model.prior::GaussianPrior
-    # A Float64 floor gives Float32/Float64 models the same scalar return type
-    # for empty and nonempty data. A Union{Float32,Float64} return prevents
-    # Mooncake from constructing the objective's scalar tangent.
-    ll = zero(promote_type(Float64, eltype(p.μ0), eltype(p.Σ0)))
-    isempty(ys) && return ll
+    isempty(ys) &&
+        throw(ArgumentError("Kalman marginal_loglikelihood requires nonempty observations"))
     state = _kalman_state(p.μ0, p.Σ0)
-    state, inc = _kalman_likelihood_step(model, af, state, 1, ys[1])
-    ll += inc
+    state, ll = _kalman_likelihood_step(model, af, state, 1, ys[1])
     # The first observation/transition may promote the initial state's scalar type.
     # Start a separately specialised loop with that promoted state and increment.
     return _kalman_likelihood_tail(model, af, ys, state, ll)

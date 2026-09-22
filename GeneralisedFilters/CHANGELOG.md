@@ -18,8 +18,8 @@ Julia 1.12.7 and the Turing 0.47–0.49 / DynamicPPL 0.42 integration.
   Observation sensitivities and eigenvalue-clipping sensitivities are propagated.
 - Normalise Kalman state storage independently of structured covariance parameters; fix
   smoother histories after scalar promotion and reverse AD for shared structured covariances.
-  Kalman marginal likelihoods accumulate in at least Float64 precision to avoid a mixed
-  Float32/Float64 scalar return type for empty versus nonempty observations.
+  Kalman marginal likelihoods require nonempty observations and initialise their total
+  from the first increment, preserving its natural scalar type.
 - Implement conditional multinomial/systematic/stratified resampling, conditioning the
   entire offspring law on the chosen ancestor. AS respects ESS and refreshes ancestors
   at resampling events.

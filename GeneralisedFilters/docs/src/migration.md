@@ -46,6 +46,9 @@ factorisation. Use `mean(state)` and `cov(state)` to inspect a result, or
 can still be supplied to Gaussian model components. The filter converts them to dense or
 static covariance storage for its calculations.
 
+The Kalman `marginal_loglikelihood` requires at least one observation. Empty inputs
+raise an `ArgumentError`, including when called through a conditional inner model.
+
 ## Conditional SMC and particle Gibbs
 
 Store only the outer trajectory in an RB particle Gibbs reference. Inner Gaussian

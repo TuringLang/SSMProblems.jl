@@ -189,8 +189,7 @@ Covariances must be symmetric, and innovation covariances must be positive defin
 the Kalman likelihood. For numerical stability and square-root filtering, see
 [Numerical stability](../inference.md#Numerical-stability).
 
-Two type conventions matter when writing generic numerical code. The smoother allocates
-its history after the first update, so later states must retain that storage and scalar
-type. Also, `marginal_loglikelihood` accumulates in at least Float64 precision while
-preserving wider and AD scalar types. Float32 filtering states and individual likelihood
-increments can remain Float32.
+The smoother allocates its history after the first update, so later states must retain
+that storage and scalar type. The Kalman `marginal_loglikelihood` requires at least one
+observation and starts its total with the first likelihood increment. It does not force
+Float32 calculations to accumulate in Float64.
