@@ -1,8 +1,8 @@
 """
 A minimal interface for defining state-space models.
 
-This package owns only the substrate: the three process abstract types, the
-`distribution`/`simulate`/`logdensity` generics, and a plain model container. Inference
+This package defines process and model interfaces, distribution adapters, and the
+`distribution`/`simulate`/`logdensity` generics. Inference
 packages build on these without depending on each other. Conditioning mechanisms, parameter
 atoms and algorithm-specific machinery deliberately live downstream.
 """
@@ -15,7 +15,8 @@ using StaticArrays: SVector, @SVector
 using Statistics: mean, cov
 
 export StatePrior, LatentDynamics, ObservationProcess
-export StateSpaceModel
+export AbstractStateSpaceModel, StateSpaceModel, prior, dyn, obs
+export DistributionPrior, DistributionDynamics, DistributionObservation
 export distribution, simulate, logdensity, simulate_from_dist
 
 ## PROCESSES ###############################################################################
@@ -112,39 +113,116 @@ function logdensity(obs::ObservationProcess, t::Integer, x, y)
     return logpdf(distribution(obs, t, x), y)
 end
 
+## DISTRIBUTION ADAPTERS ####################################################################
+
+"""
+    DistributionPrior(dist)
+
+Lift a distribution object into a `StatePrior`.
+"""
+struct DistributionPrior{D} <: StatePrior
+    dist::D
+end
+
+"""
+    DistributionDynamics(f)
+
+Lift a closure `f(t, x) -> distribution` into a `LatentDynamics`.
+"""
+struct DistributionDynamics{F} <: LatentDynamics
+    f::F
+end
+
+"""
+    DistributionObservation(f)
+
+Lift a closure `f(t, x) -> distribution` into an `ObservationProcess`.
+"""
+struct DistributionObservation{F} <: ObservationProcess
+    f::F
+end
+
+distribution(p::DistributionPrior) = p.dist
+distribution(d::DistributionDynamics, t::Integer, x) = d.f(t, x)
+distribution(o::DistributionObservation, t::Integer, x) = o.f(t, x)
+
 ## MODEL ###################################################################################
 
 """
+    AbstractStateSpaceModel
+
+Interface for a state-space model. Subtypes implement [`prior`](@ref), [`dyn`](@ref), and
+[`obs`](@ref) to expose their model components. A custom model need not store components in
+fields with those names. Inference algorithms may require additional structure from the
+returned components.
+"""
+abstract type AbstractStateSpaceModel end
+
+"""
+    prior(model::AbstractStateSpaceModel)
+
+Return the model's initial state prior, a [`StatePrior`](@ref).
+"""
+function prior end
+
+"""
+    dyn(model::AbstractStateSpaceModel)
+
+Return the model's latent dynamics, a [`LatentDynamics`](@ref).
+"""
+function dyn end
+
+"""
+    obs(model::AbstractStateSpaceModel)
+
+Return the model's observation process, an [`ObservationProcess`](@ref).
+"""
+function obs end
+
+"""
     StateSpaceModel(prior, dyn, obs)
+    StateSpaceModel(model::AbstractStateSpaceModel)
 
 A state-space model composed of an initial state prior, latent dynamics, and an observation
-process.
+process. The one-argument constructor obtains the components through [`prior`](@ref),
+[`dyn`](@ref), and [`obs`](@ref). It retains those components without copying them; an
+existing `StateSpaceModel` is returned unchanged.
 """
-struct StateSpaceModel{P<:StatePrior,D<:LatentDynamics,O<:ObservationProcess}
+struct StateSpaceModel{P<:StatePrior,D<:LatentDynamics,O<:ObservationProcess} <:
+       AbstractStateSpaceModel
     prior::P
     dyn::D
     obs::O
 end
 
+function StateSpaceModel(model::AbstractStateSpaceModel)
+    return StateSpaceModel(prior(model), dyn(model), obs(model))
+end
+StateSpaceModel(model::StateSpaceModel) = model
+
+prior(model::StateSpaceModel) = model.prior
+dyn(model::StateSpaceModel) = model.dyn
+obs(model::StateSpaceModel) = model.obs
+
 ## FORWARD SIMULATION ######################################################################
 
 """
-    simulate([rng,] model::StateSpaceModel, T::Integer)
+    simulate([rng,] model::AbstractStateSpaceModel, T::Integer)
 
 Simulate a trajectory of length `T`, returning `(x0, xs, ys)` where `x0` is the initial
 state, `xs` the states at times `1:T`, and `ys` the observations at times `1:T`.
 """
-function simulate(rng::AbstractRNG, model::StateSpaceModel, T::Integer)
+function simulate(rng::AbstractRNG, model::AbstractStateSpaceModel, T::Integer)
     T >= 0 || throw(ArgumentError("simulation length must be nonnegative"))
-    x0 = simulate(rng, model.prior)
+    x0 = simulate(rng, prior(model))
     T == 0 && return (x0, typeof(x0)[], Any[])
-    xs = fill(simulate(rng, model.dyn, 1, x0), T)
+    xs = fill(simulate(rng, dyn(model), 1, x0), T)
     for t in 2:T
-        xs[t] = simulate(rng, model.dyn, t, xs[t - 1])
+        xs[t] = simulate(rng, dyn(model), t, xs[t - 1])
     end
-    ys = map(t -> simulate(rng, model.obs, t, xs[t]), 1:T)
+    ys = map(t -> simulate(rng, obs(model), t, xs[t]), 1:T)
     return x0, xs, ys
 end
-simulate(model::StateSpaceModel, T::Integer) = simulate(default_rng(), model, T)
+simulate(model::AbstractStateSpaceModel, T::Integer) = simulate(default_rng(), model, T)
 
 end

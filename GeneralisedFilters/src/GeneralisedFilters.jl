@@ -51,14 +51,14 @@ An empty observation sequence raises an `ArgumentError`.
 """
 function filter(
     rng::AbstractRNG,
-    model::StateSpaceModel,
+    model::AbstractStateSpaceModel,
     algo::AbstractFilter,
     ys::AbstractVector;
     ref_state=nothing,
 )
     _validate_observations(model, ys)
     isempty(ys) && throw(ArgumentError("filter requires nonempty observations"))
-    init_state = initialise(rng, model.prior, algo; ref_state)
+    init_state = initialise(rng, SSMProblems.prior(model), algo; ref_state)
 
     # First iteration peeled out for type stability.
     state, log_evidence = step(rng, model, algo, 1, init_state, ys[1]; ref_state)
@@ -69,13 +69,15 @@ function filter(
 
     return state, log_evidence
 end
-function filter(model::StateSpaceModel, algo::AbstractFilter, ys::AbstractVector; kwargs...)
+function filter(
+    model::AbstractStateSpaceModel, algo::AbstractFilter, ys::AbstractVector; kwargs...
+)
     return filter(default_rng(), model, algo, ys; kwargs...)
 end
 
 function step(
     rng::AbstractRNG,
-    model::StateSpaceModel,
+    model::AbstractStateSpaceModel,
     algo::AbstractFilter,
     t::Integer,
     state,
@@ -84,21 +86,23 @@ function step(
 )
     return move(rng, model, algo, t, state, y; ref_state)
 end
-function step(model::StateSpaceModel, algo::AbstractFilter, t::Integer, state, y; kwargs...)
+function step(
+    model::AbstractStateSpaceModel, algo::AbstractFilter, t::Integer, state, y; kwargs...
+)
     return step(default_rng(), model, algo, t, state, y; kwargs...)
 end
 
 function move(
     rng::AbstractRNG,
-    model::StateSpaceModel,
+    model::AbstractStateSpaceModel,
     algo::AbstractFilter,
     t::Integer,
     state,
     y;
     ref_state=nothing,
 )
-    state = predict(rng, model.dyn, algo, t, state, y; ref_state)
-    state, ll_increment = update(model.obs, algo, t, state, y)
+    state = predict(rng, SSMProblems.dyn(model), algo, t, state, y; ref_state)
+    state, ll_increment = update(SSMProblems.obs(model), algo, t, state, y)
     return state, ll_increment
 end
 

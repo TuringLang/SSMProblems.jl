@@ -80,9 +80,11 @@ callables or `resolve` methods; the model-level methods are convenience delegate
 component form uses `resolve(component, (; x0))`; hierarchical components and models
 delegate to it.
 """
-inner_prior(component, x0) = resolve(component, (; x0))
+function inner_prior(component, x0)
+    return _resolved_component(resolve(component, (; x0)), StatePrior, "inner prior")
+end
 inner_prior(p::HierarchicalPrior, x0) = inner_prior(p.inner, x0)
-inner_prior(m::HierarchicalSSM, x0) = inner_prior(m.prior, x0)
+inner_prior(m::HierarchicalSSM, x0) = inner_prior(SSMProblems.prior(m), x0)
 
 """
     inner_dynamics(model::HierarchicalSSM, t, x_prev, x_new)
@@ -95,13 +97,15 @@ Longer history dependence requires an augmented outer state for consistent incre
 reuse in particle filtering.
 """
 function inner_dynamics(component, t::Integer, x_prev, x_new)
-    return resolve(component, (; t, x_prev, x_new))
+    return _resolved_component(
+        resolve(component, (; t, x_prev, x_new)), LatentDynamics, "inner dynamics"
+    )
 end
 function inner_dynamics(d::HierarchicalDynamics, t::Integer, x_prev, x_new)
     return inner_dynamics(d.inner, t, x_prev, x_new)
 end
 function inner_dynamics(m::HierarchicalSSM, t::Integer, x_prev, x_new)
-    return inner_dynamics(m.dyn, t, x_prev, x_new)
+    return inner_dynamics(SSMProblems.dyn(m), t, x_prev, x_new)
 end
 
 """
@@ -112,11 +116,17 @@ end
 Resolve the inner observation process at time `t` conditioned on the current outer state.
 The component form uses `resolve(component, (; t, x))`.
 """
-inner_observation(component, t::Integer, x) = resolve(component, (; t, x))
+function inner_observation(component, t::Integer, x)
+    return _resolved_component(
+        resolve(component, (; t, x)), ObservationProcess, "inner observation"
+    )
+end
 function inner_observation(o::HierarchicalObservation, t::Integer, x)
     return inner_observation(o.inner, t, x)
 end
-inner_observation(m::HierarchicalSSM, t::Integer, x) = inner_observation(m.obs, t, x)
+function inner_observation(m::HierarchicalSSM, t::Integer, x)
+    return inner_observation(SSMProblems.obs(m), t, x)
+end
 
 # Only ReferenceTrajectory uses physical time as its array index. Ordinary vectors store
 # x0 at index 1. Reject other axes rather than silently interpreting an offset vector.
@@ -187,8 +197,8 @@ function condition_inner(model::HierarchicalSSM, xs::AbstractVector)
     _validate_trajectory(xs)
     return StateSpaceModel(
         inner_prior(model, _trajectory_state(xs, 0)),
-        TimeVaryingDynamics(ConditionalDynamics(model.dyn.inner, xs)),
-        TimeVaryingObservation(ConditionalObservation(model.obs.inner, xs)),
+        TimeVaryingDynamics(ConditionalDynamics(SSMProblems.dyn(model).inner, xs)),
+        TimeVaryingObservation(ConditionalObservation(SSMProblems.obs(model).inner, xs)),
     )
 end
 
@@ -205,10 +215,10 @@ function _validate_observation_horizon(
     return nothing
 end
 _validate_observation_horizon(c::TimeVarying, ys) = _validate_observation_horizon(c.f, ys)
-function _validate_observations(model::StateSpaceModel, ys::AbstractVector)
+function _validate_observations(model::AbstractStateSpaceModel, ys::AbstractVector)
     Base.require_one_based_indexing(ys)
-    _validate_observation_horizon(model.dyn, ys)
-    _validate_observation_horizon(model.obs, ys)
+    _validate_observation_horizon(SSMProblems.dyn(model), ys)
+    _validate_observation_horizon(SSMProblems.obs(model), ys)
     return nothing
 end
 
@@ -247,4 +257,27 @@ end
 
 function logdensity(o::HierarchicalObservation, t::Integer, s::HierarchicalState, y)
     return logdensity(inner_observation(o, t, s.x), t, s.z, y)
+end
+
+# A component view preserves hierarchical dispatch for custom model containers.
+function _hierarchical_model(model::AbstractStateSpaceModel)
+    view = StateSpaceModel(model)
+    view isa HierarchicalSSM || throw(
+        ArgumentError(
+            "This operation requires hierarchical prior, dynamics and observation components",
+        ),
+    )
+    return view
+end
+function condition_inner(model::AbstractStateSpaceModel, xs::AbstractVector)
+    return condition_inner(_hierarchical_model(model), xs)
+end
+function inner_prior(model::AbstractStateSpaceModel, x0)
+    return inner_prior(_hierarchical_model(model), x0)
+end
+function inner_dynamics(model::AbstractStateSpaceModel, t::Integer, xp, xn)
+    return inner_dynamics(_hierarchical_model(model), t, xp, xn)
+end
+function inner_observation(model::AbstractStateSpaceModel, t::Integer, x)
+    return inner_observation(_hierarchical_model(model), t, x)
 end

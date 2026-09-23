@@ -3,13 +3,14 @@
 # `using GeneralisedFilters` remains self-sufficient, and so that loading both packages
 # does not produce ambiguous bindings.
 using SSMProblems: SSMProblems, StatePrior, LatentDynamics, ObservationProcess
-using SSMProblems: simulate_from_dist
+using SSMProblems: simulate_from_dist, AbstractStateSpaceModel, prior, dyn, obs
+using SSMProblems: DistributionPrior, DistributionDynamics, DistributionObservation
 # `import` rather than `using`: these are extended by this package — the generics
 # throughout, and `StateSpaceModel` by the hierarchical shorthand constructor.
 import SSMProblems: StateSpaceModel, distribution, simulate, logdensity
 
 export StatePrior, LatentDynamics, ObservationProcess
-export StateSpaceModel
+export AbstractStateSpaceModel, StateSpaceModel, prior, dyn, obs
 export distribution, simulate, logdensity, simulate_from_dist
 export TimeVaryingDynamics, TimeVaryingObservation
 export DistributionPrior, DistributionDynamics, DistributionObservation
@@ -56,42 +57,22 @@ end
 
 const TimeVarying = Union{TimeVaryingDynamics,TimeVaryingObservation}
 
-resolve(w::TimeVarying, ctx) = w.f(ctx)
+function _resolved_component(value, ::Type{P}, slot) where {P}
+    _component(value) isa P || throw(
+        ArgumentError(
+            "$slot must return a $P component, got $(typeof(value)). Use DistributionPrior for a prior distribution, DistributionDynamics/DistributionObservation for distribution-returning functions, or an explicit analytical component for an analytical filter.",
+        ),
+    )
+    return value
+end
+function resolve(w::TimeVaryingDynamics, ctx)
+    return _resolved_component(w.f(ctx), LatentDynamics, "TimeVaryingDynamics")
+end
+function resolve(w::TimeVaryingObservation, ctx)
+    return _resolved_component(w.f(ctx), ObservationProcess, "TimeVaryingObservation")
+end
 distribution(w::TimeVarying, t::Integer, x) = distribution(resolve(w, (; t)), t, x)
 function simulate(rng::AbstractRNG, w::TimeVarying, t::Integer, x)
     return simulate(rng, resolve(w, (; t)), t, x)
 end
 logdensity(w::TimeVarying, t::Integer, a, b) = logdensity(resolve(w, (; t)), t, a, b)
-
-## DISTRIBUTION-RETURNING PROCESS WRAPPERS #################################################
-
-"""
-    DistributionPrior(dist)
-
-Lift a distribution object into a `StatePrior`.
-"""
-struct DistributionPrior{D} <: StatePrior
-    dist::D
-end
-
-"""
-    DistributionDynamics(f)
-
-Lift a closure `f(t, x) -> distribution` into a `LatentDynamics`.
-"""
-struct DistributionDynamics{F} <: LatentDynamics
-    f::F
-end
-
-"""
-    DistributionObservation(f)
-
-Lift a closure `f(t, x) -> distribution` into an `ObservationProcess`.
-"""
-struct DistributionObservation{F} <: ObservationProcess
-    f::F
-end
-
-distribution(p::DistributionPrior) = p.dist
-distribution(d::DistributionDynamics, t::Integer, x) = d.f(t, x)
-distribution(o::DistributionObservation, t::Integer, x) = o.f(t, x)

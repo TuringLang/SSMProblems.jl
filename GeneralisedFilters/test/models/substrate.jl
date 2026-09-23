@@ -5,6 +5,13 @@
     using Distributions
 
     for name in (
+        :AbstractStateSpaceModel,
+        :prior,
+        :dyn,
+        :obs,
+        :DistributionPrior,
+        :DistributionDynamics,
+        :DistributionObservation,
         :StatePrior,
         :LatentDynamics,
         :ObservationProcess,

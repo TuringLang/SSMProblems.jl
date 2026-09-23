@@ -78,3 +78,13 @@ function create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
         LinearGaussianObservation(H, c, R),
     )
 end
+
+function _linear_component(value, ::Type{P}) where {P}
+    component = _component(value)
+    component isa P || throw(
+        ArgumentError(
+            "Kalman filtering requires $P, got $(typeof(component)). Return an explicit linear-Gaussian component rather than a distribution-returning process.",
+        ),
+    )
+    return component
+end

@@ -45,7 +45,7 @@ Evaluate a finite-state model's deterministic forward likelihood. Emission weigh
 normalised in log space; impossible observations return `-Inf`.
 """
 function marginal_loglikelihood(
-    model::StateSpaceModel, af::DiscreteFilter, ys::AbstractVector
+    model::AbstractStateSpaceModel, af::DiscreteFilter, ys::AbstractVector
 )
     return last(filter(model, af, ys))
 end
@@ -122,7 +122,7 @@ end
 
 function smooth(
     rng::AbstractRNG,
-    model::StateSpaceModel,
+    model::AbstractStateSpaceModel,
     ::DiscreteSmoother,
     ys::AbstractVector;
     t_smooth=1,
@@ -137,11 +137,11 @@ function smooth(
     predicted = Vector{Vector{Float64}}(undef, T)
 
     total_ll = 0.0
-    state = let s = initialise(rng, model.prior, df)
+    state = let s = initialise(rng, SSMProblems.prior(model), df)
         for t in 1:T
-            pred = predict(rng, model.dyn, df, t, s, ys[t])
+            pred = predict(rng, SSMProblems.dyn(model), df, t, s, ys[t])
             predicted[t] = pred
-            s, ll = update(model.obs, df, t, pred, ys[t])
+            s, ll = update(SSMProblems.obs(model), df, t, pred, ys[t])
             filtered[t] = s
             total_ll += ll
         end
@@ -151,7 +151,7 @@ function smooth(
     smoothed = let s = filtered[T]
         for t in (T - 1):-1:t_smooth
             # Atom index t+1 parameterises the transition x_t → x_{t+1}.
-            d = resolve(model.dyn, (; t=t + 1))
+            d = resolve(SSMProblems.dyn(model), (; t=t + 1))
             s = _discrete_backward_step(d, filtered[t], s, predicted[t + 1])
         end
         s

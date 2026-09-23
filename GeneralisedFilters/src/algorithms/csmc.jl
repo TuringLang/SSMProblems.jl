@@ -141,7 +141,8 @@ Model wrapper for standalone CSMC sampling via the AbstractMCMC interface.
 - `ssm::MT`: The state-space model
 - `observations::YT`: Vector of observations
 """
-struct CSMCModel{MT<:StateSpaceModel,YT<:AbstractVector} <: AbstractMCMC.AbstractModel
+struct CSMCModel{MT<:AbstractStateSpaceModel,YT<:AbstractVector} <:
+       AbstractMCMC.AbstractModel
     ssm::MT
     observations::YT
 end
@@ -289,11 +290,12 @@ implements a conditional law (see `supports_conditional`).
 """
 function _csmc_sample(
     rng::AbstractRNG,
-    model::StateSpaceModel,
+    ssm::AbstractStateSpaceModel,
     csmc::ConditionalSMC{<:Any,NoRefreshment},
     observations,
     ref_traj,
 )
+    model = StateSpaceModel(ssm)
     _validate_csmc(model, csmc, observations, ref_traj)
     pf = csmc.pf
     K = length(observations)
@@ -315,11 +317,12 @@ end
 
 function _csmc_sample(
     rng::AbstractRNG,
-    model::StateSpaceModel,
+    ssm::AbstractStateSpaceModel,
     csmc::ConditionalSMC{<:Any,<:AncestorSampling},
     observations,
     ref_traj,
 )
+    model = StateSpaceModel(ssm)
     _validate_csmc(model, csmc, observations, ref_traj)
     pf = csmc.pf
     K = length(observations)
@@ -413,11 +416,12 @@ end
 
 function _csmc_sample(
     rng::AbstractRNG,
-    model::StateSpaceModel,
+    ssm::AbstractStateSpaceModel,
     csmc::ConditionalSMC{<:Any,<:BackwardSimulation},
     observations,
     ref_traj,
 )
+    model = StateSpaceModel(ssm)
     _validate_csmc(model, csmc, observations, ref_traj)
     pf = csmc.pf
     K = length(observations)

@@ -252,7 +252,7 @@ end
     @test marginal_loglikelihood(model, DF(), ys) ≈ expected
     @test all(isfinite, state)
     @test sum(state) ≈ 1
-    @test marginal_loglikelihood(model, DF(), Float64[]) == 0
+    @test_throws ArgumentError marginal_loglikelihood(model, DF(), Float64[])
     derivative = ForwardDiff.derivative(
         p -> marginal_loglikelihood(build(p), DF(), ys), 0.3
     )

@@ -8,7 +8,8 @@ The historical fast-diff branch is not a dependency of this release.
 
 | Boundary | Release contract | Regression coverage |
 |:--|:--|:--|
-| Shared model interface | SSMProblems owns process abstracts, model container and generics; GeneralisedFilters adds atoms and conditioning | `test/models/substrate.jl` |
+| Shared model interface | SSMProblems owns process abstracts, distribution adapters, the abstract model/accessor interface and standard container; GeneralisedFilters adds analytical components and conditioning | `test/models/substrate.jl`, `model_interface.jl` |
+| Custom model containers | Accessors supply components to ordinary inference; conditional likelihoods, CSMC and Turing use shallow standard-container views preserving those components | `test/models/model_interface.jl`, `test/integrations/conditional_ad.jl` |
 | Conditional inner model | Prior uses `x0`, transition uses adjacent outer states, observation uses current outer state; borrowed trajectories require rebuilding after changes | `test/models/conditional.jl` |
 | Parameter target | Outer trajectory density plus conditional inner likelihood; parameter prior and Jacobian included once by the host | `test/integrations/logdensity.jl`, `turing.jl` |
 | Gibbs alternation | Outer-only references; recompute inner beliefs and refresh HMC target after every trajectory change | `test/integrations/particle_gibbs.jl`, `apf_srkf_turing.jl` |

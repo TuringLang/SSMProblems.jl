@@ -5,7 +5,7 @@ For example, a sensor might record noisy measurements of a signal that changes o
 Inference uses those measurements to estimate the signal and, when needed, learn the
 parameters that govern its evolution.
 
-GeneralisedFilters separates a model into three components:
+GeneralisedFilters uses the model interface defined by SSMProblems, with three components:
 
 - A **prior** describes the initial state at time zero.
 - **Dynamics** describe how the state changes between consecutive times.
@@ -49,6 +49,67 @@ given all observations, along with the log marginal likelihood of the observatio
 This example uses StaticArrays for its small, fixed-size state. Ordinary Julia vectors and
 matrices work too. Observations start at time one: the filter first propagates the initial
 state, then conditions on the first observation.
+
+## Distribution functions and analytical components
+
+For particle filtering, it is often convenient to describe each conditional distribution
+with a function. The following model has the same scalar dynamics as the example above:
+
+```@example models
+using Distributions
+scalar_model = StateSpaceModel(
+    DistributionPrior(Normal(0.0, 1.0)),
+    DistributionDynamics((t, z_prev) -> Normal(0.9z_prev, sqrt(0.1))),
+    DistributionObservation((t, z) -> Normal(z, sqrt(0.2))),
+)
+```
+
+These adapters belong to SSMProblems and are also exported by GeneralisedFilters.
+`DistributionDynamics` calls the supplied function with the time and previous state.
+SSMProblems uses the returned distribution to sample a state or evaluate its log density.
+`DistributionObservation` works the same way with the current state. `DistributionPrior`
+wraps the initial distribution directly.
+
+The two model definitions expose different information to an algorithm. A function
+returning a distribution can describe almost any transition, but it does not tell a
+Kalman filter whether the transition is linear. `LinearGaussianDynamics(A, b, Q)` exposes
+that structure: its conditional mean is `A * z_prev + b` and its covariance is `Q`.
+Use these analytical components when you want an algorithm to exploit their structure.
+There is no need to define a new Julia type for either form.
+
+## Time-varying models
+
+A distribution function already receives the time index, so it can look up coefficients
+or external inputs directly:
+
+```@example models
+coefficients = [0.9, 0.8, 0.7]
+time_varying_scalar = StateSpaceModel(
+    DistributionPrior(Normal()),
+    DistributionDynamics((t, z_prev) -> Normal(coefficients[t] * z_prev, sqrt(0.1))),
+    DistributionObservation((t, z) -> Normal(z, sqrt(0.2))),
+)
+```
+
+To use the same time dependence with a Kalman filter, return a linear-Gaussian component
+for each time. `TimeVaryingDynamics` receives a named tuple containing `t`:
+
+```@example models
+time_varying_gaussian = StateSpaceModel(
+    GaussianPrior(SA[0.0], SMatrix{1,1}(1.0)),
+    TimeVaryingDynamics(ctx -> LinearGaussianDynamics(
+        SMatrix{1,1}(coefficients[ctx.t]), SA[0.0], SMatrix{1,1}(0.1),
+    )),
+    LinearGaussianObservation(SMatrix{1,1}(1.0), SA[0.0], SMatrix{1,1}(0.2)),
+)
+GeneralisedFilters.filter(time_varying_gaussian, KF(), ys)
+```
+
+`TimeVaryingObservation` accepts the corresponding function for the observation process.
+The package evaluates these functions as it visits each time step. This is called
+*resolving* a component. A dynamics function must return a dynamics component, rather
+than a distribution. For Kalman filtering, that component must expose linear-Gaussian
+parameters.
 
 ## Rao-Blackwellised models
 
@@ -123,6 +184,30 @@ A component that does not depend on these values can be supplied directly, as th
 prior and observation process are above. If dynamics need a longer outer history, include
 that history in the outer state so each transition has the information it needs.
 
+### Time-varying hierarchical dynamics
+
+Both the outer dynamics and the inner dynamics can depend on time. The outer distribution
+function receives `t` as above. The inner function receives `t` together with the adjacent
+outer states, so it does not need an additional `TimeVaryingDynamics` wrapper:
+
+```@example models
+time_varying_hierarchical = StateSpaceModel(
+    DistributionPrior(Normal()),
+    DistributionDynamics((t, x_prev) -> Normal(coefficients[t] * x_prev, sqrt(0.1))),
+    GaussianPrior(SA[0.0], SMatrix{1,1}(1.0)),
+    ctx -> LinearGaussianDynamics(
+        SMatrix{1,1}(coefficients[ctx.t]), SA[0.0], SMatrix{1,1}(exp(ctx.x_new)),
+    ),
+    LinearGaussianObservation(SMatrix{1,1}(1.0), SA[0.0], SMatrix{1,1}(0.2)),
+)
+GeneralisedFilters.filter(Xoshiro(42), time_varying_hierarchical, RBPF(BF(100), KF()), ys)
+```
+
+The particle filter resolves the inner dynamics separately for each particle. When the
+outer trajectory is fixed for a parameter update, the conditional likelihood resolves
+the same function using the states from that trajectory. The model therefore specifies
+the same transition for both calculations.
+
 ## Conditioning on a trajectory
 
 `condition_inner` turns a hierarchical model and a fixed outer trajectory into an ordinary
@@ -158,18 +243,26 @@ the model, and rebuild the conditional model when the trajectory or parameters c
 The prior is resolved at construction, while dynamics and observations are resolved as the
 filter visits each time step.
 
-## Other model components
+## Custom process and model types
 
-For time-varying linear-Gaussian models, wrap a function of `(; t)` in
-`TimeVaryingDynamics` or `TimeVaryingObservation`. The function returns the component for
-that time step.
+Functions are convenient for individual models. For reusable components or specialised
+methods, you can instead define subtypes of SSMProblems' `StatePrior`, `LatentDynamics`
+and `ObservationProcess`. Implement `SSMProblems.distribution` to obtain the default
+sampling and density methods, or implement `simulate` and `logdensity` directly when
+no suitable distribution object exists. Algorithms require the methods and analytical
+structure they use, so a component that works with a bootstrap filter need not support
+Kalman filtering or backward simulation.
 
-For nonlinear or non-Gaussian components, use `DistributionPrior`,
-`DistributionDynamics((t, x) -> distribution)`, and
-`DistributionObservation((t, x) -> distribution)`. You can also define your own process
-subtypes and implement their `simulate` and `logdensity` methods. These constructors make
-a model usable by compatible algorithms. Analytical filtering, ancestor sampling, and
-backward simulation each require the corresponding algorithm support for its components.
+`StateSpaceModel` is the standard container. Ordinary model operations also accept custom
+subtypes of `AbstractStateSpaceModel` through the `SSMProblems.prior`, `SSMProblems.dyn`
+and `SSMProblems.obs` accessors. Implement these accessors to return the three process
+components. The abstract model interface does not depend on AbstractMCMC.
+
+Use the five-component `StateSpaceModel` constructor for the hierarchical models described
+above. A custom container can also return `HierarchicalPrior`, `HierarchicalDynamics` and
+`HierarchicalObservation` through its accessors. Conditioning and Rao-Blackwellised
+algorithms use these component objects. Additional fields on the container do not enter
+the likelihood unless its components use them.
 
 ## Covariance storage and differentiation
 

@@ -23,10 +23,13 @@ Includes all transitions represented by `xs`, and excludes observations and para
 """
 function outer_logdensity(model::HierarchicalSSM, xs::AbstractVector)
     _validate_trajectory(xs)
-    ll = logdensity(model.prior.outer, _trajectory_state(xs, 0))
+    ll = logdensity(SSMProblems.prior(model).outer, _trajectory_state(xs, 0))
     for t in 1:(length(xs) - 1)
         ll += logdensity(
-            model.dyn.outer, t, _trajectory_state(xs, t - 1), _trajectory_state(xs, t)
+            SSMProblems.dyn(model).outer,
+            t,
+            _trajectory_state(xs, t - 1),
+            _trajectory_state(xs, t),
         )
     end
     return ll
@@ -53,7 +56,7 @@ function trajectory_logdensity(
 end
 
 """
-    trajectory_logdensity(model::StateSpaceModel, xs, ys)
+    trajectory_logdensity(model::AbstractStateSpaceModel, xs, ys)
 
 Compute the joint log-density of sampled states and observations, including the initial
 state and every transition. Unlike the four-argument hierarchical method, this method
@@ -61,7 +64,7 @@ integrates out no states: a hierarchical model therefore takes `HierarchicalStat
 Trajectory indexing follows [`condition_inner`](@ref); observations are one-based.
 """
 function trajectory_logdensity(
-    model::StateSpaceModel, xs::AbstractVector, ys::AbstractVector
+    model::AbstractStateSpaceModel, xs::AbstractVector, ys::AbstractVector
 )
     _validate_trajectory(xs)
     _validate_observations(model, ys)
@@ -70,11 +73,31 @@ function trajectory_logdensity(
             "trajectory must contain one initial state plus one state per observation"
         ),
     )
-    ll = logdensity(model.prior, _trajectory_state(xs, 0))
+    ll = logdensity(SSMProblems.prior(model), _trajectory_state(xs, 0))
     for t in eachindex(ys)
         x = _trajectory_state(xs, t)
-        ll += logdensity(model.dyn, t, _trajectory_state(xs, t - 1), x)
-        ll += logdensity(model.obs, t, x, ys[t])
+        ll += logdensity(SSMProblems.dyn(model), t, _trajectory_state(xs, t - 1), x)
+        ll += logdensity(SSMProblems.obs(model), t, x, ys[t])
     end
     return ll
+end
+
+function inner_loglikelihood(
+    af::AbstractFilter,
+    model::AbstractStateSpaceModel,
+    xs::AbstractVector,
+    ys::AbstractVector,
+)
+    return inner_loglikelihood(af, _hierarchical_model(model), xs, ys)
+end
+function outer_logdensity(model::AbstractStateSpaceModel, xs::AbstractVector)
+    return outer_logdensity(_hierarchical_model(model), xs)
+end
+function trajectory_logdensity(
+    model::AbstractStateSpaceModel,
+    af::AbstractFilter,
+    xs::AbstractVector,
+    ys::AbstractVector,
+)
+    return trajectory_logdensity(_hierarchical_model(model), af, xs, ys)
 end

@@ -27,11 +27,18 @@ function predict(
     y;
     ref_state=nothing,
 )
-    return kalman_predict(state, _component(resolve(dyn, (; t))))
+    return kalman_predict(
+        state, _linear_component(resolve(dyn, (; t)), LinearGaussianDynamics)
+    )
 end
 
 function update(obs, algo::KalmanFilter, t::Integer, state::GaussianState, y)
-    return kalman_update(state, _component(resolve(obs, (; t))), y; repair=algo.repair)
+    return kalman_update(
+        state,
+        _linear_component(resolve(obs, (; t)), LinearGaussianObservation),
+        y;
+        repair=algo.repair,
+    )
 end
 
 """
@@ -44,10 +51,10 @@ Observations must be nonempty. The likelihood total starts with the first increm
 retains the scalar type determined by the Kalman calculations.
 """
 function marginal_loglikelihood(
-    model::StateSpaceModel, af::KalmanFilter, ys::AbstractVector
+    model::AbstractStateSpaceModel, af::KalmanFilter, ys::AbstractVector
 )
     _validate_observations(model, ys)
-    p = model.prior::GaussianPrior
+    p = SSMProblems.prior(model)::GaussianPrior
     isempty(ys) &&
         throw(ArgumentError("Kalman marginal_loglikelihood requires nonempty observations"))
     state = _kalman_state(p.μ0, p.Σ0)
@@ -58,8 +65,8 @@ function marginal_loglikelihood(
 end
 
 function _kalman_likelihood_step(model, af, state, t, y)
-    d = resolve(model.dyn, (; t))
-    o = resolve(model.obs, (; t))
+    d = resolve(SSMProblems.dyn(model), (; t))
+    o = resolve(SSMProblems.obs(model), (; t))
     state, inc = kalman_step(state, d, o, y)
     return _kalman_state(state.μ, repair_covariance(af.repair, state.Σ)), inc
 end
@@ -79,7 +86,7 @@ const KS = KalmanSmoother()
 
 function smooth(
     rng::AbstractRNG,
-    model::StateSpaceModel,
+    model::AbstractStateSpaceModel,
     ::KalmanSmoother,
     ys::AbstractVector;
     t_smooth=1,
@@ -90,9 +97,9 @@ function smooth(
     kf = KalmanFilter()
     T = length(ys)
 
-    state = initialise(rng, model.prior, kf)
-    pred = predict(rng, model.dyn, kf, 1, state, ys[1])
-    state, total_ll = update(model.obs, kf, 1, pred, ys[1])
+    state = initialise(rng, SSMProblems.prior(model), kf)
+    pred = predict(rng, SSMProblems.dyn(model), kf, 1, state, ys[1])
+    state, total_ll = update(SSMProblems.obs(model), kf, 1, pred, ys[1])
     # The first update may promote both precision and storage (e.g. a Float32
     # prior with Float64 observations). Store its prediction in the promoted
     # representation too, without changing its values or the model parameters.
@@ -102,8 +109,8 @@ function smooth(
     predicted[1], filtered[1] = first_pred, state
 
     for t in 2:T
-        pred = predict(rng, model.dyn, kf, t, state, ys[t])
-        state, ll = update(model.obs, kf, t, pred, ys[t])
+        pred = predict(rng, SSMProblems.dyn(model), kf, t, state, ys[t])
+        state, ll = update(SSMProblems.obs(model), kf, t, pred, ys[t])
         (typeof(pred) === eltype(predicted) && typeof(state) === eltype(filtered)) || throw(
             ArgumentError(
                 "Kalman smoothing requires stable state storage and scalar types after the first update",
@@ -116,12 +123,14 @@ function smooth(
     smoothed = filtered[T]
     for t in (T - 1):-1:t_smooth
         # Atom index t+1 parameterises the transition x_t → x_{t+1}.
-        d = _component(resolve(model.dyn, (; t=t + 1)))
+        d = _component(resolve(SSMProblems.dyn(model), (; t=t + 1)))
         smoothed = rts_backward_step(filtered[t], d, smoothed, predicted[t + 1])
     end
 
     return smoothed, total_ll
 end
-function smooth(model::StateSpaceModel, algo::KalmanSmoother, ys::AbstractVector; kwargs...)
+function smooth(
+    model::AbstractStateSpaceModel, algo::KalmanSmoother, ys::AbstractVector; kwargs...
+)
     return smooth(default_rng(), model, algo, ys; kwargs...)
 end

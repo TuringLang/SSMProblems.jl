@@ -121,3 +121,10 @@ function _rand!(rng::AbstractRNG, d::SSMTrajectory, flat::AbstractVector{<:Real}
     end
     return flat
 end
+
+function SSMTrajectory(model::AbstractStateSpaceModel, ys)
+    return SSMTrajectory(StateSpaceModel(model), ys)
+end
+function SSMTrajectory(model::AbstractStateSpaceModel, af, ys)
+    return SSMTrajectory(StateSpaceModel(model), af, ys)
+end

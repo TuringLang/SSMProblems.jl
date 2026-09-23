@@ -48,3 +48,7 @@ function with_activity(m::HierarchicalSSM, ::Val{flags}) where {flags}
         HierarchicalObservation(Activated{typeof(m.obs.inner),flags.obs}(m.obs.inner)),
     )
 end
+
+function with_activity(model::AbstractStateSpaceModel, flags::Val)
+    return with_activity(_hierarchical_model(model), flags)
+end

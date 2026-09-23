@@ -18,9 +18,17 @@ to this interface.
 ## Model definitions
 
 GeneralisedFilters now re-exports the process types, model container and generic
-functions from SSMProblems 0.7. Define model processes using these shared types.
+functions from SSMProblems 0.7, including the `DistributionPrior`, `DistributionDynamics`
+and `DistributionObservation` adapters. Their constructor syntax is unchanged. Define
+model processes using these shared types.
 GeneralisedFilters supplies the Gaussian model components, conditioning operations and
 inference algorithms.
+
+`AbstractStateSpaceModel` and the `prior`, `dyn` and `obs` accessors remain available.
+Custom ordinary model containers should subtype this abstract type and implement those
+accessors rather than rely on particular field names. The abstract type no longer
+inherits from `AbstractMCMC.AbstractModel`. Inference-specific wrappers provide the
+AbstractMCMC integration.
 
 | 0.4.2 interface | 0.5 interface |
 |:--|:--|

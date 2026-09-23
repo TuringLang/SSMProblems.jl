@@ -50,9 +50,60 @@ struct DirectObservation <: ObservationProcess end
 SSMProblems.simulate(::AbstractRNG, ::DirectObservation, ::Integer, x) = 2x
 SSMProblems.logdensity(::DirectObservation, ::Integer, x, y) = -3.5
 
+## CUSTOM MODEL CONTAINERS #################################################################
+
+struct CustomModel{P,D,O} <: AbstractStateSpaceModel
+    initial::P
+    transition::D
+    emission::O
+end
+SSMProblems.prior(model::CustomModel) = model.initial
+SSMProblems.dyn(model::CustomModel) = model.transition
+SSMProblems.obs(model::CustomModel) = model.emission
+
 ## TESTS ###################################################################################
 
 @testset "SSMProblems" begin
+    @testset "Distribution adapters" begin
+        p = DistributionPrior(Normal(0, 1))
+        d = DistributionDynamics((t, x) -> Normal(x + 0.1t, 0.2))
+        o = DistributionObservation((t, x) -> Normal(2x, 0.3t))
+        @test p isa StatePrior
+        @test d isa LatentDynamics
+        @test o isa ObservationProcess
+        @test distribution(p) === p.dist
+        @test logdensity(p, 0.4) == logpdf(Normal(0, 1), 0.4)
+        @test logdensity(d, 2, 0.5, 0.7) == logpdf(Normal(0.7, 0.2), 0.7)
+        @test logdensity(o, 2, 0.5, 0.2) == logpdf(Normal(1.0, 0.6), 0.2)
+        @test simulate(MersenneTwister(1), p) == rand(MersenneTwister(1), Normal(0, 1))
+        @test simulate(MersenneTwister(1), d, 2, 0.5) ==
+            rand(MersenneTwister(1), Normal(0.7, 0.2))
+        @test simulate(MersenneTwister(1), o, 2, 0.5) ==
+            rand(MersenneTwister(1), Normal(1.0, 0.6))
+    end
+
+    @testset "Model accessors and custom containers" begin
+        p, d, o = DirectPrior(), DirectDynamics(), DirectObservation()
+        standard = StateSpaceModel(p, d, o)
+        custom = CustomModel(p, d, o)
+        @test standard isa AbstractStateSpaceModel
+        @test StateSpaceModel(standard) === standard
+        canonical = StateSpaceModel(custom)
+        @test canonical isa StateSpaceModel
+        @test SSMProblems.prior(canonical) === p
+        @test SSMProblems.dyn(canonical) === d
+        @test SSMProblems.obs(canonical) === o
+        for model in (standard, custom)
+            @test SSMProblems.prior(model) === p
+            @test SSMProblems.dyn(model) === d
+            @test SSMProblems.obs(model) === o
+            @test simulate(MersenneTwister(1), model, 3) ==
+                (7.0, [8.0, 10.0, 13.0], [16.0, 20.0, 26.0])
+            @test simulate(model, 3) == (7.0, [8.0, 10.0, 13.0], [16.0, 20.0, 26.0])
+            @test simulate(MersenneTwister(1), model, 0) == (7.0, Float64[], Any[])
+            @test_throws ArgumentError simulate(MersenneTwister(1), model, -1)
+        end
+    end
     @testset "Distribution-derived simulate and logdensity" begin
         rng = MersenneTwister(1234)
         prior = SimplePrior()

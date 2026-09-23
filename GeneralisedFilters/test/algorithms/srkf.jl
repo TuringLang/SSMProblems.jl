@@ -68,7 +68,7 @@ end
     model = StateSpaceModel(p, d, observation(0.0))
     @test marginal_loglikelihood(model, SRKF(), ys) ≈
         marginal_loglikelihood(model, KF(), ys)
-    @test marginal_loglikelihood(model, SRKF(), SVector{1,Float64}[]) == 0
+    @test_throws ArgumentError marginal_loglikelihood(model, SRKF(), SVector{1,Float64}[])
     f(c, af) = marginal_loglikelihood(StateSpaceModel(p, d, observation(c)), af, ys)
     @test ForwardDiff.derivative(c -> f(c, SRKF()), 0.2) ≈
         ForwardDiff.derivative(c -> f(c, KF()), 0.2)

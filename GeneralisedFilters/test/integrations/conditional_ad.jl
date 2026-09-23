@@ -91,3 +91,26 @@ end
         @test result.ad ≈ ForwardDiff.gradient(f, θ0) rtol = 1e-7 atol = 1e-8
     end
 end
+
+@testitem "Custom hierarchical model: forward and reverse parameter gradients" setup = [
+    ConditionalADSetup
+] tags = [:mooncake] begin
+    using SSMProblems, Mooncake
+    using GeneralisedFilters.GFTest: check_gradients
+    struct CustomConditionalModel{T} <: AbstractStateSpaceModel
+        components::T
+    end
+    SSMProblems.prior(m::CustomConditionalModel) = m.components[1]
+    SSMProblems.dyn(m::CustomConditionalModel) = m.components[2]
+    SSMProblems.obs(m::CustomConditionalModel) = m.components[3]
+    function custom_objective(θ)
+        model = conditional_ad_model(θ)
+        custom = CustomConditionalModel((prior(model), dyn(model), obs(model)))
+        return trajectory_logdensity(custom, KF(), xs, ys) - sum(abs2, θ) / 2
+    end
+    @test custom_objective(θ0) ≈ objective(θ0)
+    @test ForwardDiff.gradient(custom_objective, θ0) ≈ ForwardDiff.gradient(objective, θ0)
+    result = check_gradients(custom_objective, θ0)
+    @test result.agrees
+    @test result.ad ≈ ForwardDiff.gradient(objective, θ0) rtol = 1e-7 atol = 1e-8
+end

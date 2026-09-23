@@ -153,7 +153,7 @@ end
 
 function step(
     rng::AbstractRNG,
-    model::StateSpaceModel,
+    model::AbstractStateSpaceModel,
     algo::AbstractParticleFilter,
     iter::Integer,
     state,
@@ -203,24 +203,24 @@ BootstrapFilter(N::Integer; kwargs...) = ParticleFilter(N, LatentProposal(); kwa
 
 function simulate(
     rng::AbstractRNG,
-    model::StateSpaceModel,
+    model::AbstractStateSpaceModel,
     prop::LatentProposal,
     iter::Integer,
     state,
     observation,
 )
-    return simulate(rng, model.dyn, iter, state)
+    return simulate(rng, SSMProblems.dyn(model), iter, state)
 end
 
 function logdensity(
-    model::StateSpaceModel,
+    model::AbstractStateSpaceModel,
     prop::LatentProposal,
     iter::Integer,
     prev_state,
     new_state,
     observation,
 )
-    return logdensity(model.dyn, iter, prev_state, new_state)
+    return logdensity(SSMProblems.dyn(model), iter, prev_state, new_state)
 end
 
 # overwrite propagate for the bootstrap filter to remove redundant computation
@@ -241,7 +241,7 @@ abstract type AbstractLookAheadScore end
 function compute_logeta(
     rng::AbstractRNG,
     weight_strategy::AbstractLookAheadScore,
-    model::StateSpaceModel,
+    model::AbstractStateSpaceModel,
     algo,
     iter::Integer,
     state,
@@ -273,14 +273,16 @@ end
 function compute_logeta(
     rng::AbstractRNG,
     weight_strategy::RepresentativeStateLookAhead,
-    model::StateSpaceModel,
+    model::AbstractStateSpaceModel,
     algo,
     iter::Integer,
     state,
     observation,
 )
-    state_star = predictive_state(rng, model.dyn, weight_strategy, algo, iter, state)
-    return predictive_loglik(model.obs, algo, iter, state_star, observation)
+    state_star = predictive_state(
+        rng, SSMProblems.dyn(model), weight_strategy, algo, iter, state
+    )
+    return predictive_loglik(SSMProblems.obs(model), algo, iter, state_star, observation)
 end
 
 resampler(algo::AuxiliaryParticleFilter) = resampler(algo.pf)
@@ -297,7 +299,7 @@ end
 
 function step(
     rng::AbstractRNG,
-    model::StateSpaceModel,
+    model::AbstractStateSpaceModel,
     algo::AuxiliaryParticleFilter,
     iter::Integer,
     state,
@@ -333,7 +335,7 @@ end
 
 function move(
     rng::AbstractRNG,
-    model::StateSpaceModel,
+    model::AbstractStateSpaceModel,
     algo::AuxiliaryParticleFilter,
     iter::Integer,
     state,
