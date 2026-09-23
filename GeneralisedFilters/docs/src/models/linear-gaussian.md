@@ -193,3 +193,23 @@ The smoother allocates its history after the first update, so later states must 
 that storage and scalar type. The Kalman `marginal_loglikelihood` requires at least one
 observation and starts its total with the first likelihood increment. It does not force
 Float32 calculations to accumulate in Float64.
+
+## Particle weights and numeric types
+
+Particle weights take their numeric type from the evaluated log-density contributions,
+which need not have the same type as the latent state. For example, an integer-valued
+state can have a floating-point likelihood, and ForwardDiff parameters can produce dual
+weights. Initialization and the first complete filtering step may change these types.
+Subsequent steps must retain the numeric log-weight type established by that first update.
+Use consistent scalar types in your model's density calculations across time.
+
+If you implement custom particle-level updates, combine an existing weight and a new
+contribution with [`add_logweight`](@ref). Initial particles and bootstrap proposal
+corrections can contain an internal marker for an exact zero contribution. This operation
+handles the marker without choosing a floating-point type. Model density methods should
+return ordinary real scalars, including a numeric zero when appropriate.
+
+CSMC history preserves the numeric weight type established at the first update. Passing
+weights of a different type to that history raises an error rather than silently converting
+them. For differentiation through particle weights, disable resampling. This interface
+does not define a gradient estimator for discrete ancestor selection.

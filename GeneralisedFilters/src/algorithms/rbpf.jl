@@ -50,7 +50,9 @@ function predict_particle(
     )
 
     return Particle(
-        RBState(new_x, new_z), log_weight(particle) + logw_inc, particle.ancestor
+        RBState(new_x, new_z),
+        add_logweight(log_weight(particle), logw_inc),
+        particle.ancestor,
     )
 end
 
@@ -70,7 +72,7 @@ function update_particle(
     )
     return Particle(
         RBState(particle.state.x, new_z),
-        log_weight(particle) + log_increment,
+        add_logweight(log_weight(particle), log_increment),
         particle.ancestor,
     )
 end

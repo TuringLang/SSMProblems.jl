@@ -46,7 +46,8 @@ include("algorithms/interface.jl")
 """
     filter([rng,] model, algo, ys; ref_state=nothing)
 
-Run a filtering algorithm over observations `ys`, returning `(final_state, total_ll)`.
+Run a filtering algorithm over nonempty observations `ys`, returning `(final_state, total_ll)`.
+An empty observation sequence raises an `ArgumentError`.
 """
 function filter(
     rng::AbstractRNG,
@@ -56,8 +57,8 @@ function filter(
     ref_state=nothing,
 )
     _validate_observations(model, ys)
+    isempty(ys) && throw(ArgumentError("filter requires nonempty observations"))
     init_state = initialise(rng, model.prior, algo; ref_state)
-    isempty(ys) && return (init_state, 0.0)
 
     # First iteration peeled out for type stability.
     state, log_evidence = step(rng, model, algo, 1, init_state, ys[1]; ref_state)

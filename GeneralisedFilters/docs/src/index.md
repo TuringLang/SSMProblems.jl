@@ -86,7 +86,7 @@ state, loglikelihood = GeneralisedFilters.filter(model, KF(), observations)
 ```
 
 The result contains the Gaussian filtering distribution at time 3 and the log likelihood
-of all three observations. The covariance arguments specify variances, not standard
+of all three observations. Filtering requires at least one observation. The covariance arguments specify variances, not standard
 deviations. To obtain only the likelihood, use
 `marginal_loglikelihood(model, KF(), observations)`.
 

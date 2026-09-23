@@ -198,7 +198,7 @@ function _init_container(init_state::ParticleDistribution, state::ParticleDistri
     return DenseParticleContainer(
         initial_states,
         map(p -> p.state, state.particles),
-        Float64.(log_weights(state)),
+        log_weights(state),
         map(p -> p.ancestor, state.particles),
     )
 end
@@ -215,10 +215,7 @@ end
 function _update_container!(c::DenseParticleContainer, state::ParticleDistribution)
     particles = state.particles
     push!(
-        c,
-        map(p -> p.state, particles),
-        Float64.(log_weights(state)),
-        map(p -> p.ancestor, particles),
+        c, map(p -> p.state, particles), log_weights(state), map(p -> p.ancestor, particles)
     )
     return c
 end
@@ -367,6 +364,7 @@ function _csmc_sample(
 
     # Perform one CSMC-AS step on the current state
     function _csmc_as_step(state, t)
+        previous_state = state
         rs = _step_resampler(rng, model, pf, t, state, observations[t])
         if !will_resample(rs, state)
             # The trigger depends only on the previous cloud, which is held fixed during
@@ -389,7 +387,9 @@ function _csmc_sample(
             # afterwards gives the wrong distribution for all the other offspring.
             state = resample(rng, rs, state; ref_state, ref_idx=ancestor_idx)
         end
-        return move(rng, model, pf, t, state, observations[t]; ref_state)
+        state, increment = move(rng, model, pf, t, state, observations[t]; ref_state)
+        _check_weight_type(previous_state, state, t)
+        return state, increment
     end
 
     state, ll = _csmc_as_step(init_state, 1)

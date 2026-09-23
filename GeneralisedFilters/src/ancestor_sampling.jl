@@ -120,8 +120,10 @@ The log backward sampling weight (unnormalized).
 See also: [`future_conditional_density`](@ref)
 """
 function ancestor_weight(particle::Particle, dyn, algo, iter::Integer, ref_state; kwargs...)
-    return log_weight(particle) +
-           future_conditional_density(dyn, algo, iter, particle.state, ref_state; kwargs...)
+    return add_logweight(
+        log_weight(particle),
+        future_conditional_density(dyn, algo, iter, particle.state, ref_state; kwargs...),
+    )
 end
 
 # An APF changes proposal selection and carries its inverse-lookahead correction in

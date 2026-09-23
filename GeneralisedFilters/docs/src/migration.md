@@ -46,8 +46,9 @@ factorisation. Use `mean(state)` and `cov(state)` to inspect a result, or
 can still be supplied to Gaussian model components. The filter converts them to dense or
 static covariance storage for its calculations.
 
-The Kalman `marginal_loglikelihood` requires at least one observation. Empty inputs
+`filter` and `marginal_loglikelihood` require at least one observation. Empty inputs
 raise an `ArgumentError`, including when called through a conditional inner model.
+Use `initialise` if you only need the initial filtering state.
 
 ## Conditional SMC and particle Gibbs
 
@@ -101,3 +102,14 @@ numerical stability without changing these covariances.
 Use Julia's normal precompiled package loading. With the supported DynamicPPL
 version, source loading under Julia 1.12 with `--compiled-modules=no` encounters
 an upstream generated-function binding error.
+
+## Custom particle updates
+
+Use `add_logweight(old_weight, increment)` when extending particle-level weight updates.
+The initial zero-weight marker is internal bookkeeping and no longer supports generic
+numeric conversion or arithmetic. Ordinary density and proposal methods continue to return
+numeric log-density contributions.
+
+Particle weights may acquire their numeric type during the first complete step. Later
+steps must preserve that type. CSMC history now retains the weight precision instead of
+converting weights to Float64, and rejects incompatible subsequent weight types.

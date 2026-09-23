@@ -14,6 +14,7 @@ The historical fast-diff branch is not a dependency of this release.
 | Gibbs alternation | Outer-only references; recompute inner beliefs and refresh HMC target after every trajectory change | `test/integrations/particle_gibbs.jl`, `apf_srkf_turing.jl` |
 | Gaussian storage | Preserve structured model parameters; computational KF states use full dense/static covariance storage | `test/algorithms/kalman_storage.jl` |
 | Differentiation | ForwardDiff through the primal; Mooncake static numerical rule and derived rules for other supported representations | `test/integrations/conditional_ad.jl`, `structured_covariance_ad.jl` |
+| Particle weight types | Explicit zero markers, `add_logweight`, first-step promotion, stable later weights and preserved CSMC history precision | `test/components/weight_types.jl`, `weight_history.jl`, `test/integrations/particle_weight_ad.jl` |
 | Conditional resampling | Conditional offspring law, including systematic/stratified; AS occurs at population resampling events | `test/components/resamplers.jl`, `test/algorithms/csmc.jl` |
 | APF refreshment | Corrected filtering weights and selected-ancestor lookahead correction | `test/algorithms/apf_refreshment.jl` |
 | Stable RB refreshment | Square-root backward messages; exact AS/BS rejects filtering-state repair and backward jitter | `test/algorithms/sqrt_backward.jl` |

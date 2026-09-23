@@ -62,14 +62,14 @@ end
 
 function construct_new_state(
     state::ParticleDistribution{WT,PT}, idxs, ::Nothing
-) where {WT<:Number,PT}
+) where {WT,PT}
     new_particles = Vector{PT}(undef, length(state.particles))
     for i in eachindex(state.particles)
         particle = state.particles[idxs[i]]
         new_particles[i] = resample_ancestor(particle, idxs[i])
     end
 
-    return ParticleDistribution(new_particles, zero(WT))
+    return ParticleDistribution(new_particles, _zero_logweight(WT))
 end
 
 function resample_ancestor(particle::Particle, ancestor::Int)
@@ -180,7 +180,7 @@ function resample(
     ref_state::Union{Nothing,AbstractVector}=nothing,
     ref_idx::Integer=1,
 )
-    weights = softmax(log_weights(state) + auxiliary.log_weights)
+    weights = softmax(add_logweight.(log_weights(state), auxiliary.log_weights))
     auxiliary_weights = auxiliary.log_weights
     return resample(
         rng, auxiliary.resampler, state, weights; ref_state, ref_idx, auxiliary_weights
@@ -190,7 +190,7 @@ end
 function maybe_resample(
     rng::AbstractRNG, auxiliary::AuxiliaryResampler, state; ref_state=nothing
 )
-    weights = softmax(log_weights(state) + auxiliary.log_weights)
+    weights = softmax(add_logweight.(log_weights(state), auxiliary.log_weights))
     auxiliary_weights = auxiliary.log_weights
     return maybe_resample(
         rng, auxiliary.resampler, state, weights; ref_state, auxiliary_weights
@@ -198,7 +198,7 @@ function maybe_resample(
 end
 
 function will_resample(auxiliary::AuxiliaryResampler, state)
-    weights = softmax(log_weights(state) + auxiliary.log_weights)
+    weights = softmax(add_logweight.(log_weights(state), auxiliary.log_weights))
     return will_resample(auxiliary.resampler, state, weights)
 end
 function will_resample(auxiliary::AuxiliaryResampler, state, weights)
@@ -217,13 +217,16 @@ function construct_new_state(
         return resample_ancestor(particle, idxs[i], auxiliary_weights)
     end
 
-    # calculate the baseline log-likelihood (not a fan, but it works...)
-    LSE_1 = logsumexp(auxiliary_weights + log_weights(state))
-    LSE_2 = logsumexp(log_weights(state))
-    LSE_3 = logsumexp(log_weight.(new_particles))
+    # Preserve the APF first-stage correction, resolving count normalisers only
+    # against the numeric lookahead contributions.
+    LSE_1 = _weight_logsumexp(add_logweight.(auxiliary_weights, log_weights(state)))
+    LSE_2 = _weight_logsumexp(log_weights(state))
+    LSE_3 = _weight_logsumexp(log_weight.(new_particles))
     LSE_4 = TypelessBaseline(length(auxiliary_weights))
 
-    return ParticleDistribution(new_particles, -((LSE_1 - LSE_2) + (LSE_3 - LSE_4)))
+    baseline =
+        -add_logweight(_subtract_baseline(LSE_1, LSE_2), _subtract_baseline(LSE_3, LSE_4))
+    return ParticleDistribution(new_particles, baseline)
 end
 
 function resample_ancestor(

@@ -11,6 +11,11 @@ Julia 1.12.7 and the Turing 0.47–0.49 / DynamicPPL 0.42 integration.
   analytical likelihood evaluator serves both ordinary and conditional models.
 - Share inner component resolution between simulation, densities and Rao–Blackwellised
   particle filtering. Proposals receive the full particle state.
+- Require nonempty observations in `filter` as well as the Kalman likelihood, avoiding an
+  empty-data return that changes the inferred likelihood type.
+- Infer particle-weight scalar types from density contributions. Use `add_logweight` in
+  custom particle updates, preserve CSMC history precision, and require stable weight types
+  after the first completed step. Initial zero markers no longer act as generic numbers.
 - Store outer-only conditional-SMC references and recompute inner filtering states.
 - Refresh cached parameter-sampler targets when trajectories change. Turing uses the same
   marginalised trajectory objective and handles constrained parameters.

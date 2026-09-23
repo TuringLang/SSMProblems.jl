@@ -74,7 +74,7 @@ function predict(
     # For plain PF/guided: ll_baseline is 0.0 on entry, becomes LSE_before
     # For APF with resample: ll_baseline already stores negative correction; add LSE_before
     return ParticleDistribution(
-        particles, logsumexp(log_weights(state)) + state.ll_baseline
+        particles, _add_baseline(_weight_logsumexp(log_weights(state)), state.ll_baseline)
     )
 end
 
@@ -131,7 +131,9 @@ function predict_particle(
     new_x, log_increment = propagate(
         rng, dyn, algo, iter, particle.state, observation, ref_state
     )
-    return Particle(new_x, log_weight(particle) + log_increment, particle.ancestor)
+    return Particle(
+        new_x, add_logweight(log_weight(particle), log_increment), particle.ancestor
+    )
 end
 
 function update_particle(
@@ -142,7 +144,11 @@ function update_particle(
     observation,
 )
     log_increment = logdensity(obs, iter, particle.state, observation)
-    return Particle(particle.state, log_weight(particle) + log_increment, particle.ancestor)
+    return Particle(
+        particle.state,
+        add_logweight(log_weight(particle), log_increment),
+        particle.ancestor,
+    )
 end
 
 function step(
@@ -155,8 +161,11 @@ function step(
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
     rs = resampler(algo)
+    incoming = state
     state = maybe_resample(rng, rs, state; ref_state)
-    return move(rng, model, algo, iter, state, observation; ref_state)
+    result, ll = move(rng, model, algo, iter, state, observation; ref_state)
+    _check_weight_type(incoming, result, iter)
+    return result, ll
 end
 
 function sample_prior(rng::AbstractRNG, prior::StatePrior, algo::ParticleFilter, ref_state)
@@ -296,8 +305,11 @@ function step(
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
     rs = _step_resampler(rng, model, algo, iter, state, observation)
+    incoming = state
     state = maybe_resample(rng, rs, state; ref_state)
-    return move(rng, model, algo, iter, state, observation; ref_state)
+    result, ll = move(rng, model, algo, iter, state, observation; ref_state)
+    _check_weight_type(incoming, result, iter)
+    return result, ll
 end
 
 # Auxiliary weights affect ancestor proposals, not the filtering target used by AS/BS.

@@ -10,64 +10,67 @@ export DenseParticleContainer, ParticleTree
 
 ## TYPELESS INITIALIZERS ###################################################################
 
-"""
-    TypelessZero
+# Internal identities defer choosing a scalar type until a density is evaluated.
+struct TypelessZero end
 
-A lazy promotion for uninitialized particle weights whos type is not yet known at the first
-simulation of a particle filter.
-"""
-struct TypelessZero <: Number end
-
-Base.convert(::Type{T}, ::TypelessZero) where {T<:Number} = zero(T)
-Base.convert(::Type{TypelessZero}, ::TypelessZero) = TypelessZero()
-
-Base.:+(::TypelessZero, ::TypelessZero) = TypelessZero()
-
-Base.promote_rule(::Type{TypelessZero}, ::Type{T}) where {T<:Number} = T
-Base.promote_rule(::Type{TypelessZero}, ::Type{TypelessZero}) = TypelessZero
-
-Base.zero(::TypelessZero) = TypelessZero()
-Base.zero(::Type{TypelessZero}) = TypelessZero()
-
-Base.iszero(::TypelessZero) = true
-Base.isone(::TypelessZero) = false
-
-Base.show(io::IO, ::TypelessZero) = print(io, "TypelessZero()")
-
-"""
-    TypelessBaseline
-
-A lazy promotion for the computation of log-likelihood baslines given a collection of
-unweighted particles.
-"""
-struct TypelessBaseline <: Number
-    N::Int64
+struct TypelessBaseline
+    N::Int
 end
 
-# Constructors for compatibility with Base.Number
-TypelessBaseline(x::TypelessBaseline) = x
-TypelessBaseline(x::Base.TwicePrecision) = TypelessBaseline(Int64(x))
-TypelessBaseline(x::AbstractChar) = TypelessBaseline(Int64(x))
+export add_logweight
 
-Base.convert(::Type{T}, b::TypelessBaseline) where {T<:Number} = T(log(b.N))
-Base.promote_rule(::Type{TypelessBaseline}, ::Type{T}) where {T<:Number} = T
+"""
+    add_logweight(a, b)
 
-Base.iszero(::TypelessBaseline) = false
-Base.isone(::TypelessBaseline) = false
+Combine log-weight contributions using ordinary numeric addition. An initial particle
+weight or an exact bootstrap correction may be an internal zero marker; in that case,
+return the other contribution unchanged. Use this operation in custom particle methods
+instead of adding directly to an initial particle's `log_w` field.
+"""
+add_logweight(a::Real, b::Real) = a + b
+add_logweight(::TypelessZero, b::Real) = b
+add_logweight(a::Real, ::TypelessZero) = a
+add_logweight(::TypelessZero, ::TypelessZero) = TypelessZero()
 
-function LogExpFunctions.logsumexp(weights::AbstractVector{TypelessZero})
+_zero_logweight(::Type{T}) where {T<:Real} = zero(T)
+_zero_logweight(::Type{TypelessZero}) = TypelessZero()
+
+# Float16 cannot represent ordinary large particle counts even though log(N) fits.
+_log_count_like(x::Float16, N::Integer) = Float16(log(Float64(N)))
+_log_count_like(x::Real, N::Integer) = log(oftype(x, N))
+
+_weight_logsumexp(weights::AbstractVector{<:Real}) = logsumexp(weights)
+function _weight_logsumexp(weights::AbstractVector{TypelessZero})
     return TypelessBaseline(length(weights))
 end
 
-function LogExpFunctions.softmax(x::AbstractVector{TypelessZero})
-    # TODO: horrible, but theoretically never used... except in the unit tests
-    return fill(1 / length(x), length(x))
+_weight_probabilities(weights::AbstractVector{<:Real}) = softmax(weights)
+function _weight_probabilities(weights::AbstractVector{TypelessZero})
+    # Sampling probabilities before any density is evaluated do not fix the later
+    # likelihood type. Preserve the ordinary uniform resampling representation.
+    return fill(1 / length(weights), length(weights))
 end
 
-Base.:+(::TypelessZero, b::TypelessBaseline) = b
-Base.:+(b::TypelessBaseline, ::TypelessZero) = b
+_add_baseline(a::Real, b::Real) = a + b
+_add_baseline(::TypelessZero, b::Real) = b
+_add_baseline(a::Real, ::TypelessZero) = a
+_add_baseline(::TypelessZero, ::TypelessZero) = TypelessZero()
+_add_baseline(a::TypelessBaseline, ::TypelessZero) = a
+_add_baseline(::TypelessZero, b::TypelessBaseline) = b
+_add_baseline(a::TypelessBaseline, b::Real) = _log_count_like(b, a.N) + b
+_add_baseline(a::Real, b::TypelessBaseline) = a + _log_count_like(a, b.N)
 
-Base.show(io::IO, b::TypelessBaseline) = print(io, "Typeless(log($(b.N)))")
+_subtract_baseline(a::Real, b::Real) = a - b
+_subtract_baseline(a::Real, ::TypelessZero) = a
+_subtract_baseline(::TypelessZero, b::Real) = -b
+_subtract_baseline(::TypelessZero, ::TypelessZero) = TypelessZero()
+_subtract_baseline(a::Real, b::TypelessBaseline) = a - _log_count_like(a, b.N)
+_subtract_baseline(a::TypelessBaseline, b::Real) = _log_count_like(b, a.N) - b
+function _subtract_baseline(a::TypelessBaseline, b::TypelessBaseline)
+    a.N == b.N ||
+        throw(ArgumentError("cannot cancel normalizers with different particle counts"))
+    return TypelessZero()
+end
 
 ## PARTICLES ###############################################################################
 
@@ -127,6 +130,28 @@ mutable struct ParticleDistribution{WT,PT<:Particle,VT<:AbstractVector{PT}}
     ll_baseline::WT
 end
 
+# A completed update establishes a concrete numeric weight representation. Inspect
+# particle storage types rather than values so this check compiles away on stable paths.
+_particle_weight_type(::ParticleDistribution{W,<:Particle{S,T}}) where {W,S,T} = T
+_particle_weight_type(::ParticleDistribution) = Any
+
+function _check_weight_type(before::ParticleDistribution, after::ParticleDistribution, t)
+    T = _particle_weight_type(after)
+    (isconcretetype(T) && T <: Real) || throw(
+        ArgumentError(
+            "Particle updates must produce one concrete real log-weight type, got $T"
+        ),
+    )
+    if t != 1 && _particle_weight_type(before) !== T
+        throw(
+            ArgumentError(
+                "Particle log-weight type changed after the first step from $(_particle_weight_type(before)) to $T at step $t. Use consistent density scalar types after initialization.",
+            ),
+        )
+    end
+    return nothing
+end
+
 # Helper functions to make ParticleDistribution behave like a collection
 Base.collect(state::ParticleDistribution) = state.particles
 Base.length(state::ParticleDistribution) = length(state.particles)
@@ -138,7 +163,7 @@ Base.iterate(state::ParticleDistribution) = iterate(state.particles)
 Base.@propagate_inbounds Base.getindex(state::ParticleDistribution, i) = state.particles[i]
 
 log_weights(state::ParticleDistribution) = map(p -> log_weight(p), state.particles)
-get_weights(state::ParticleDistribution) = softmax(log_weights(state))
+get_weights(state::ParticleDistribution) = _weight_probabilities(log_weights(state))
 
 # Helpers for StatsBase compatibility
 StatsBase.weights(state::ParticleDistribution) = StatsBase.Weights(get_weights(state))
@@ -162,7 +187,7 @@ function marginalise!(state::ParticleDistribution, particles)
     LSE_after = logsumexp(log_weight.(particles))
 
     # Compute log-likelihood increment: works for both PF and APF cases
-    ll_increment = LSE_after - state.ll_baseline
+    ll_increment = _subtract_baseline(LSE_after, state.ll_baseline)
 
     # Create new particles with normalized weights
     particles = map(p -> Particle(p.state, p.log_w - LSE_after, p.ancestor), particles)
@@ -381,13 +406,20 @@ end
 function Base.push!(
     c::DenseParticleContainer{T0,T,WT}, states, weights, ancestors
 ) where {T0,T,WT}
+    if eltype(weights) !== WT
+        throw(
+            ArgumentError(
+                "Particle history weight type changed from $WT to $(eltype(weights)). " *
+                "Establish the weight type from the completed first update and keep it " *
+                "consistent at subsequent steps.",
+            ),
+        )
+    end
     return throw(
         ArgumentError(
-            "Subsequent states/weights have type ($(eltype(states)), $(eltype(weights))) " *
-            "but the container's subsequent state/weight types are ($T, $WT). If the " *
-            "initial and subsequent types are intentionally different, construct the " *
-            "container with `DenseParticleContainer(initial_states, states_t1, " *
-            "weights_t1, ancestors_t1)` (or `DenseParticleContainer(initial_states, T)`).",
+            "Particle history state type changed from $T to $(eltype(states)). " *
+            "If initial and subsequent states have different types, construct the history " *
+            "with DenseParticleContainer(initial_states, states_t1, weights_t1, ancestors_t1).",
         ),
     )
 end

@@ -112,7 +112,7 @@ end
     end
 end
 
-@testitem "Empty filtering and simulation do not evaluate a transition" begin
+@testitem "Filtering rejects empty data and zero-step simulation avoids transitions" begin
     using GeneralisedFilters
     using StaticArrays
     using Random
@@ -120,9 +120,11 @@ end
     d = TimeVaryingDynamics(ctx -> error("no transition should be evaluated"))
     o = TimeVaryingObservation(ctx -> error("no observation should be evaluated"))
     model = StateSpaceModel(p, d, o)
-    state, ll = GeneralisedFilters.filter(model, KF(), SVector{1,Float64}[])
-    @test state == distribution(p) || isapprox(state, distribution(p))
-    @test ll == 0
+    for af in (KF(), SRKF(), BF(2))
+        @test_throws ArgumentError GeneralisedFilters.filter(
+            model, af, SVector{1,Float64}[]
+        )
+    end
     x0, xs, ys = simulate(MersenneTwister(2), model, 0)
     @test x0 isa SVector{1,Float64}
     @test isempty(xs) && isempty(ys)
