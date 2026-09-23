@@ -4,7 +4,7 @@ using Random: rand
 
 export AbstractLikelihood, InformationLikelihood, DiscreteLikelihood, log_likelihoods
 export ReferenceTrajectory
-export DenseParticleContainer, ParticleTree
+export DenseParticleContainer, ParticleTree, get_ancestry
 
 """Containers used for storing representations of the filtering distribution."""
 
@@ -340,15 +340,29 @@ states with a different type will raise an error.
 
 # Constructors
 
+    DenseParticleContainer(initial, first_state)
     DenseParticleContainer(initial_states)
     DenseParticleContainer(initial_states, T)
     DenseParticleContainer(initial_states, states_t1, weights_t1, ancestors_t1)
 
+With particle distributions, `DenseParticleContainer(initial, first_state)` infers both
+state and weight types from the first completed step. Append later results with
+`push!(history, state)`. For the raw-vector constructors:
+
 - First form: assumes `T == T0`.
 - Second form: explicit subsequent-state type `T` (the container starts empty for t≥1).
+  These two raw-vector forms use Float64 weight storage. Use first-step data to infer
+  a different weight type.
 - Third form: construct directly from the initial states and the time-1 states, weights,
   and ancestors — `T` is inferred from `states_t1`. Prefer this when the initial and
   subsequent state types differ so that `T` is inferred from concrete data.
+
+# Ownership
+
+Constructors and append operations copy collection buffers but retain the state objects
+inside them. Do not mutate stored state objects. Use an explicit `deepcopy` of an input
+particle distribution when snapshots of mutable states are needed. Returned trajectories
+also share their state objects with storage.
 
 # Mutation
 
@@ -364,7 +378,7 @@ end
 
 function DenseParticleContainer(initial_states::Vector{T0}) where {T0}
     return DenseParticleContainer{T0,T0,Float64}(
-        initial_states,
+        copy(initial_states),
         Vector{Vector{T0}}(),
         Vector{Vector{Float64}}(),
         Vector{Vector{Int}}(),
@@ -373,7 +387,7 @@ end
 
 function DenseParticleContainer(initial_states::Vector{T0}, ::Type{T}) where {T0,T}
     return DenseParticleContainer{T0,T,Float64}(
-        initial_states,
+        copy(initial_states),
         Vector{Vector{T}}(),
         Vector{Vector{Float64}}(),
         Vector{Vector{Int}}(),
@@ -386,8 +400,14 @@ function DenseParticleContainer(
     weights_t1::Vector{WT},
     ancestors_t1::AbstractVector{<:Integer},
 ) where {T0,T,WT}
+    _validate_history_step(states_t1, ancestors_t1, length(initial_states))
+    length(weights_t1) == length(states_t1) ||
+        throw(DimensionMismatch("one weight per state is required"))
     return DenseParticleContainer{T0,T,WT}(
-        initial_states, [states_t1], [weights_t1], [Vector{Int}(ancestors_t1)]
+        copy(initial_states),
+        [copy(states_t1)],
+        [copy(weights_t1)],
+        [Vector{Int}(ancestors_t1)],
     )
 end
 
@@ -397,9 +417,15 @@ function Base.push!(
     weights::Vector{WT},
     ancestors::AbstractVector{<:Integer},
 ) where {T0,T,WT}
-    push!(c.states, states)
-    push!(c.weights, weights)
-    push!(c.ancestors, Vector{Int}(ancestors))
+    _validate_history_step(states, ancestors, length(c.initial_states))
+    length(weights) == length(states) ||
+        throw(DimensionMismatch("one weight per state is required"))
+    stored_states, stored_weights, stored_ancestors = copy(states),
+    copy(weights),
+    Vector{Int}(ancestors)
+    push!(c.states, stored_states)
+    push!(c.weights, stored_weights)
+    push!(c.ancestors, stored_ancestors)
     return c
 end
 
@@ -487,14 +513,28 @@ subsequent-state buffer grows as needed.
 
 # Constructors
 
+    ParticleTree(initial; capacity)
+    ParticleTree(initial, first_state; capacity)
     ParticleTree(initial_states, M)
     ParticleTree(initial_states, T, M)
     ParticleTree(initial_states, states_t1, ancestors_t1, M)
+
+For particle distributions, `ParticleTree(initial)` assumes the later state type matches
+the initial type. `ParticleTree(initial, first_state)` infers the later type from the first
+completed step and stores that step, including its links to time zero. Append each later
+result with `push!(tree, state)`, which validates input, prunes, and inserts it. `capacity`
+controls the initial storage allocation and grows automatically. For raw-vector inputs:
 
 - First form: assumes `T == T0`.
 - Second form: explicit subsequent-state type `T`.
 - Third form: construct with time-1 data already inserted — `T` is inferred from
   `states_t1`. Prefer this when initial and subsequent types differ.
+
+# Ownership
+
+Collection buffers are copied, but the state objects they contain are shared. Do not mutate
+stored states, including through a retrieved trajectory. Copy an input particle distribution
+explicitly with `deepcopy` when an independent snapshot is needed.
 
 # Reference
 Jacob, P., Murray L., & Rubenthaler S. (2015). Path storage in the particle filter
@@ -516,6 +556,9 @@ function ParticleTree(initial_states::Vector{T0}, M::Integer) where {T0}
 end
 
 function ParticleTree(initial_states::Vector{T0}, ::Type{T}, M::Integer) where {T0,T}
+    isempty(initial_states) &&
+        throw(ArgumentError("particle history requires a nonempty initial population"))
+    M > 0 || throw(ArgumentError("particle tree capacity must be positive"))
     states = Vector{T}(undef, M)
     parents = zeros(Int64, M)
     is_penultimate = fill(false, M)
@@ -524,7 +567,7 @@ function ParticleTree(initial_states::Vector{T0}, ::Type{T}, M::Integer) where {
     append_to_stack!(free_indices, collect(Int64, M:-1:1))
     leaves = collect(Int64, 1:length(initial_states))
     return ParticleTree{T0,T}(
-        initial_states,
+        copy(initial_states),
         states,
         parents,
         is_penultimate,
@@ -572,10 +615,11 @@ end
 function Base.insert!(
     tree::ParticleTree{T0,T}, states::Vector{T}, ancestors::AbstractVector{<:Integer}
 ) where {T0,T}
+    _validate_history_step(states, ancestors, length(tree.leaves))
     parents_of_new = getindex(tree.leaves, ancestors)
     parent_in_initial = tree.leaves_in_initial[]
 
-    if length(tree.free_indices) < length(ancestors)
+    while length(tree.free_indices) < length(ancestors)
         @debug "expanding tree"
         expand!(tree)
     end
@@ -595,7 +639,7 @@ function Base.insert!(tree::ParticleTree{T0,T}, states, ancestors) where {T0,T}
         ArgumentError(
             "Subsequent particle states have type $(eltype(states)) but the tree's " *
             "subsequent-state type is $T. If the initial and subsequent types are " *
-            "intentionally different, construct the tree with " *
+            "intentionally different, use ParticleTree(initial, first_state), or " *
             "`ParticleTree(initial_states, states_t1, ancestors_t1, M)` (or " *
             "`ParticleTree(initial_states, T, M)`).",
         ),
@@ -665,4 +709,81 @@ function rand(
     end
     reverse!(xs)
     return ReferenceTrajectory(tree.initial_states[j], xs)
+end
+
+# Public history operations accept complete particle populations. Ancestor indices
+# always refer to positions in the preceding population, including time zero.
+function _validate_history_step(states, ancestors, N)
+    N > 0 || throw(ArgumentError("particle history requires a nonempty initial population"))
+    Base.require_one_based_indexing(states, ancestors)
+    length(states) == N || throw(
+        DimensionMismatch("particle history requires a fixed population of $N states")
+    )
+    length(ancestors) == N || throw(DimensionMismatch("one ancestor per state is required"))
+    all(a -> 1 <= a <= N, ancestors) ||
+        throw(ArgumentError("ancestor indices must be in 1:$N"))
+    return nothing
+end
+
+function _tree_capacity(N::Integer)
+    return if N > 0
+        max(N, floor(Int, N * log(N)))
+    else
+        throw(ArgumentError("particle history requires a nonempty initial population"))
+    end
+end
+_history_states(state::ParticleDistribution) = map(p -> p.state, state.particles)
+_history_ancestors(state::ParticleDistribution) = map(p -> p.ancestor, state.particles)
+
+function ParticleTree(
+    initial::ParticleDistribution; capacity::Integer=_tree_capacity(length(initial))
+)
+    return ParticleTree(_history_states(initial), capacity)
+end
+
+function ParticleTree(
+    initial::ParticleDistribution,
+    first_state::ParticleDistribution;
+    capacity::Integer=_tree_capacity(length(initial)),
+)
+    return ParticleTree(
+        _history_states(initial),
+        _history_states(first_state),
+        _history_ancestors(first_state),
+        capacity,
+    )
+end
+
+function Base.push!(tree::ParticleTree{T0,T}, state::ParticleDistribution) where {T0,T}
+    states, ancestors = _history_states(state), _history_ancestors(state)
+    eltype(states) === T || throw(
+        ArgumentError(
+            "Particle history state type changed from $T to $(eltype(states)). If the prior and first filtered state have different types, use ParticleTree(initial, first_state).",
+        ),
+    )
+    _validate_history_step(states, ancestors, length(tree.leaves))
+    ancestors = Vector{Int}(ancestors)
+    offspring = get_offspring(ancestors)
+    # All input checks and metadata conversion precede pruning.
+    prune!(tree, offspring)
+    insert!(tree, states, ancestors)
+    return tree
+end
+
+function DenseParticleContainer(
+    initial::ParticleDistribution, first_state::ParticleDistribution
+)
+    _check_weight_type(initial, first_state, 1)
+    return DenseParticleContainer(
+        _history_states(initial),
+        _history_states(first_state),
+        log_weights(first_state),
+        _history_ancestors(first_state),
+    )
+end
+
+function Base.push!(history::DenseParticleContainer, state::ParticleDistribution)
+    return push!(
+        history, _history_states(state), log_weights(state), _history_ancestors(state)
+    )
 end

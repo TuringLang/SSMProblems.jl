@@ -31,11 +31,11 @@ end
 function filter_with_ancestry(rng, model, algo, ys)
     initial = GeneralisedFilters.initialise(rng, model.prior, algo)
     state, ll = GeneralisedFilters.step(rng, model, algo, 1, initial, ys[1])
-    tree = GeneralisedFilters._init_tree(initial, state)
+    tree = ParticleTree(initial, state)
     for t in 2:length(ys)
         state, inc = GeneralisedFilters.step(rng, model, algo, t, state, ys[t])
         ll += inc
-        GeneralisedFilters._update_tree!(tree, state)
+        push!(tree, state)
     end
     return state, ll, tree
 end

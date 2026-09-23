@@ -46,6 +46,8 @@ and algorithm interface with a complete filtering example. From there:
   how to define models and their Rao–Blackwellised structure.
 - [Particle Gibbs and Turing](GeneralisedFilters/docs/src/inference.md) covers joint inference
   for trajectories and parameters.
+- [Recording filtering results](GeneralisedFilters/docs/src/history.md) shows manual
+  loops and particle ancestry storage.
 - The [trend inflation example](GeneralisedFilters/examples/trend-inflation/script.jl)
   applies Rao–Blackwellised filtering to a model with stochastic volatility.
 

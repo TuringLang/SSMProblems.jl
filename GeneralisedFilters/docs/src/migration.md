@@ -113,3 +113,15 @@ numeric log-density contributions.
 Particle weights may acquire their numeric type during the first complete step. Later
 steps must preserve that type. CSMC history now retains the weight precision instead of
 converting weights to Float64, and rejects incompatible subsequent weight types.
+
+## Recording histories without callbacks
+
+Use `ParticleTree(initial)` when initial and later state types match, or
+`ParticleTree(initial, first_state)` to infer the later type from the first completed step.
+`DenseParticleContainer(initial, first_state)` infers both state and weight types.
+Append subsequent results with `push!(container, state)`.
+
+Containers copy collection buffers but share the state objects inside them. Custom
+transitions and updates used with history storage must not mutate retained states. Use
+explicit snapshots where necessary. See [Recording filtering results](history.md) for
+an executable loop and ownership guidance.

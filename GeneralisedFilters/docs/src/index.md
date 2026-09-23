@@ -99,7 +99,8 @@ models can use StaticArrays in place of ordinary arrays.
 Read [Models and conditioning](models/linear-gaussian.md) to define a hierarchical model
 and see how fixing an outer trajectory gives a conditional inner model. Then follow
 [Particle Gibbs and Turing](inference.md) for joint trajectory and parameter inference.
-The **Examples** section works through trend inflation with stochastic volatility.
+Read [Recording filtering results](history.md) for manual loops and particle ancestry
+storage. The **Examples** section works through trend inflation with stochastic volatility.
 
 The [API reference](api.md) lists the available types and operations. Existing users
 upgrading from 0.4.2 can consult the [migration guide](migration.md).

@@ -178,46 +178,16 @@ end
 
 ## PARTICLE TREE / CONTAINER HELPERS ######################################################
 
-# Capacity heuristic from Jacob, Murray & Rubenthaler (2015)
-_tree_capacity(N::Integer) = max(N, floor(Int64, N * log(N)))
-
-# Construct a ParticleTree using both the time-0 and time-1 particle distributions so
-# that the subsequent-state type `T` is inferred from the time-1 states (which may
-# differ from the type of the initial states in Rao-Blackwellised settings).
-function _init_tree(init_state::ParticleDistribution, state::ParticleDistribution)
-    initial_states = map(p -> p.state, init_state.particles)
-    states_t1 = map(p -> p.state, state.particles)
-    ancestors_t1 = map(p -> p.ancestor, state.particles)
-    return ParticleTree(
-        initial_states, states_t1, ancestors_t1, _tree_capacity(length(initial_states))
-    )
+# Use the same container operations exposed for manual filtering loops.
+function _init_tree(initial::ParticleDistribution, state::ParticleDistribution)
+    return ParticleTree(initial, state)
 end
-
-function _init_container(init_state::ParticleDistribution, state::ParticleDistribution)
-    initial_states = map(p -> p.state, init_state.particles)
-    return DenseParticleContainer(
-        initial_states,
-        map(p -> p.state, state.particles),
-        log_weights(state),
-        map(p -> p.ancestor, state.particles),
-    )
+function _init_container(initial::ParticleDistribution, state::ParticleDistribution)
+    return DenseParticleContainer(initial, state)
 end
-
-function _update_tree!(tree::ParticleTree, state::ParticleDistribution)
-    particles = state.particles
-    ancestors = map(p -> p.ancestor, particles)
-    states = map(p -> p.state, particles)
-    prune!(tree, get_offspring(ancestors))
-    insert!(tree, states, ancestors)
-    return tree
-end
-
-function _update_container!(c::DenseParticleContainer, state::ParticleDistribution)
-    particles = state.particles
-    push!(
-        c, map(p -> p.state, particles), log_weights(state), map(p -> p.ancestor, particles)
-    )
-    return c
+_update_tree!(tree::ParticleTree, state::ParticleDistribution) = push!(tree, state)
+function _update_container!(history::DenseParticleContainer, state::ParticleDistribution)
+    return push!(history, state)
 end
 
 ## BACKWARD PREDICTIVE LIKELIHOODS #########################################################

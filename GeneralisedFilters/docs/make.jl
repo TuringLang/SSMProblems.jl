@@ -66,6 +66,7 @@ makedocs(;
         "Overview" => "index.md",
         "Models and conditioning" => "models/linear-gaussian.md",
         "Particle Gibbs and Turing" => "inference.md",
+        "Recording filtering results" => "history.md",
         "Examples" =>
             [joinpath("examples", f) for f in readdir(EXAMPLES_OUT) if endswith(f, ".md")],
         "API reference" => "api.md",
