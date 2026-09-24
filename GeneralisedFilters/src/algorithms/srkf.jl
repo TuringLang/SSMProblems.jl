@@ -1,136 +1,104 @@
 using StaticArrays: SOneTo, SUnitRange
-using LinearAlgebra: qr, UpperTriangular, Diagonal, Cholesky, cholesky, diag, dot
+using LinearAlgebra: qr, UpperTriangular, Diagonal, cholesky, diag, dot
 
 export SRKalmanFilter, SRKF
 
 """
-    SRKalmanFilter(; jitter=nothing)
+    SRKalmanFilter()
 
-Square-root Kalman filter for linear Gaussian state space models.
+Square-root Kalman filter for linear-Gaussian state-space models. Propagates the Cholesky
+factor of the covariance directly via QR factorisation, keeping the covariance positive
+semi-definite by construction (no repair is required).
 
-Uses QR factorization to propagate the Cholesky factor of the covariance matrix
-directly, avoiding the numerical instabilities associated with forming and
-subtracting full covariance matrices.
+The covariance is represented as `Σ = U'U` with `U` upper triangular; the filtering state is
+a [`SqrtGaussianState`](@ref). Explicit [`CovarianceFactor`](@ref)s may supply
+rank-deficient prior and process-noise roots. Plain covariance arrays are Cholesky-factorized
+and must be positive definite. Observation noise must be positive definite.
 
-# Fields
-- `jitter::Union{Nothing, Real}`: Optional value added to the covariance matrix after the
-  update step to improve numerical stability. If `nothing`, no jitter is applied.
-
-# Algorithm
-The SRKF represents the covariance as `Σ = U' * U` where `U` is upper triangular.
-
-**Predict Step**: Given filtered state:
-1. Form matrix `A = [[√Q], [A*U']]`
-2. QR factorize to obtain `U_new` (predicted square-root covariance)
-
-**Update Step**: Given predicted state and observation `y`:
-1. Form matrix `A = [[√R, H*U'], [0, U']]`
-2. QR factorize: `Q, B = qr(A)` where `B` is upper triangular
-3. Extract `U_new` (posterior square-root covariance) from bottom-right block
-4. Compute Kalman gain from the factorization components
-
-See also: [`KalmanFilter`](@ref)
+Likelihood differentiation is supported on nondegenerate QR branches. Derivatives through
+rank changes or zero QR pivots are not supported; singular filtering support does not imply
+smooth derivatives of a chosen factor representation.
 """
-struct SRKalmanFilter{T<:Union{Nothing,Real}} <: AbstractFilter
-    jitter::T
-end
-SRKalmanFilter(; jitter=nothing) = SRKalmanFilter(jitter)
-
+struct SRKalmanFilter <: AbstractFilter end
 SRKF() = SRKalmanFilter()
 
-function initialise(
-    rng::AbstractRNG, prior::GaussianPrior, filter::SRKalmanFilter; kwargs...
+"""
+    marginal_loglikelihood(model, ::SRKalmanFilter, ys)
+
+Evaluate the deterministic square-root Kalman likelihood through the ordinary filter.
+"""
+function marginal_loglikelihood(
+    model::AbstractStateSpaceModel, af::SRKalmanFilter, ys::AbstractVector
 )
-    μ0, Σ0 = calc_initial(prior; kwargs...)
-    return MvNormal(μ0, Σ0)
+    return last(filter(model, af, ys))
+end
+
+function initialise(
+    ::AbstractRNG, prior::GaussianPrior, ::SRKalmanFilter; ref_state=nothing
+)
+    return SqrtGaussianState(prior.μ0, _upper_covariance_root(prior.Σ0))
 end
 
 function predict(
-    rng::AbstractRNG,
-    dyn::LinearGaussianLatentDynamics,
-    algo::SRKalmanFilter,
-    iter::Integer,
-    state::MvNormal,
-    observation=nothing;
-    kwargs...,
+    ::AbstractRNG,
+    dyn,
+    ::SRKalmanFilter,
+    t::Integer,
+    state::SqrtGaussianState,
+    y;
+    ref_state=nothing,
 )
-    dyn_params = calc_params(dyn, iter; kwargs...)
-    return srkf_predict(state, dyn_params)
+    return srkf_predict(
+        state, _linear_component(resolve(dyn, (; t)), LinearGaussianDynamics)
+    )
 end
 
-function update(
-    obs::LinearGaussianObservationProcess,
-    algo::SRKalmanFilter,
-    iter::Integer,
-    state::MvNormal,
-    observation::AbstractVector;
-    kwargs...,
-)
-    obs_params = calc_params(obs, iter; kwargs...)
-    state, ll = srkf_update(state, obs_params, observation, algo.jitter)
-    return state, ll
+function update(obs, ::SRKalmanFilter, t::Integer, state::SqrtGaussianState, y)
+    return srkf_update(
+        state, _linear_component(resolve(obs, (; t)), LinearGaussianObservation), y
+    )
 end
 
 """
     _correct_cholesky_sign(R)
 
-Ensure the diagonal of an upper triangular matrix is positive.
-
-QR factorization produces an upper triangular R that may have negative diagonal elements. 
-For use as a Cholesky factor, the diagonal must be positive. This function multiplies rows
-by -1 as needed, in an StaticArray-compatible fashion.
+Flip rows of an upper triangular matrix so its diagonal is positive, as required for use as a
+Cholesky factor (QR factorisation may return negative diagonal entries).
 """
-_correct_cholesky_sign(R) = Diagonal(sign.(diag(R))) * R
+_qr_upper(M) = qr(M).R
 
-"""
-    srkf_predict(state, dyn_params)
+_correct_cholesky_sign(R) = Diagonal(map(x -> x < zero(x) ? -one(x) : one(x), diag(R))) * R
 
-Perform the square-root Kalman filter predict step.
+_root_padding(F::AbstractMatrix) = zeros(eltype(F), size(F, 1), size(F, 1))
+_root_padding(F::StaticMatrix{N,M,T}) where {N,M,T} = zero(SMatrix{N,N,T})
 
-Given the filtered state and dynamics parameters `(A, b, Q)`, compute the predicted
-state using QR factorization.
-"""
-function srkf_predict(state::MvNormal, dyn_params)
-    μ, Σ = params(state)
-    A, b, Q = dyn_params
+_upper_covariance_root(C::AbstractMatrix) = cholesky(Symmetric(C)).U
+function _upper_covariance_root(C::CovarianceFactor)
+    F = C.factor
+    # Padding supports a rectangular, even zero-rank, initial covariance factor.
+    R = _qr_upper(vcat(F', _root_padding(F)))
+    return UpperTriangular(_correct_cholesky_sign(R))
+end
 
-    U = cholesky(Σ).U
-    U_Q = cholesky(Q).U
-
-    μ̂ = A * μ + b
-    Û = _srkf_predict_covariance(U, A, U_Q)
-
-    return MvNormal(μ̂, PDMat(Cholesky(UpperTriangular(Û))))
+function srkf_predict(state::SqrtGaussianState, d::LinearGaussianDynamics)
+    μ, U = state.μ, state.U
+    U_Q = _covariance_root(d.Q)'
+    μ̂ = d.A * μ + d.b
+    Û = _srkf_predict_covariance(U, d.A, U_Q)
+    return SqrtGaussianState(μ̂, UpperTriangular(Û))
 end
 
 function _srkf_predict_covariance(U, A, U_Q)
     M = vcat(U_Q, U * A')
-    _, R = qr(M)
+    R = _qr_upper(M)
     return _correct_cholesky_sign(R)
 end
 
-"""
-    srkf_update(state, obs_params, observation, jitter)
-
-Perform the square-root Kalman filter update step.
-
-Given the predicted state, observation parameters `(H, c, R)`, and observation `y`,
-compute the filtered state and log-likelihood using QR factorization.
-"""
-function srkf_update(state::MvNormal, obs_params, observation, jitter)
-    μ, Σ = params(state)
-    H, c, R = obs_params
-
-    U = cholesky(Σ).U
-    U_R = cholesky(R).U
-
-    μ̂, Û, ll = _srkf_update_covariance(μ, U, observation, H, c, U_R)
-
-    if !isnothing(jitter)
-        Û = Û + jitter * I
-    end
-
-    return MvNormal(μ̂, PDMat(Cholesky(UpperTriangular(Û)))), ll
+function srkf_update(state::SqrtGaussianState, o::LinearGaussianObservation, y)
+    μ, U = state.μ, state.U
+    U_R = _upper_covariance_root(o.R)
+    μ̂, Û, ll = _srkf_update_covariance(μ, U, y, o.H, o.c, U_R)
+    return SqrtGaussianState(μ̂, UpperTriangular(Û)), ll
 end
 
 function _srkf_update_covariance(μ, U, y, H, c, U_R)
@@ -138,10 +106,10 @@ function _srkf_update_covariance(μ, U, y, H, c, U_R)
     Dx = size(H, 2)
 
     M = _srkf_form_update_matrix(U, H, U_R)
-    _, R = qr(M)
+    R = _qr_upper(M)
     R = _correct_cholesky_sign(R)
 
-    U_S, PHt, Û = _srkf_extract_update_components(R, Dx, Dy)
+    U_S, PHt, Û = _srkf_extract_update_components(R, H)
 
     z = y - H * μ - c
     w = U_S' \ z
@@ -164,7 +132,8 @@ function _srkf_form_update_matrix(U, H, U_R)
     return M
 end
 
-function _srkf_extract_update_components(R, Dx, Dy)
+function _srkf_extract_update_components(R, H)
+    Dy, Dx = size(H)
     U_S = R[1:Dy, 1:Dy]
     PHt = R[1:Dy, (Dy + 1):(Dy + Dx)]'
     Û = R[(Dy + 1):(Dy + Dx), (Dy + 1):(Dy + Dx)]
@@ -175,29 +144,32 @@ function _srkf_loglikelihood(w, U_S, Dy)
     return -0.5 * (dot(w, w) + 2 * sum(log.(diag(U_S))) + Dy * log(2π))
 end
 
-# StaticArrays specializations for type stability
+# StaticArrays specialisations for type stability
 
 function _srkf_predict_covariance(
-    U::UpperTriangular{T,<:SMatrix{Dx,Dx,T}},
-    A::SMatrix{Dx,Dx,T},
-    U_Q::UpperTriangular{T,<:SMatrix{Dx,Dx,T}},
-) where {Dx,T}
+    U::UpperTriangular{TU,<:SMatrix{Dx,Dx,TU}},
+    A::SMatrix{Dx,Dx,TA},
+    U_Q::UpperTriangular{TQ,<:SMatrix{Dx,Dx,TQ}},
+) where {Dx,TU,TA,TQ}
     M = vcat(parent(U_Q), parent(U) * A')
-    _, R = qr(M)
+    R = _qr_upper(M)
     return _correct_cholesky_sign(R)
 end
 
 function _srkf_form_update_matrix(
-    U::UpperTriangular{T,<:SMatrix{Dx,Dx,T}},
-    H::SMatrix{Dy,Dx,T},
-    U_R::UpperTriangular{T,<:SMatrix{Dy,Dy,T}},
-) where {Dx,Dy,T}
+    U::UpperTriangular{TU,<:SMatrix{Dx,Dx,TU}},
+    H::SMatrix{Dy,Dx,TH},
+    U_R::UpperTriangular{TR,<:SMatrix{Dy,Dy,TR}},
+) where {Dx,Dy,TU,TH,TR}
+    T = promote_type(TU, TH, TR)
     top = hcat(parent(U_R), @SMatrix zeros(T, Dy, Dx))
     bottom = hcat(parent(U) * H', parent(U))
     return vcat(top, bottom)
 end
 
-function _srkf_extract_update_components(R::SMatrix{N,N,T}, Dx::Int, Dy::Int) where {N,T}
+function _srkf_extract_update_components(
+    R::SMatrix{N,N,T}, ::StaticMatrix{Dy,Dx}
+) where {N,T,Dy,Dx}
     U_S = R[SOneTo(Dy), SOneTo(Dy)]
     PHt = R[SOneTo(Dy), SUnitRange(Dy + 1, Dy + Dx)]'
     Û = R[SUnitRange(Dy + 1, Dy + Dx), SUnitRange(Dy + 1, Dy + Dx)]

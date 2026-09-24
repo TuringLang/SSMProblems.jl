@@ -11,7 +11,6 @@
     using Distributions
     using PDMats
     using LinearAlgebra
-    using SSMProblems
     using ForwardDiff
 
     rng = StableRNG(1234)
@@ -36,12 +35,14 @@
     end
 
     true_ssm = build_ssm([1.0])
-    _, _, ys = SSMProblems.sample(rng, true_ssm, 5)
+    _, _, ys = simulate(rng, true_ssm, 5)
 
     prior = MvNormal([0.0], [4.0;;])
     pssm = ParameterisedSSM(build_ssm, ys)
     model = ParticleGibbsModel(prior, pssm)
-    pg = ParticleGibbs(ConditionalSMC(BF(10)), NUTS(0.8))
+    pg = ParticleGibbs(
+        ConditionalSMC(BF(10; resampler=GeneralisedFilters.Multinomial())), NUTS(0.8)
+    )
 
     # Initial step
     transition, state = AbstractMCMC.step(rng, model, pg; n_adapts=5)
@@ -90,7 +91,6 @@ end
     using Distributions
     using PDMats
     using LinearAlgebra
-    using SSMProblems
 
     rng = StableRNG(1234)
 
@@ -113,12 +113,15 @@ end
     end
 
     true_ssm = build_ssm_mh([1.0])
-    _, _, ys = SSMProblems.sample(rng, true_ssm, 5)
+    _, _, ys = simulate(rng, true_ssm, 5)
 
     prior = MvNormal([0.0], [4.0;;])
     pssm = ParameterisedSSM(build_ssm_mh, ys)
     model = ParticleGibbsModel(prior, pssm)
-    pg = ParticleGibbs(ConditionalSMC(BF(10)), RWMH(MvNormal(zeros(1), 0.5 * I)))
+    pg = ParticleGibbs(
+        ConditionalSMC(BF(10; resampler=GeneralisedFilters.Multinomial())),
+        RWMH(MvNormal(zeros(1), 0.5 * I)),
+    )
 
     # Initial step
     transition, state = AbstractMCMC.step(rng, model, pg)
@@ -153,8 +156,7 @@ end
     using PDMats
     using LinearAlgebra
     using Statistics
-    using SSMProblems
-    using Zygote
+    using Mooncake
 
     rng = StableRNG(42)
 
@@ -170,7 +172,7 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, Dx, Dz, Dy; static_arrays=true
     )
-    _, _, _, _, ys = SSMProblems.sample(rng, hier_model, T_len)
+    _, _, ys = simulate(rng, hier_model, T_len)
 
     # Parameterise: θ controls inner dynamics drift b
     fixed = hier_model
@@ -189,7 +191,11 @@ end
     pssm = ParameterisedSSM(build_hier, ys)
     model = ParticleGibbsModel(prior, pssm)
     pg = ParticleGibbs(
-        ConditionalSMC(RBPF(BF(N_particles), KF())), NUTS(0.8); adtype=ADTypes.AutoZygote()
+        ConditionalSMC(
+            RBPF(BF(N_particles; resampler=GeneralisedFilters.Multinomial()), KF())
+        ),
+        NUTS(0.8);
+        adtype=ADTypes.AutoMooncake(; config=nothing),
     )
 
     chain = AbstractMCMC.sample(
@@ -221,7 +227,6 @@ end
     using PDMats
     using LinearAlgebra
     using Statistics
-    using SSMProblems
     using ForwardDiff
 
     rng = StableRNG(42)
@@ -253,7 +258,7 @@ end
     # Generate data
     true_b = 1.5
     true_ssm = build_ssm([true_b])
-    _, _, ys = SSMProblems.sample(rng, true_ssm, T_len)
+    _, _, ys = simulate(rng, true_ssm, T_len)
 
     # Augmented KF ground truth
     ref_model = build_ssm([0.0])
@@ -267,7 +272,10 @@ end
     prior = MvNormal([0.0], [σ_b²;;])
     pssm = ParameterisedSSM(build_ssm, ys)
     model = ParticleGibbsModel(prior, pssm)
-    pg = ParticleGibbs(ConditionalSMC(BF(N_particles)), NUTS(0.8))
+    pg = ParticleGibbs(
+        ConditionalSMC(BF(N_particles; resampler=GeneralisedFilters.Multinomial())),
+        NUTS(0.8),
+    )
 
     chain = AbstractMCMC.sample(
         rng,

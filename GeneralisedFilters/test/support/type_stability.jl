@@ -1,38 +1,34 @@
 """Type stability tests using JET.jl."""
 
-@testitem "Particle filter type stability" begin
+@testitem "Kalman filter type stability" begin
     using GeneralisedFilters
-    using SSMProblems
     using StableRNGs
     using JET
 
     const GF = GeneralisedFilters
 
     rng = StableRNG(1234)
-    model = GF.GFTest.create_linear_gaussian_model(rng, 1, 1, Float32; static_arrays=true)
-    _, _, ys = sample(rng, model, 4)
-    algo = BF(2^3)
+    model = GF.GFTest.create_linear_gaussian_model(rng, 2, 2, Float32; static_arrays=true)
+    _, _, ys = GF.simulate(rng, model, 4)
+    kf = KalmanFilter()
 
-    # initialize
-    @test_opt GF.initialise(rng, prior(model), algo)
-    @test_call GF.initialise(rng, prior(model), algo)
-    init_state = GF.initialise(rng, prior(model), algo)
-
-    # resample (fails test_op)
-    rs = GF.resampler(algo)
-    @test_opt skip = true GF.maybe_resample(rng, rs, init_state)
-    @test_call skip = true GF.maybe_resample(rng, rs, init_state)
-    state = GF.maybe_resample(rng, rs, init_state)
+    # initialise
+    @test_opt GF.initialise(rng, model.prior, kf)
+    @test_call GF.initialise(rng, model.prior, kf)
+    state = GF.initialise(rng, model.prior, kf)
 
     # predict
-    @test_opt GF.predict(rng, dyn(model), algo, 1, state, ys[1])
-    @test_call GF.predict(rng, dyn(model), algo, 1, state, ys[1])
-    state = GF.predict(rng, dyn(model), algo, 1, state, ys[1])
+    @test_opt GF.predict(rng, model.dyn, kf, 1, state, ys[1])
+    @test_call GF.predict(rng, model.dyn, kf, 1, state, ys[1])
+    pred = GF.predict(rng, model.dyn, kf, 1, state, ys[1])
 
     # update
-    @test_opt GF.update(obs(model), algo, 1, state, ys[1])
-    @test_call GF.update(obs(model), algo, 1, state, ys[1])
-    _, ll = GF.update(obs(model), algo, 1, state, ys[1])
-
+    @test_opt GF.update(model.obs, kf, 1, pred, ys[1])
+    @test_call GF.update(model.obs, kf, 1, pred, ys[1])
+    _, ll = GF.update(model.obs, kf, 1, pred, ys[1])
     @test ll isa Float32
+
+    # full filtering pass
+    @test_opt GF.filter(rng, model, kf, ys)
+    @test_call GF.filter(rng, model, kf, ys)
 end

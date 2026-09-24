@@ -1,102 +1,56 @@
-# SSMProblems.jl
+# GeneralisedFilters.jl
 
-[![Code Style: Blue](https://img.shields.io/badge/code%20style-blue-4495d1.svg)](https://github.com/invenia/BlueStyle)
-[![Aqua QA](https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg)](https://github.com/JuliaTesting/Aqua.jl)
-<!--[![Build Status](https://github.com/TuringLang/SSMProblems.jl/workflows/CI/badge.svg?branch=master)](https://github.com/TuringLang/SSMProblems.jl/actions?query=workflow%3ACI%20branch%3Amaster) -->
+GeneralisedFilters is a flexible, modular framework for state-space inference in Julia.
+State-space models describe an unobserved process that evolves over time and is measured
+through noisy observations. The package provides filtering to estimate the current state,
+smoothing to infer past states, and particle Gibbs to jointly infer state trajectories and
+model parameters.
 
-|           Package            |                                                                                                                                                    Docs                                                                                                                                                    |
-| :--------------------------: | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-|   SSMProblems   |   [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://turinglang.org/SSMProblems.jl/SSMProblems/dev/)        |
-| GeneralisedFilters | [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://turinglang.org/SSMProblems.jl/GeneralisedFilters/dev/)|
+Models and inference algorithms are defined separately. You can combine prior, transition
+and observation models, then choose an analytical filter, a particle filter, or a combination
+of the two. Custom processes and algorithms can extend the same interface.
 
-A minimalist framework to define state space models (SSMs) and their associated
-log-densities to feed into inference algorithms.
+## Rao–Blackwellised inference
 
-> [!TIP]
-> We are currently refactoring the GPU implementation of our filters to make
-> them both more flexible and performant. Whilst this is ongoing, we have
-> removed the legacy GPU batching interface, but this can still be found
-> pre-v0.3.1 or by viewing the repository at [this state](https://github.com/TuringLang/SSMProblems.jl/tree/b7f53f1cd4ec7aabe48a9d223b34ebfb8db56a49)
+Many models have a part that is difficult to integrate out and another part that becomes
+linear and Gaussian once the first is known. For example, a model of inflation might have
+an unknown trend and changing volatility. Given the volatility trajectory, a Kalman filter
+can integrate out the trend.
 
-## Talk at [LAFI 2025](https://popl25.sigplan.org/details/lafi-2025/11/State-Space-Model-Programming-in-Turing-jl)
+A Rao–Blackwellised particle filter uses this structure: particles sample the volatility,
+while each particle carries a conditional Gaussian distribution for the trend. This reduces
+the number of states that must be sampled and can give more accurate estimates for a given
+number of particles.
 
-[PDF Slides](https://github.com/user-attachments/files/20160397/LAFI_2025_Presentation.pdf)
-
-[![State space programming](http://i3.ytimg.com/vi/58DsScclqGU/hqdefault.jpg)](https://www.youtube.com/watch?v=58DsScclqGU
-)
-
-
-## Basic interface
-
-This package defines the basic interface needed to run inference on state space
-as the following:
+This combination is a particular focus of GeneralisedFilters. A particle filter and an
+analytical filter can be composed directly:
 
 ```julia
-# Wrapper for model dynamics and observation process
-abstract type StatePrior end
-abstract type LatentDynamics end
-abstract type ObservationDynamics end
+using GeneralisedFilters
 
-# Define the initial distribution for the latent states
-function distribution(prior::StatePrior, ...) end
-
-# Define the transition distribution for the latent dynamics
-function distribution(dyn::LatentDynamics, ...) end
-
-# Define the observation distribution
-function distribution(obs::ObservationProcess, ...) end
-
-# Combine the latent dynamics and observation process to form a SSM
-model = StateSpaceModel(prior, dyn, obs)
+pf = RBPF(BF(100), KF())  # 100 outer particles, each with an inner Kalman filter
 ```
 
-For specific details on the interface, please refer to the package [documentation](https://turinglang.github.io/SSMProblems.jl/dev).
+For joint state and parameter inference, particle Gibbs alternates trajectory updates with
+parameter updates. The Turing.jl integration lets you specify parameter priors in a Turing
+model and use HMC or NUTS for the parameter update. ForwardDiff and Mooncake provide forward
+and reverse mode differentiation of the likelihood after integrating out the Gaussian states.
+StaticArrays are supported for small, fixed-dimensional states.
 
-## Linear Gaussian State Space Model
+## Getting started
 
-As a concrete example, the following snippet of pseudo-code defines a linear
-Gaussian state space model. Note the inclusion of the `extra` parameter in each
-method definition. This is a key feature of the SSMProblems interface which
-allows for the definition of more complex models in a performant fashion,
-explained in more details in the package documentation.
+The [documentation overview](GeneralisedFilters/docs/src/index.md) introduces the model
+and algorithm interface with a complete filtering example. From there:
 
-```julia
-using SSMProblems, Distributions
+- [Models and conditioning](GeneralisedFilters/docs/src/models/linear-gaussian.md) explains
+  how to define models and their Rao–Blackwellised structure.
+- [Particle Gibbs and Turing](GeneralisedFilters/docs/src/inference.md) covers joint inference
+  for trajectories and parameters.
+- [Recording filtering results](GeneralisedFilters/docs/src/history.md) shows manual
+  loops and particle ancestry storage.
+- The [trend inflation example](GeneralisedFilters/examples/trend-inflation/script.jl)
+  applies Rao–Blackwellised filtering to a model with stochastic volatility.
 
-# Model parameters
-sig_u, sig_v  = 0.1, 0.2
-
-struct LinearGaussianStatePrior <: StatePrior end
-
-# Initial distribution
-function distribution(
-    prior::LinearGaussianStatePrior;
-    kwargs...
-)
-    return Normal(0.0, 1.0)
-end
-
-struct LinearGaussianLatentDynamics <: LatentDynamics end
-
-# Transition distribution
-function distribution(
-    dyn::LinearGaussianLatentDynamics,
-    step::Int,
-    state::Float64;
-    kwargs...
-)
-    return Normal(state, sig_u)
-end
-
-struct LinearGaussianObservationProcess <: ObservationProcess end
-
-# Observation distribution
-function distribution(
-    obs::LinearGaussianObservationProcess,
-    step::Int,
-    state::Float64;
-    kwargs...
-)
-    return Normal(state, sig_v)
-end
-```
+This repository contains both GeneralisedFilters and SSMProblems, which supplies the shared
+state-space model interface. GeneralisedFilters re-exports that interface, so most users
+only need to load GeneralisedFilters.

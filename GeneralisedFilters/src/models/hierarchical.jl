@@ -1,137 +1,283 @@
-import SSMProblems: LatentDynamics, ObservationProcess, simulate
-export HierarchicalSSM
+export HierarchicalPrior, HierarchicalDynamics, HierarchicalObservation, HierarchicalSSM
+export HierarchicalState
+export inner_prior, inner_dynamics, inner_observation, condition_inner
 
-struct HierarchicalSSM{PT<:StatePrior,LD<:LatentDynamics,MT<:StateSpaceModel} <:
-       AbstractStateSpaceModel
-    outer_prior::PT
-    outer_dyn::LD
-    inner_model::MT
-end
-outer_prior(model::HierarchicalSSM) = model.outer_prior
-inner_prior(model::HierarchicalSSM) = model.inner_model.prior
-outer_dyn(model::HierarchicalSSM) = model.outer_dyn
-inner_dyn(model::HierarchicalSSM) = model.inner_model.dyn
-SSMProblems.obs(model::HierarchicalSSM) = model.inner_model.obs
+"""
+    HierarchicalPrior(outer, inner)
 
-struct HierarchicalPrior{P1<:StatePrior,P2<:StatePrior} <: StatePrior
-    outer_prior::P1
-    inner_prior::P2
-end
-function SSMProblems.prior(model::HierarchicalSSM)
-    return HierarchicalPrior(model.outer_prior, model.inner_model.prior)
-end
-outer_prior(prior::HierarchicalPrior) = prior.outer_prior
-inner_prior(prior::HierarchicalPrior) = prior.inner_prior
-
-struct HierarchicalDynamics{D1<:LatentDynamics,D2<:LatentDynamics} <: LatentDynamics
-    outer_dyn::D1
-    inner_dyn::D2
-end
-function SSMProblems.dyn(model::HierarchicalSSM)
-    return HierarchicalDynamics(model.outer_dyn, model.inner_model.dyn)
-end
-outer_dyn(dyn::HierarchicalDynamics) = dyn.outer_dyn
-inner_dyn(dyn::HierarchicalDynamics) = dyn.inner_dyn
-
-function HierarchicalSSM(
-    outer_prior::StatePrior,
-    outer_dyn::LatentDynamics,
-    inner_prior::StatePrior,
-    inner_dyn::LatentDynamics,
-    obs::ObservationProcess,
-)
-    inner_model = StateSpaceModel(inner_prior, inner_dyn, obs)
-    return HierarchicalSSM(outer_prior, outer_dyn, inner_model)
+Prior for a Rao-Blackwellisable model. `outer` is the prior for the sampled component;
+`inner` is either a constant prior atom or a conditioning callable `(; x0) -> atom`.
+"""
+struct HierarchicalPrior{OP<:StatePrior,IP} <: StatePrior
+    outer::OP
+    inner::IP
 end
 
 """
-A container for a sampled state from a hierarchical SSM, with separation between the outer
-and inner dimensions. Note this differs from a RBState in the the inner state is a sample
-rather than a conditional distribution.
+    HierarchicalDynamics(outer, inner)
+
+Dynamics for a Rao-Blackwellisable model. `outer` is the dynamics for the sampled component;
+`inner` is either a constant dynamics atom or a conditioning callable
+`(; t, x_prev, x_new) -> atom`.
+"""
+struct HierarchicalDynamics{OD<:LatentDynamics,ID} <: LatentDynamics
+    outer::OD
+    inner::ID
+end
+
+"""
+    HierarchicalObservation(inner)
+
+Observation process for a Rao-Blackwellisable model. `inner` is either a constant observation
+atom/emission or a conditioning callable `(; t, x) -> atom/emission`.
+"""
+struct HierarchicalObservation{IO} <: ObservationProcess
+    inner::IO
+end
+
+const HierarchicalSSM = StateSpaceModel{
+    <:HierarchicalPrior,<:HierarchicalDynamics,<:HierarchicalObservation
+}
+
+"""
+    StateSpaceModel(outer_prior, outer_dyn, inner_prior, inner_dyn, obs)
+
+Shorthand for building a hierarchical model. The explicit component form using
+`HierarchicalPrior`/`HierarchicalDynamics`/`HierarchicalObservation` is the canonical
+construction.
+"""
+function StateSpaceModel(
+    outer_prior::StatePrior, outer_dyn::LatentDynamics, inner_prior, inner_dyn, obs
+)
+    return StateSpaceModel(
+        HierarchicalPrior(outer_prior, inner_prior),
+        HierarchicalDynamics(outer_dyn, inner_dyn),
+        HierarchicalObservation(obs),
+    )
+end
+
+"""
+    HierarchicalState(x, z)
+
+A joint sample from a hierarchical model, with outer component `x` and a sampled inner
+component `z`. This differs from an `RBState`, whose inner component is a distribution rather
+than a sample.
 """
 struct HierarchicalState{XT,ZT}
     x::XT
     z::ZT
 end
 
-function AbstractMCMC.sample(
-    rng::AbstractRNG, model::HierarchicalSSM, T::Integer; kwargs...
-)
-    outer_dyn, inner_model = model.outer_dyn, model.inner_model
+## CONDITIONAL COMPONENT INTERFACE ########################################################
 
-    x0 = simulate(rng, model.outer_prior; kwargs...)
-    z0 = simulate(rng, inner_model.prior; new_outer=x0, kwargs...)
+"""
+    inner_prior(model::HierarchicalSSM, x0)
+    inner_prior(prior::HierarchicalPrior, x0)
+    inner_prior(component, x0)
 
-    # Simulate outer dynamics
-    xs = fill(simulate(rng, outer_dyn, 1, x0; kwargs...), T)
-    zs = fill(
-        simulate(rng, inner_model.dyn, 1, z0; prev_outer=x0, new_outer=xs[1], kwargs...), T
+Resolve the inner prior conditioned on the initial outer state. Define conditioning through
+callables or `resolve` methods; the model-level methods are convenience delegates. The
+component form uses `resolve(component, (; x0))`; hierarchical components and models
+delegate to it.
+"""
+function inner_prior(component, x0)
+    return _resolved_component(resolve(component, (; x0)), StatePrior, "inner prior")
+end
+inner_prior(p::HierarchicalPrior, x0) = inner_prior(p.inner, x0)
+inner_prior(m::HierarchicalSSM, x0) = inner_prior(SSMProblems.prior(m), x0)
+
+"""
+    inner_dynamics(model::HierarchicalSSM, t, x_prev, x_new)
+    inner_dynamics(dynamics::HierarchicalDynamics, t, x_prev, x_new)
+    inner_dynamics(component, t, x_prev, x_new)
+
+Resolve the inner transition at time `t` using the adjacent outer states. Both generative
+hierarchical operations and conditioned likelihoods use this component-level operation.
+Longer history dependence requires an augmented outer state for consistent incremental
+reuse in particle filtering.
+"""
+function inner_dynamics(component, t::Integer, x_prev, x_new)
+    return _resolved_component(
+        resolve(component, (; t, x_prev, x_new)), LatentDynamics, "inner dynamics"
     )
-
-    for t in 2:T
-        xs[t] = simulate(rng, outer_dyn, t, xs[t - 1]; kwargs...)
-        zs[t] = simulate(
-            rng,
-            inner_model.dyn,
-            t,
-            zs[t - 1];
-            prev_outer=xs[t - 1],
-            new_outer=xs[t],
-            kwargs...,
-        )
-    end
-
-    ys = map(t -> simulate(rng, inner_model.obs, t, zs[t]; new_outer=xs[t], kwargs...), 1:T)
-    return x0, z0, xs, zs, ys
+end
+function inner_dynamics(d::HierarchicalDynamics, t::Integer, x_prev, x_new)
+    return inner_dynamics(d.inner, t, x_prev, x_new)
+end
+function inner_dynamics(m::HierarchicalSSM, t::Integer, x_prev, x_new)
+    return inner_dynamics(SSMProblems.dyn(m), t, x_prev, x_new)
 end
 
-function SSMProblems.simulate(rng::AbstractRNG, prior::HierarchicalPrior; kwargs...)
-    outer_prior, inner_prior = prior.outer_prior, prior.inner_prior
-    x0 = simulate(rng, outer_prior; kwargs...)
-    z0 = simulate(rng, inner_prior; new_outer=x0, kwargs...)
-    # TODO (RB): this isn't really RB at all, just hierarchical state
-    return HierarchicalState(x0, z0)
+"""
+    inner_observation(model::HierarchicalSSM, t, x)
+    inner_observation(observation::HierarchicalObservation, t, x)
+    inner_observation(component, t, x)
+
+Resolve the inner observation process at time `t` conditioned on the current outer state.
+The component form uses `resolve(component, (; t, x))`.
+"""
+function inner_observation(component, t::Integer, x)
+    return _resolved_component(
+        resolve(component, (; t, x)), ObservationProcess, "inner observation"
+    )
+end
+function inner_observation(o::HierarchicalObservation, t::Integer, x)
+    return inner_observation(o.inner, t, x)
+end
+function inner_observation(m::HierarchicalSSM, t::Integer, x)
+    return inner_observation(SSMProblems.obs(m), t, x)
 end
 
-function SSMProblems.simulate(
-    rng::AbstractRNG,
-    proc::HierarchicalDynamics,
-    step::Integer,
-    prev_state::HierarchicalState;
-    kwargs...,
-)
-    outer_dyn, inner_dyn = proc.outer_dyn, proc.inner_dyn
-    x = simulate(rng, outer_dyn, step, prev_state.x; kwargs...)
-    z = simulate(
-        rng, inner_dyn, step, prev_state.z; prev_outer=prev_state.x, new_outer=x, kwargs...
+# Only ReferenceTrajectory uses physical time as its array index. Ordinary vectors store
+# x0 at index 1. Reject other axes rather than silently interpreting an offset vector.
+function _validate_trajectory(xs::AbstractVector)
+    isempty(xs) && throw(ArgumentError("a trajectory must include its initial state"))
+    Base.require_one_based_indexing(xs)
+    return nothing
+end
+function _validate_trajectory(xs::ReferenceTrajectory)
+    Base.require_one_based_indexing(xs.xs)
+    return nothing
+end
+_trajectory_state(xs::AbstractVector, t::Integer) = xs[t + 1]
+_trajectory_state(xs::ReferenceTrajectory, t::Integer) = xs[t]
+
+function _validate_trajectory_time(xs, t::Integer)
+    1 <= t < length(xs) || throw(
+        ArgumentError(
+            "conditional model time must lie in 1:$(length(xs) - 1); received $t"
+        ),
     )
+    return nothing
+end
+
+struct ConditionalDynamics{D,X}
+    component::D
+    trajectory::X
+end
+function (d::ConditionalDynamics)(ctx)
+    t = ctx.t
+    _validate_trajectory_time(d.trajectory, t)
+    return inner_dynamics(
+        d.component,
+        t,
+        _trajectory_state(d.trajectory, t - 1),
+        _trajectory_state(d.trajectory, t),
+    )
+end
+
+struct ConditionalObservation{O,X}
+    component::O
+    trajectory::X
+end
+function (o::ConditionalObservation)(ctx)
+    t = ctx.t
+    _validate_trajectory_time(o.trajectory, t)
+    return inner_observation(o.component, t, _trajectory_state(o.trajectory, t))
+end
+
+"""
+    condition_inner(model::HierarchicalSSM, outer_trajectory::AbstractVector)
+
+Return an ordinary `StateSpaceModel` describing the inner process conditional on the outer
+trajectory. A `ReferenceTrajectory` is indexed `0:T`; an ordinary one-based vector stores
+`x0` at index 1 and `x_t` at index `t+1`. At least the initial state is required.
+
+The prior is resolved once. Dynamics and observations resolve lazily, without materialising
+per-time matrices, and retain the original component values (including activity flags).
+The trajectory is borrowed and must remain unchanged while the conditional model is used:
+rebuild the view when trajectory values or model parameters change. No numerical filtering
+state or AD workspace is cached. Differentiation through construction can include the
+trajectory; holding this view fixed during AD instead treats its captured inputs as fixed.
+
+This operation supplies a model, not an algorithm capability: an appropriate analytical
+filter is still required, and backward prediction/ancestor sampling support is separate.
+"""
+function condition_inner(model::HierarchicalSSM, xs::AbstractVector)
+    _validate_trajectory(xs)
+    return StateSpaceModel(
+        inner_prior(model, _trajectory_state(xs, 0)),
+        TimeVaryingDynamics(ConditionalDynamics(SSMProblems.dyn(model).inner, xs)),
+        TimeVaryingObservation(ConditionalObservation(SSMProblems.obs(model).inner, xs)),
+    )
+end
+
+# A small hook lets ordinary likelihood evaluators check a conditional model's horizon.
+_validate_observation_horizon(component, ys) = nothing
+function _validate_observation_horizon(
+    c::Union{ConditionalDynamics,ConditionalObservation}, ys
+)
+    length(c.trajectory) == length(ys) + 1 || throw(
+        DimensionMismatch(
+            "trajectory must contain one initial state plus one state per observation"
+        ),
+    )
+    return nothing
+end
+_validate_observation_horizon(c::TimeVarying, ys) = _validate_observation_horizon(c.f, ys)
+function _validate_observations(model::AbstractStateSpaceModel, ys::AbstractVector)
+    Base.require_one_based_indexing(ys)
+    _validate_observation_horizon(SSMProblems.dyn(model), ys)
+    _validate_observation_horizon(SSMProblems.obs(model), ys)
+    return nothing
+end
+
+## GENERATIVE INTERFACE ####################################################################
+
+function simulate(rng::AbstractRNG, p::HierarchicalPrior)
+    x = simulate(rng, p.outer)
+    z = simulate(rng, inner_prior(p, x))
     return HierarchicalState(x, z)
 end
 
-function SSMProblems.logdensity(
-    obs::ObservationProcess, step::Integer, state::HierarchicalState, observation; kwargs...
+function simulate(
+    rng::AbstractRNG, d::HierarchicalDynamics, t::Integer, s::HierarchicalState
 )
-    return SSMProblems.logdensity(
-        obs, step, state.z, observation; new_outer=state.x, kwargs...
-    )
+    x = simulate(rng, d.outer, t, s.x)
+    z = simulate(rng, inner_dynamics(d, t, s.x, x), t, s.z)
+    return HierarchicalState(x, z)
 end
 
-function SSMProblems.logdensity(
-    dyn::HierarchicalDynamics,
-    step::Integer,
-    prev_state::HierarchicalState,
-    new_state::HierarchicalState;
-    kwargs...,
+function simulate(
+    rng::AbstractRNG, o::HierarchicalObservation, t::Integer, s::HierarchicalState
 )
-    ll = SSMProblems.logdensity(dyn.outer_dyn, step, prev_state.x, new_state.x; kwargs...)
-    ll += SSMProblems.logdensity(
-        dyn.inner_dyn,
-        step,
-        prev_state.z,
-        new_state.z;
-        prev_outer=prev_state.x,
-        new_outer=new_state.x,
-        kwargs...,
+    return simulate(rng, inner_observation(o, t, s.x), t, s.z)
+end
+
+function logdensity(p::HierarchicalPrior, s::HierarchicalState)
+    return logdensity(p.outer, s.x) + logdensity(inner_prior(p, s.x), s.z)
+end
+
+function logdensity(
+    d::HierarchicalDynamics, t::Integer, sp::HierarchicalState, sn::HierarchicalState
+)
+    return logdensity(d.outer, t, sp.x, sn.x) +
+           logdensity(inner_dynamics(d, t, sp.x, sn.x), t, sp.z, sn.z)
+end
+
+function logdensity(o::HierarchicalObservation, t::Integer, s::HierarchicalState, y)
+    return logdensity(inner_observation(o, t, s.x), t, s.z, y)
+end
+
+# A component view preserves hierarchical dispatch for custom model containers.
+function _hierarchical_model(model::AbstractStateSpaceModel)
+    view = StateSpaceModel(model)
+    view isa HierarchicalSSM || throw(
+        ArgumentError(
+            "This operation requires hierarchical prior, dynamics and observation components",
+        ),
     )
-    return ll
+    return view
+end
+function condition_inner(model::AbstractStateSpaceModel, xs::AbstractVector)
+    return condition_inner(_hierarchical_model(model), xs)
+end
+function inner_prior(model::AbstractStateSpaceModel, x0)
+    return inner_prior(_hierarchical_model(model), x0)
+end
+function inner_dynamics(model::AbstractStateSpaceModel, t::Integer, xp, xn)
+    return inner_dynamics(_hierarchical_model(model), t, xp, xn)
+end
+function inner_observation(model::AbstractStateSpaceModel, t::Integer, x)
+    return inner_observation(_hierarchical_model(model), t, x)
 end

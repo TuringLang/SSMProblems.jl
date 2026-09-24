@@ -1,7 +1,4 @@
 using StaticArrays
-import PDMats: PDMat
-
-export augment_drift_model, augmented_kf_drift_posterior
 
 function create_linear_gaussian_model(
     rng::AbstractRNG,
@@ -32,60 +29,10 @@ function create_linear_gaussian_model(
         R = SMatrix{Dy,Dy,T}(R)
     end
 
-    return create_homogeneous_linear_gaussian_model(
-        μ0, PDMat(Σ0), A, b, PDMat(Q), H, c, PDMat(R)
-    )
+    return create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
 end
 
-## NON-HOMOGENEOUS LINEAR GAUSSIAN MODEL FOR TESTING ####
-
-struct NonHomogeneousLinearGaussianLatentDynamics{
-    AT<:AbstractVector,bT<:AbstractVector,QT<:AbstractVector
-} <: GeneralisedFilters.LinearGaussianLatentDynamics
-    As::AT
-    bs::bT
-    Qs::QT
-end
-
-function GeneralisedFilters.calc_A(
-    dyn::NonHomogeneousLinearGaussianLatentDynamics, step::Integer; kwargs...
-)
-    return dyn.As[step]
-end
-function GeneralisedFilters.calc_b(
-    dyn::NonHomogeneousLinearGaussianLatentDynamics, step::Integer; kwargs...
-)
-    return dyn.bs[step]
-end
-function GeneralisedFilters.calc_Q(
-    dyn::NonHomogeneousLinearGaussianLatentDynamics, step::Integer; kwargs...
-)
-    return dyn.Qs[step]
-end
-
-struct NonHomogeneousLinearGaussianObservationProcess{
-    HT<:AbstractVector,cT<:AbstractVector,RT<:AbstractVector
-} <: GeneralisedFilters.LinearGaussianObservationProcess
-    Hs::HT
-    cs::cT
-    Rs::RT
-end
-
-function GeneralisedFilters.calc_H(
-    obs::NonHomogeneousLinearGaussianObservationProcess, step::Integer; kwargs...
-)
-    return obs.Hs[step]
-end
-function GeneralisedFilters.calc_c(
-    obs::NonHomogeneousLinearGaussianObservationProcess, step::Integer; kwargs...
-)
-    return obs.cs[step]
-end
-function GeneralisedFilters.calc_R(
-    obs::NonHomogeneousLinearGaussianObservationProcess, step::Integer; kwargs...
-)
-    return obs.Rs[step]
-end
+## NON-HOMOGENEOUS LINEAR GAUSSIAN MODEL FOR TESTING #######################################
 
 function create_nonhomogeneous_linear_gaussian_model(
     rng::AbstractRNG,
@@ -98,33 +45,36 @@ function create_nonhomogeneous_linear_gaussian_model(
 ) where {T<:Real}
     μ0 = rand(rng, T, Dx)
     Σ0 = rand_cov(rng, T, Dx)
-    prior = GeneralisedFilters.HomogeneousGaussianPrior(μ0, PDMat(Σ0))
+    prior = GaussianPrior(μ0, Σ0)
 
     As = [rand(rng, T, Dx, Dx) for _ in 1:T_max]
     bs = [rand(rng, T, Dx) for _ in 1:T_max]
-    Qs = [PDMat(rand_cov(rng, T, Dx; scale=process_noise_scale)) for _ in 1:T_max]
-    dyn = NonHomogeneousLinearGaussianLatentDynamics(As, bs, Qs)
+    Qs = [rand_cov(rng, T, Dx; scale=process_noise_scale) for _ in 1:T_max]
+    dyn = TimeVaryingDynamics(((; t),) -> LinearGaussianDynamics(As[t], bs[t], Qs[t]))
 
     Hs = [rand(rng, T, Dy, Dx) for _ in 1:T_max]
     cs = [rand(rng, T, Dy) for _ in 1:T_max]
-    Rs = [PDMat(rand_cov(rng, T, Dy; scale=obs_noise_scale)) for _ in 1:T_max]
-    obs = NonHomogeneousLinearGaussianObservationProcess(Hs, cs, Rs)
+    Rs = [rand_cov(rng, T, Dy; scale=obs_noise_scale) for _ in 1:T_max]
+    obs = TimeVaryingObservation(((; t),) -> LinearGaussianObservation(Hs[t], cs[t], Rs[t]))
 
-    return SSMProblems.StateSpaceModel(prior, dyn, obs)
+    return StateSpaceModel(prior, dyn, obs)
 end
+
+## JOINT DISTRIBUTIONS FOR ANALYTIC COMPARISON ############################################
+
+# Both helpers build Z = [X0, X1, ..., XT, Y1, ..., YT], write Z = P Z + ϵ with
+# ϵ ~ N(μ_ϵ, Σ_ϵ), and solve (I - P) Z = ϵ for the joint moments (μ_Z, Σ_Z).
 
 function _compute_joint_nonhomogeneous(model, T::Integer)
     (; μ0, Σ0) = model.prior
-    dyn = model.dyn
-    obs = model.obs
-    Dy, Dx = size(calc_H(obs, 1))
+    d(t) = GeneralisedFilters.resolve(model.dyn, (; t))
+    o(t) = GeneralisedFilters.resolve(model.obs, (; t))
+    Dy, Dx = size(o(1).H)
 
-    # Let Z = [X0, X1, ..., XT, Y1, ..., YT] be the joint state vector
-    # Write Z = P.Z + ϵ, where ϵ ~ N(μ_ϵ, Σ_ϵ)
     P = zeros(Dx + T * (Dx + Dy), Dx + T * (Dx + Dy))
     for t in 1:T
-        A_t = calc_A(dyn, t)
-        H_t = calc_H(obs, t)
+        A_t = d(t).A
+        H_t = o(t).H
 
         iA = t * Dx + 1
         jA = (t - 1) * Dx + 1
@@ -138,8 +88,8 @@ function _compute_joint_nonhomogeneous(model, T::Integer)
     μ_ϵ = zeros(Dx + T * (Dx + Dy))
     μ_ϵ[1:Dx] .= μ0
     for t in 1:T
-        b_t = calc_b(dyn, t)
-        c_t = calc_c(obs, t)
+        b_t = d(t).b
+        c_t = o(t).c
 
         ib = t * Dx + 1
         μ_ϵ[ib:(ib + Dx - 1)] = b_t
@@ -151,8 +101,8 @@ function _compute_joint_nonhomogeneous(model, T::Integer)
     Σ_ϵ = zeros(Dx + T * (Dx + Dy), Dx + T * (Dx + Dy))
     Σ_ϵ[1:Dx, 1:Dx] .= Σ0
     for t in 1:T
-        Q_t = calc_Q(dyn, t)
-        R_t = calc_R(obs, t)
+        Q_t = d(t).Q
+        R_t = o(t).R
 
         iQ = t * Dx + 1
         Σ_ϵ[iQ:(iQ + Dx - 1), iQ:(iQ + Dx - 1)] = Q_t
@@ -161,7 +111,6 @@ function _compute_joint_nonhomogeneous(model, T::Integer)
         Σ_ϵ[iR:(iR + Dy - 1), iR:(iR + Dy - 1)] = R_t
     end
 
-    # Note (I - P)Z = ϵ and solve for Z ~ N(μ_Z, Σ_Z)
     μ_Z = (I - P) \ μ_ϵ
     Σ_Z = ((I - P) \ Σ_ϵ) / (I - P)'
 
@@ -174,8 +123,6 @@ function _compute_joint(model, T::Integer)
     (; H, c, R) = model.obs
     Dy, Dx = size(H)
 
-    # Let Z = [X0, X1, ..., XT, Y1, ..., YT] be the joint state vector
-    # Write Z = P.Z + ϵ, where ϵ ~ N(μ_ϵ, Σ_ϵ)
     P = zeros(Dx + T * (Dx + Dy), Dx + T * (Dx + Dy))
     for t in 1:T
         iA = t * Dx + 1
@@ -207,247 +154,13 @@ function _compute_joint(model, T::Integer)
         Σ_ϵ[iR:(iR + Dy - 1), iR:(iR + Dy - 1)] = R
     end
 
-    # Note (I - P)Z = ϵ and solve for Z ~ N(μ_Z, Σ_Z)
     μ_Z = (I - P) \ μ_ϵ
     Σ_Z = ((I - P) \ Σ_ϵ) / (I - P)'
 
     return μ_Z, Σ_Z
 end
 
-## GRADIENT TEST HELPERS ##
-
-"""
-    setup_kf_rrule_params(rng, Dx, Dy, T)
-
-Extract all parameters needed for testing `kf_loglikelihood` and its rrule.
-Returns `(μ0, Σ0, A, b, Q, H, c, R, ys_vec)` as dense (non-static) arrays.
-"""
-function setup_kf_rrule_params(rng::AbstractRNG, Dx::Integer, Dy::Integer, T::Integer)
-    model = create_linear_gaussian_model(rng, Dx, Dy)
-    _, _, ys = SSMProblems.sample(rng, model, T)
-
-    pr = SSMProblems.prior(model)
-    dy = SSMProblems.dyn(model)
-    ob = SSMProblems.obs(model)
-
-    μ0 = Vector(GeneralisedFilters.calc_μ0(pr))
-    Σ0 = PDMat(Matrix(GeneralisedFilters.calc_Σ0(pr)))
-    A = Matrix(GeneralisedFilters.calc_A(dy, 1))
-    b = Vector(GeneralisedFilters.calc_b(dy, 1))
-    Q = PDMat(Matrix(GeneralisedFilters.calc_Q(dy, 1)))
-    H = Matrix(GeneralisedFilters.calc_H(ob, 1))
-    c = Vector(GeneralisedFilters.calc_c(ob, 1))
-    R = PDMat(Matrix(GeneralisedFilters.calc_R(ob, 1)))
-    ys_vec = [Vector(y) for y in ys]
-
-    return μ0, Σ0, A, b, Q, H, c, R, ys_vec
-end
-
-"""
-    setup_gradient_test(rng; D=2, T=3)
-
-Set up a gradient test scenario with a linear Gaussian model.
-Returns a named tuple with all quantities needed for gradient testing.
-"""
-function setup_gradient_test(rng::AbstractRNG; D::Int=2, T::Int=3)
-    model = create_linear_gaussian_model(rng, D, D, Float64, 0.1, 1.0; static_arrays=true)
-    _, _, ys = SSMProblems.sample(rng, model, T)
-
-    A = GeneralisedFilters.calc_A(SSMProblems.dyn(model), 1)
-    b = GeneralisedFilters.calc_b(SSMProblems.dyn(model), 1)
-    Q = GeneralisedFilters.calc_Q(SSMProblems.dyn(model), 1)
-    H, c, R = GeneralisedFilters.calc_params(SSMProblems.obs(model), 1)
-    μ0 = GeneralisedFilters.calc_μ0(SSMProblems.prior(model))
-    Σ0 = GeneralisedFilters.calc_Σ0(SSMProblems.prior(model))
-
-    state = GeneralisedFilters.initialise(
-        rng, SSMProblems.prior(model), GeneralisedFilters.KF()
-    )
-    caches = Vector{GeneralisedFilters.KalmanGradientCache}(undef, T)
-    μ_prevs = Vector{typeof(state.μ)}(undef, T)
-    Σ_prevs = Vector{typeof(state.Σ)}(undef, T)
-
-    for t in 1:T
-        μ_prevs[t] = state.μ
-        Σ_prevs[t] = state.Σ
-        pred = GeneralisedFilters.predict(
-            rng, SSMProblems.dyn(model), GeneralisedFilters.KF(), t, state, ys[t]
-        )
-        state, _, caches[t] = GeneralisedFilters.update_with_cache(
-            SSMProblems.obs(model), GeneralisedFilters.KF(), t, pred, ys[t]
-        )
-    end
-
-    ∂μ = @SVector zeros(D)
-    ∂Σ = @SMatrix zeros(D, D)
-    ∂Q_total = @SMatrix zeros(D, D)
-    ∂R_total = @SMatrix zeros(D, D)
-    ∂A_total = @SMatrix zeros(D, D)
-    ∂b_total = @SVector zeros(D)
-    ∂H_total = @SMatrix zeros(D, D)
-    ∂c_total = @SVector zeros(D)
-
-    for t in T:-1:1
-        ∂μ_pred, ∂Σ_pred = GeneralisedFilters.backward_gradient_update(
-            ∂μ, ∂Σ, caches[t], H, R
-        )
-        ∂Q_total += GeneralisedFilters.gradient_Q(∂Σ_pred)
-        ∂R_total += GeneralisedFilters.gradient_R(∂μ, ∂Σ, caches[t])
-        ∂A_total += GeneralisedFilters.gradient_A(
-            ∂μ_pred, ∂Σ_pred, μ_prevs[t], Σ_prevs[t], A
-        )
-        ∂b_total += GeneralisedFilters.gradient_b(∂μ_pred)
-        ∂H_total += GeneralisedFilters.gradient_H(∂μ, ∂Σ, caches[t], caches[t].Σ_pred, H)
-        ∂c_total += GeneralisedFilters.gradient_c(∂μ, caches[t])
-        ∂μ, ∂Σ = GeneralisedFilters.backward_gradient_predict(∂μ_pred, ∂Σ_pred, A)
-    end
-
-    ∂μ0 = ∂μ
-    ∂Σ0 = ∂Σ
-
-    return (;
-        D,
-        T,
-        model,
-        ys,
-        A,
-        b,
-        Q,
-        H,
-        c,
-        R,
-        μ0,
-        Σ0,
-        caches,
-        μ_prevs,
-        Σ_prevs,
-        ∂Q_total,
-        ∂R_total,
-        ∂A_total,
-        ∂b_total,
-        ∂H_total,
-        ∂c_total,
-        ∂μ0,
-        ∂Σ0,
-    )
-end
-
-"""
-    make_nll_func(model, ys, param::Symbol)
-
-Create a function that computes NLL with one parameter varied.
-Returns a function taking a vector and returning scalar NLL.
-"""
-function make_nll_func(model, ys, param::Symbol)
-    pr = SSMProblems.prior(model)
-    dy = SSMProblems.dyn(model)
-    ob = SSMProblems.obs(model)
-
-    μ0 = GeneralisedFilters.calc_μ0(pr)
-    Σ0 = GeneralisedFilters.calc_Σ0(pr)
-    A = GeneralisedFilters.calc_A(dy, 1)
-    b = GeneralisedFilters.calc_b(dy, 1)
-    Q = GeneralisedFilters.calc_Q(dy, 1)
-    H = GeneralisedFilters.calc_H(ob, 1)
-    c = GeneralisedFilters.calc_c(ob, 1)
-    R = GeneralisedFilters.calc_R(ob, 1)
-
-    Dx = length(μ0)
-    Dy = length(c)
-
-    function make_pd(M)
-        M_sym = (M + M') / 2
-        λ, V = eigen(M_sym)
-        λ_clipped = max.(λ, 1e-8)
-        return PDMat(Symmetric(V * Diagonal(λ_clipped) * V'))
-    end
-
-    if param == :Q
-        return function (x)
-            Q_new = make_pd(reshape(x, Dx, Dx))
-            m = GeneralisedFilters.create_homogeneous_linear_gaussian_model(
-                μ0, Σ0, A, b, Q_new, H, c, R
-            )
-            _, ll = GeneralisedFilters.filter(m, GeneralisedFilters.KF(), ys)
-            return -ll
-        end
-    elseif param == :R
-        return function (x)
-            R_new = make_pd(reshape(x, Dy, Dy))
-            m = GeneralisedFilters.create_homogeneous_linear_gaussian_model(
-                μ0, Σ0, A, b, Q, H, c, R_new
-            )
-            _, ll = GeneralisedFilters.filter(m, GeneralisedFilters.KF(), ys)
-            return -ll
-        end
-    elseif param == :A
-        return function (x)
-            A_new = reshape(x, Dx, Dx)
-            m = GeneralisedFilters.create_homogeneous_linear_gaussian_model(
-                μ0, Σ0, A_new, b, Q, H, c, R
-            )
-            _, ll = GeneralisedFilters.filter(m, GeneralisedFilters.KF(), ys)
-            return -ll
-        end
-    elseif param == :b
-        return function (x)
-            m = GeneralisedFilters.create_homogeneous_linear_gaussian_model(
-                μ0, Σ0, A, x, Q, H, c, R
-            )
-            _, ll = GeneralisedFilters.filter(m, GeneralisedFilters.KF(), ys)
-            return -ll
-        end
-    elseif param == :H
-        return function (x)
-            H_new = reshape(x, Dy, Dx)
-            m = GeneralisedFilters.create_homogeneous_linear_gaussian_model(
-                μ0, Σ0, A, b, Q, H_new, c, R
-            )
-            _, ll = GeneralisedFilters.filter(m, GeneralisedFilters.KF(), ys)
-            return -ll
-        end
-    elseif param == :c
-        return function (x)
-            m = GeneralisedFilters.create_homogeneous_linear_gaussian_model(
-                μ0, Σ0, A, b, Q, H, x, R
-            )
-            _, ll = GeneralisedFilters.filter(m, GeneralisedFilters.KF(), ys)
-            return -ll
-        end
-    elseif param == :μ0
-        return function (x)
-            m = GeneralisedFilters.create_homogeneous_linear_gaussian_model(
-                x, Σ0, A, b, Q, H, c, R
-            )
-            _, ll = GeneralisedFilters.filter(m, GeneralisedFilters.KF(), ys)
-            return -ll
-        end
-    elseif param == :Σ0
-        return function (x)
-            Σ0_new = make_pd(reshape(x, Dx, Dx))
-            m = GeneralisedFilters.create_homogeneous_linear_gaussian_model(
-                μ0, Σ0_new, A, b, Q, H, c, R
-            )
-            _, ll = GeneralisedFilters.filter(m, GeneralisedFilters.KF(), ys)
-            return -ll
-        end
-    else
-        error("Unknown parameter: $param")
-    end
-end
-
-"""
-    augment_drift_model(model, drift_indices; σ²_b=4.0, μ_b=nothing, ε=1e-12, static_arrays=nothing)
-
-Construct an augmented linear Gaussian model where selected drift components are treated as
-latent constants. If `drift_indices = [i1, ..., ik]`, then the augmented state is
-`[x; b_unknown]` with `b_unknown' = b_unknown + ϵ`, `ϵ ~ N(0, εI)`.
-
-Returns a named tuple with:
-- `model`: augmented linear Gaussian model
-- `drift_slice`: index range for unknown drift in the augmented state
-- `drift_indices`: validated drift indices in the original state
-"""
+# Exact Gaussian reference for parameter-posterior integration tests.
 function augment_drift_model(
     model,
     drift_indices;
@@ -456,18 +169,18 @@ function augment_drift_model(
     ε::Real=1e-12,
     static_arrays::Union{Nothing,Bool}=nothing,
 )
-    pr = SSMProblems.prior(model)
-    dy = SSMProblems.dyn(model)
-    ob = SSMProblems.obs(model)
+    pr = model.prior
+    dy = model.dyn
+    ob = model.obs
 
-    μ0_raw = GeneralisedFilters.calc_μ0(pr)
-    Σ0_raw = GeneralisedFilters.calc_Σ0(pr)
-    A_raw = GeneralisedFilters.calc_A(dy, 1)
-    b_raw = GeneralisedFilters.calc_b(dy, 1)
-    Q_raw = GeneralisedFilters.calc_Q(dy, 1)
-    H_raw = GeneralisedFilters.calc_H(ob, 1)
-    c_raw = GeneralisedFilters.calc_c(ob, 1)
-    R_raw = GeneralisedFilters.calc_R(ob, 1)
+    μ0_raw = pr.μ0
+    Σ0_raw = pr.Σ0
+    A_raw = dy.A
+    b_raw = dy.b
+    Q_raw = dy.Q
+    H_raw = ob.H
+    c_raw = ob.c
+    R_raw = ob.R
 
     σ²_b_eltype = σ²_b isa Real ? typeof(σ²_b) : eltype(σ²_b)
     μ_b_eltype = isnothing(μ_b) ? eltype(b_raw) : eltype(μ_b)
@@ -549,7 +262,7 @@ function augment_drift_model(
     R_out = _maybe_static_matrix((R + R') / 2, use_static)
 
     aug_model = create_homogeneous_linear_gaussian_model(
-        μ0_out, PDMat(Σ0_out), A_out, b_out, PDMat(Q_out), H_out, c_out, PDMat(R_out)
+        μ0_out, Σ0_out, A_out, b_out, Q_out, H_out, c_out, R_out
     )
 
     return (model=aug_model, drift_slice=(Dx + 1):(Dx + K), drift_indices=idx)
@@ -558,7 +271,7 @@ end
 """
     augmented_kf_drift_posterior(model, observations, drift_indices; kwargs...)
 
-Run a Kalman filter on the augmented model from [`augment_drift_model`](@ref) and return
+Run a Kalman filter on the augmented model from `augment_drift_model` and return
 posterior mean/std for unknown drift components.
 """
 function augmented_kf_drift_posterior(model, observations, drift_indices; kwargs...)
@@ -608,9 +321,9 @@ function _drift_prior_covariance(σ²_b::AbstractMatrix, K::Integer, ::Type{T}) 
 end
 
 function _has_static_lg_arrays(model)
-    return GeneralisedFilters.calc_μ0(SSMProblems.prior(model)) isa StaticArray ||
-           GeneralisedFilters.calc_A(SSMProblems.dyn(model), 1) isa StaticArray ||
-           GeneralisedFilters.calc_H(SSMProblems.obs(model), 1) isa StaticArray
+    return model.prior.μ0 isa StaticArray ||
+           model.dyn.A isa StaticArray ||
+           model.obs.H isa StaticArray
 end
 
 function _maybe_static_vector(x::AbstractVector, static_arrays::Bool)

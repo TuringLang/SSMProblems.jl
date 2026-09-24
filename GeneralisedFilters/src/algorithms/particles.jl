@@ -4,32 +4,34 @@ export AuxiliaryParticleFilter
 export AbstractLookAheadScore, RepresentativeStateLookAhead
 export PredictiveStatistic, MeanPredictive, ModePredictive, DrawPredictive
 
-import SSMProblems: distribution, simulate, logdensity
+"""
+    AbstractProposal
 
+Implement `distribution(proposal, t, state, observation)`, or both `simulate` and
+`logdensity`. For an ordinary particle filter `state` is the previous latent sample.
+For an RBPF it is the full `RBState`: proposals can inspect both the outer sample and
+inner filtering belief, but must draw and score only the new outer sample. The inner
+filter is advanced by RBPF after this draw.
+"""
 abstract type AbstractProposal end
 
-function SSMProblems.distribution(
-    prop::AbstractProposal, iter::Integer, state, observation; kwargs...
-)
-    return throw(MethodError(distribution, (prop, iter, state, observation, kwargs...)))
+function distribution(prop::AbstractProposal, iter::Integer, state, observation)
+    return throw(MethodError(distribution, (prop, iter, state, observation)))
 end
 
-function SSMProblems.simulate(
-    rng::AbstractRNG, prop::AbstractProposal, iter::Integer, state, observation; kwargs...
+function simulate(
+    rng::AbstractRNG, prop::AbstractProposal, iter::Integer, state, observation
 )
-    dist = SSMProblems.distribution(prop, iter, state, observation; kwargs...)
-    return SSMProblems.simulate_from_dist(rng, dist)
+    dist = distribution(prop, iter, state, observation)
+    return simulate_from_dist(rng, dist)
 end
 
-function SSMProblems.logdensity(
-    prop::AbstractProposal, iter::Integer, prev_state, new_state, observation; kwargs...
+function logdensity(
+    prop::AbstractProposal, iter::Integer, prev_state, new_state, observation
 )
-    return logpdf(
-        SSMProblems.distribution(prop, iter, prev_state, observation; kwargs...), new_state
-    )
+    return logpdf(distribution(prop, iter, prev_state, observation), new_state)
 end
 
-abstract type AbstractParticleFilter <: AbstractFilter end
 function num_particles end
 function resampler end
 
@@ -38,12 +40,11 @@ function initialise(
     prior::StatePrior,
     algo::AbstractParticleFilter;
     ref_state::Union{Nothing,AbstractVector}=nothing,
-    kwargs...,
 )
     N = num_particles(algo)
     particles = map(1:N) do i
-        ref = !isnothing(ref_state) && i == 1 ? ref_state[0] : nothing
-        initialise_particle(rng, prior, algo, ref; kwargs...)
+        ref = !isnothing(ref_state) && i == 1 ? _trajectory_state(ref_state, 0) : nothing
+        return initialise_particle(rng, prior, algo, ref)
     end
 
     return ParticleDistribution(particles, TypelessZero())
@@ -57,19 +58,23 @@ function predict(
     state,
     observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
-    kwargs...,
 )
     particles = map(1:num_particles(algo)) do i
         particle = state.particles[i]
-        ref = !isnothing(ref_state) && i == 1 ? ref_state[iter] : nothing
-        predict_particle(rng, dyn, algo, iter, particle, observation, ref; kwargs...)
+        ref = if !isnothing(ref_state) && i == 1
+            _trajectory_state(ref_state, iter)
+        else
+            nothing
+        end
+        return predict_particle(rng, dyn, algo, iter, particle, observation, ref)
     end
 
-    # Accumulate the baseline with LSE of weights after prediction (before update)
+    # Preserve the incoming weight normalizer; guided proposal corrections belong
+    # to the new weights and must not be subtracted from the evidence increment.
     # For plain PF/guided: ll_baseline is 0.0 on entry, becomes LSE_before
     # For APF with resample: ll_baseline already stores negative correction; add LSE_before
     return ParticleDistribution(
-        particles, logsumexp(log_weights(state)) + state.ll_baseline
+        particles, _add_baseline(_weight_logsumexp(log_weights(state)), state.ll_baseline)
     )
 end
 
@@ -78,11 +83,10 @@ function update(
     algo::AbstractParticleFilter,
     iter::Integer,
     state::ParticleDistribution,
-    observation;
-    kwargs...,
+    observation,
 )
     particles = map(state.particles) do particle
-        update_particle(obs, algo, iter, particle, observation; kwargs...)
+        return update_particle(obs, algo, iter, particle, observation)
     end
     new_state, ll_increment = marginalise!(state, particles)
 
@@ -100,6 +104,7 @@ const PF = ParticleFilter
 function ParticleFilter(
     N::Integer, proposal::PT; threshold::Real=1.0, resampler::AbstractResampler=Systematic()
 ) where {PT<:AbstractProposal}
+    N > 0 || throw(ArgumentError("particle count must be positive"))
     conditional_resampler = ESSResampler(threshold, resampler)
     return ParticleFilter(N, conditional_resampler, proposal)
 end
@@ -108,9 +113,9 @@ num_particles(algo::ParticleFilter) = algo.N
 resampler(algo::ParticleFilter) = algo.resampler
 
 function initialise_particle(
-    rng::AbstractRNG, prior::StatePrior, algo::ParticleFilter, ref_state; kwargs...
+    rng::AbstractRNG, prior::StatePrior, algo::ParticleFilter, ref_state
 )
-    x = sample_prior(rng, prior, algo, ref_state; kwargs...)
+    x = sample_prior(rng, prior, algo, ref_state)
     return Particle(x, 0)
 end
 
@@ -121,13 +126,14 @@ function predict_particle(
     iter::Integer,
     particle::Particle,
     observation,
-    ref_state;
-    kwargs...,
+    ref_state,
 )
-    new_x, log_increment = propogate(
-        rng, dyn, algo, iter, particle.state, observation, ref_state; kwargs...
+    new_x, log_increment = propagate(
+        rng, dyn, algo, iter, particle.state, observation, ref_state
     )
-    return Particle(new_x, log_weight(particle) + log_increment, particle.ancestor)
+    return Particle(
+        new_x, add_logweight(log_weight(particle), log_increment), particle.ancestor
+    )
 end
 
 function update_particle(
@@ -135,13 +141,14 @@ function update_particle(
     ::ParticleFilter,
     iter::Integer,
     particle::Particle,
-    observation;
-    kwargs...,
+    observation,
 )
-    log_increment = SSMProblems.logdensity(
-        obs, iter, particle.state, observation; kwargs...
+    log_increment = logdensity(obs, iter, particle.state, observation)
+    return Particle(
+        particle.state,
+        add_logweight(log_weight(particle), log_increment),
+        particle.ancestor,
     )
-    return Particle(particle.state, log_weight(particle) + log_increment, particle.ancestor)
 end
 
 function step(
@@ -152,47 +159,41 @@ function step(
     state,
     observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
-    callback::CallbackType=nothing,
-    kwargs...,
 )
     rs = resampler(algo)
+    incoming = state
     state = maybe_resample(rng, rs, state; ref_state)
-    callback(model, algo, iter, state, observation, PostResample; kwargs...)
-    return move(rng, model, algo, iter, state, observation; ref_state, callback, kwargs...)
+    result, ll = move(rng, model, algo, iter, state, observation; ref_state)
+    _check_weight_type(incoming, result, iter)
+    return result, ll
 end
 
-function sample_prior(
-    rng::AbstractRNG, prior::StatePrior, algo::ParticleFilter, ref_state; kwargs...
-)
+function sample_prior(rng::AbstractRNG, prior::StatePrior, algo::ParticleFilter, ref_state)
     x = if isnothing(ref_state)
-        SSMProblems.simulate(rng, prior; kwargs...)
+        simulate(rng, prior)
     else
         ref_state
     end
     return x
 end
 
-function propogate(
-    rng::AbstractRNG,
-    dyn,
-    algo::ParticleFilter,
-    iter::Integer,
-    x,
-    observation,
-    ref_state;
-    kwargs...,
+function propagate(
+    rng::AbstractRNG, dyn, algo::ParticleFilter, iter::Integer, x, observation, ref_state
 )
     # TODO: use a trait to compute the sample and logpdf in one go if distribution is defined
     new_x = if isnothing(ref_state)
-        SSMProblems.simulate(rng, algo.proposal, iter, x, observation; kwargs...)
+        simulate(rng, algo.proposal, iter, x, observation)
     else
         ref_state
     end
-    log_p = SSMProblems.logdensity(dyn, iter, x, new_x; kwargs...)
-    log_q = SSMProblems.logdensity(algo.proposal, iter, x, new_x, observation; kwargs...)
+    log_p = logdensity(dyn, iter, outer_component(x), new_x)
+    log_q = logdensity(algo.proposal, iter, x, new_x, observation)
     logw_inc = log_p - log_q
     return new_x, logw_inc
 end
+
+outer_component(x) = x
+outer_component(x::RBState) = x.x
 
 struct LatentProposal <: AbstractProposal end
 
@@ -200,43 +201,34 @@ const BootstrapFilter{RS} = ParticleFilter{RS,LatentProposal}
 const BF = BootstrapFilter
 BootstrapFilter(N::Integer; kwargs...) = ParticleFilter(N, LatentProposal(); kwargs...)
 
-function SSMProblems.simulate(
+function simulate(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
     prop::LatentProposal,
     iter::Integer,
     state,
-    observation;
-    kwargs...,
+    observation,
 )
-    return SSMProblems.simulate(rng, model.dyn, iter, state; kwargs...)
+    return simulate(rng, SSMProblems.dyn(model), iter, state)
 end
 
-function SSMProblems.logdensity(
+function logdensity(
     model::AbstractStateSpaceModel,
     prop::LatentProposal,
     iter::Integer,
     prev_state,
     new_state,
-    observation;
-    kwargs...,
+    observation,
 )
-    return SSMProblems.logdensity(model.dyn, iter, prev_state, new_state; kwargs...)
+    return logdensity(SSMProblems.dyn(model), iter, prev_state, new_state)
 end
 
-# overwrite propogate for the bootstrap filter to remove redundant computation
-function propogate(
-    rng::AbstractRNG,
-    dyn,
-    algo::BootstrapFilter,
-    iter::Integer,
-    x,
-    observation,
-    ref_state;
-    kwargs...,
+# overwrite propagate for the bootstrap filter to remove redundant computation
+function propagate(
+    rng::AbstractRNG, dyn, algo::BootstrapFilter, iter::Integer, x, observation, ref_state
 )
     new_x = if isnothing(ref_state)
-        SSMProblems.simulate(rng, dyn, iter, x; kwargs...)
+        simulate(rng, dyn, iter, outer_component(x))
     else
         ref_state
     end
@@ -253,13 +245,11 @@ function compute_logeta(
     algo,
     iter::Integer,
     state,
-    observation;
-    kwargs...,
+    observation,
 )
     return throw(
         MethodError(
-            compute_logeta,
-            (rng, weight_strategy, model, algo, iter, state, observation, kwargs...),
+            compute_logeta, (rng, weight_strategy, model, algo, iter, state, observation)
         ),
     )
 end
@@ -287,13 +277,12 @@ function compute_logeta(
     algo,
     iter::Integer,
     state,
-    observation;
-    kwargs...,
+    observation,
 )
     state_star = predictive_state(
-        rng, dyn(model), weight_strategy, algo, iter, state; kwargs...
+        rng, SSMProblems.dyn(model), weight_strategy, algo, iter, state
     )
-    return predictive_loglik(obs(model), algo, iter, state_star, observation; kwargs...)
+    return predictive_loglik(SSMProblems.obs(model), algo, iter, state_star, observation)
 end
 
 resampler(algo::AuxiliaryParticleFilter) = resampler(algo.pf)
@@ -304,9 +293,8 @@ function initialise(
     prior::StatePrior,
     algo::AuxiliaryParticleFilter;
     ref_state::Union{Nothing,AbstractVector}=nothing,
-    kwargs...,
 )
-    return initialise(rng, prior, algo.pf; ref_state, kwargs...)
+    return initialise(rng, prior, algo.pf; ref_state)
 end
 
 function step(
@@ -317,56 +305,64 @@ function step(
     state,
     observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
-    callback::CallbackType=nothing,
-    kwargs...,
 )
-    # Compute lookahead weights approximating log p(y_{t+1} | x_{t}^(i))
+    rs = _step_resampler(rng, model, algo, iter, state, observation)
+    incoming = state
+    state = maybe_resample(rng, rs, state; ref_state)
+    result, ll = move(rng, model, algo, iter, state, observation; ref_state)
+    _check_weight_type(incoming, result, iter)
+    return result, ll
+end
+
+# Auxiliary weights affect ancestor proposals, not the filtering target used by AS/BS.
+_refreshment_filter(algo::AbstractParticleFilter) = algo
+_refreshment_filter(algo::AuxiliaryParticleFilter) = _refreshment_filter(algo.pf)
+
+function _step_resampler(rng, model, algo::AbstractParticleFilter, iter, state, observation)
+    return resampler(algo)
+end
+
+function _step_resampler(
+    rng, model, algo::AuxiliaryParticleFilter, iter, state, observation
+)
     log_ηs = map(state.particles) do particle
-        compute_logeta(
-            rng,
-            algo.weight_strategy,
-            model,
-            algo.pf,
-            iter,
-            particle.state,
-            observation;
-            kwargs...,
+        return compute_logeta(
+            rng, algo.weight_strategy, model, algo.pf, iter, particle.state, observation
         )
     end
+    return AuxiliaryResampler(resampler(algo), log_ηs)
+end
 
-    rs = AuxiliaryResampler(resampler(algo), log_ηs)
-    state = maybe_resample(rng, rs, state; ref_state)
-
-    callback(model, algo, iter, state, observation, PostResample; kwargs...)
-    return move(
-        rng, model, algo.pf, iter, state, observation; ref_state, callback, kwargs...
-    )
+function move(
+    rng::AbstractRNG,
+    model::AbstractStateSpaceModel,
+    algo::AuxiliaryParticleFilter,
+    iter::Integer,
+    state,
+    observation;
+    kwargs...,
+)
+    return move(rng, model, algo.pf, iter, state, observation; kwargs...)
 end
 
 struct MeanPredictive <: PredictiveStatistic end
 
-function predictive_statistic(
-    ::AbstractRNG, ::MeanPredictive, dyn, iter::Integer, state; kwargs...
-)
-    transition_dist = SSMProblems.distribution(dyn, iter, state; kwargs...)
+function predictive_statistic(::AbstractRNG, ::MeanPredictive, dyn, iter::Integer, state)
+    transition_dist = distribution(dyn, iter, state)
     return mean(transition_dist)
 end
 
 struct ModePredictive <: PredictiveStatistic end
 
-function predictive_statistic(
-    ::AbstractRNG, ::ModePredictive, dyn, iter::Integer, state; kwargs...
-)
-    transition_dist = SSMProblems.distribution(dyn, iter, state; kwargs...)
+function predictive_statistic(::AbstractRNG, ::ModePredictive, dyn, iter::Integer, state)
+    transition_dist = distribution(dyn, iter, state)
     return mode(transition_dist)
 end
 
 struct DrawPredictive <: PredictiveStatistic end
 
-function predictive_statistic(
-    rng::AbstractRNG, ::DrawPredictive, dyn, iter::Integer, state; kwargs...
-)
-    return SSMProblems.simulate(rng, dyn, iter, state; kwargs...)
+function predictive_statistic(rng::AbstractRNG, ::DrawPredictive, dyn, iter::Integer, state)
+    return simulate(rng, dyn, iter, state)
 end
 
 function predictive_state(
@@ -375,19 +371,13 @@ function predictive_state(
     weight_strategy::RepresentativeStateLookAhead,
     algo,
     iter::Integer,
-    state;
-    kwargs...,
+    state,
 )
-    return predictive_statistic(rng, weight_strategy.pp, dyn, iter, state; kwargs...)
+    return predictive_statistic(rng, weight_strategy.pp, dyn, iter, state)
 end
 
 function predictive_loglik(
-    obs::ObservationProcess,
-    algo::ParticleFilter,
-    iter::Integer,
-    state,
-    observation;
-    kwargs...,
+    obs::ObservationProcess, algo::ParticleFilter, iter::Integer, state, observation
 )
-    return SSMProblems.logdensity(obs, iter, state, observation; kwargs...)
+    return logdensity(obs, iter, state, observation)
 end

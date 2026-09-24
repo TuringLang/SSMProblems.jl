@@ -37,22 +37,35 @@ jobs:
         with:
           version: '1'
       - uses: julia-actions/cache@v3
+        with:
+          delete-old-caches: false
       - name: Install dependencies
         run: |
           julia --project=${{ matrix.pkg.dir }}/docs/ --color=yes -e '
           using Pkg;
           Pkg.Registry.update();
-          Pkg.develop(PackageSpec(path="${{ matrix.pkg.dir }}"));
-          if "${{ matrix.pkg.name }}" == "GeneralisedFilters"
-              Pkg.develop(PackageSpec(path="./SSMProblems"));
-          end;
+          paths = ["${{ matrix.pkg.dir }}"];
+          extra = "${{ matrix.pkg.additional_paths }}";
+          isempty(extra) || push!(paths, extra);
+          Pkg.develop([PackageSpec(; path) for path in paths]);
           Pkg.instantiate();'
-      - name: Build and deploy
-        uses: TuringLang/actions/DocsDocumenter@main
+      - name: Build docs
+        run: julia --project=${{ matrix.pkg.dir }}/docs/ ${{ matrix.pkg.dir }}/docs/make.jl
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check example projects remain portable
+        run: git diff --exit-code -- GeneralisedFilters/examples/*/Project.toml SSMProblems/examples/*/Project.toml
+      - name: Insert navbar
+        uses: TuringLang/actions/DocsNav@main
         with:
-          pkg_path: ${{ matrix.pkg.dir }}
-          additional_pkg_paths: ${{ matrix.pkg.additional_paths }}
-          doc-path: ${{ matrix.pkg.dir }}/docs
-          doc-make-path: ${{ matrix.pkg.dir }}/docs/make.jl
-          doc-build-path: ${{ matrix.pkg.dir }}/docs/build
-          dirname: ${{ matrix.pkg.name }}
+          doc-path: ${{ matrix.pkg.dir }}/docs/build
+      - name: Deploy docs
+        working-directory: ${{ matrix.pkg.dir }}/docs
+        shell: julia --color=yes --project=. {0}
+        run: |
+          using Documenter
+          deploydocs(; root=pwd(), repo="github.com/${{ github.repository }}.git",
+              dirname="${{ matrix.pkg.name }}", tag_prefix="${{ matrix.pkg.name }}-",
+              push_preview=true)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

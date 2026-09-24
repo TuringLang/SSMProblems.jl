@@ -1,168 +1,128 @@
 module GeneralisedFilters
 
 using AbstractMCMC: AbstractMCMC, AbstractSampler
-using ADTypes: ADTypes
-import Distributions: MvNormal, params
-import Random: AbstractRNG, default_rng, rand
-import SSMProblems: prior, dyn, obs
-using SSMProblems
+using Distributions: Distributions, MvNormal, Categorical, logpdf
+using LinearAlgebra
+using Random: Random, AbstractRNG, default_rng, randn
+import Random: rand
+using StaticArrays
+using Statistics: Statistics, mean, cov
 using StatsBase
-using DifferentiationInterface
+using LogExpFunctions: LogExpFunctions, logsumexp, softmax
+using DataStructures: DataStructures
 
-const DI = DifferentiationInterface
-
-# Filtering utilities
-include("containers.jl")
-include("callbacks.jl")
-include("resamplers.jl")
-
-## FILTERING BASE ##########################################################################
+## ALGORITHM TYPE HIERARCHY ################################################################
 
 abstract type AbstractFilter <: AbstractSampler end
+abstract type AbstractParticleFilter <: AbstractFilter end
+abstract type AbstractSmoother <: AbstractSampler end
 abstract type AbstractBackwardPredictor <: AbstractSampler end
 
-# Abstract interface definitions (filtering, smoothing, backward likelihood)
+## CORE TYPES AND CONTAINERS ###############################################################
+
+include("gaussian.jl")
+include("containers.jl")
+include("resamplers.jl")
+
+## MODEL LAYER #############################################################################
+
+include("models/interface.jl")
+include("models/atoms.jl")
+include("models/hierarchical.jl")
+
+## ACTIVITY ################################################################################
+
+include("activity.jl")
+
+## KERNELS #################################################################################
+
+include("kernels/kalman.jl")
+include("kernels/kalman_adjoint.jl")
+
+## FILTERING/SMOOTHING #####################################################################
+
 include("algorithms/interface.jl")
 
 """
-    filter([rng,] model, algo, observations; callback=nothing, kwargs...)
+    filter([rng,] model, algo, ys; ref_state=nothing)
 
-Run a filtering algorithm on a state-space model.
-
-Performs sequential Bayesian inference by iterating through observations,
-calling [`predict`](@ref) and [`update`](@ref) at each time step.
-
-# Arguments
-- `rng::AbstractRNG`: Random number generator (optional, defaults to `default_rng()`)
-- `model::AbstractStateSpaceModel`: The state-space model to filter
-- `algo::AbstractFilter`: The filtering algorithm (e.g., `KalmanFilter()`, `BootstrapFilter(N)`)
-- `observations::AbstractVector`: Vector of observations y₁:ₜ
-
-# Keyword Arguments
-- `callback`: Optional callback for recording intermediate states
-- `kwargs...`: Additional arguments passed to model parameter functions
-
-# Returns
-A tuple `(state, log_likelihood)` where:
-- `state`: The final filtered state (algorithm-dependent type)
-- `log_likelihood`: The total log-marginal likelihood log p(y₁:ₜ)
-
-# Example
-```julia
-model = create_homogeneous_linear_gaussian_model(μ0, Σ0, A, b, Q, H, c, R)
-state, ll = filter(model, KalmanFilter(), observations)
-```
-
-See also: [`predict`](@ref), [`update`](@ref), [`step`](@ref), [`smooth`](@ref)
+Run a filtering algorithm over nonempty observations `ys`, returning `(final_state, total_ll)`.
+An empty observation sequence raises an `ArgumentError`.
 """
 function filter(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
     algo::AbstractFilter,
-    observations::AbstractVector;
-    callback::CallbackType=nothing,
-    kwargs...,
+    ys::AbstractVector;
+    ref_state=nothing,
 )
-    # draw from the prior
-    init_state = initialise(rng, prior(model), algo; kwargs...)
-    callback(model, algo, init_state, observations, PostInit; kwargs...)
+    _validate_observations(model, ys)
+    isempty(ys) && throw(ArgumentError("filter requires nonempty observations"))
+    init_state = initialise(rng, SSMProblems.prior(model), algo; ref_state)
 
-    # iterations starts here for type stability
-    state, log_evidence = step(
-        rng, model, algo, 1, init_state, observations[1]; callback, kwargs...
-    )
-
-    # subsequent iteration
-    for t in 2:length(observations)
-        state, ll_increment = step(
-            rng, model, algo, t, state, observations[t]; callback, kwargs...
-        )
+    # First iteration peeled out for type stability.
+    state, log_evidence = step(rng, model, algo, 1, init_state, ys[1]; ref_state)
+    for t in 2:length(ys)
+        state, ll_increment = step(rng, model, algo, t, state, ys[t]; ref_state)
         log_evidence += ll_increment
     end
 
     return state, log_evidence
 end
-
 function filter(
-    model::AbstractStateSpaceModel,
-    algo::AbstractFilter,
-    observations::AbstractVector;
-    kwargs...,
+    model::AbstractStateSpaceModel, algo::AbstractFilter, ys::AbstractVector; kwargs...
 )
-    return filter(default_rng(), model, algo, observations; kwargs...)
+    return filter(default_rng(), model, algo, ys; kwargs...)
 end
 
 function step(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
     algo::AbstractFilter,
-    iter::Integer,
+    t::Integer,
     state,
-    observation;
-    kwargs...,
+    y;
+    ref_state=nothing,
 )
-    # generalised to fit analytical filters
-    return move(rng, model, algo, iter, state, observation; kwargs...)
+    return move(rng, model, algo, t, state, y; ref_state)
 end
 function step(
-    model::AbstractStateSpaceModel,
-    algo::AbstractFilter,
-    iter::Integer,
-    state,
-    observation;
-    kwargs...,
+    model::AbstractStateSpaceModel, algo::AbstractFilter, t::Integer, state, y; kwargs...
 )
-    return step(default_rng(), model, algo, iter, state, observation; kwargs...)
+    return step(default_rng(), model, algo, t, state, y; kwargs...)
 end
 
 function move(
     rng::AbstractRNG,
     model::AbstractStateSpaceModel,
     algo::AbstractFilter,
-    iter::Integer,
+    t::Integer,
     state,
-    observation;
-    callback::CallbackType=nothing,
-    kwargs...,
+    y;
+    ref_state=nothing,
 )
-    state = predict(rng, dyn(model), algo, iter, state, observation; kwargs...)
-    callback(model, algo, iter, state, observation, PostPredict; kwargs...)
-
-    state, ll_increment = update(obs(model), algo, iter, state, observation; kwargs...)
-    callback(model, algo, iter, state, observation, PostUpdate; kwargs...)
-
+    state = predict(rng, SSMProblems.dyn(model), algo, t, state, y; ref_state)
+    state, ll_increment = update(SSMProblems.obs(model), algo, t, state, y)
     return state, ll_increment
 end
 
-## SMOOTHING BASE ##########################################################################
+## ALGORITHMS ##############################################################################
 
-abstract type AbstractSmoother <: AbstractSampler end
-
-# Model types
-include("models/linear_gaussian.jl")
-include("models/discrete.jl")
-include("models/hierarchical.jl")
-
-# Filtering/smoothing algorithms
-include("algorithms/particles.jl")
 include("algorithms/kalman.jl")
 include("algorithms/srkf.jl")
-include("algorithms/kalman_gradient.jl")
 include("algorithms/forward.jl")
+include("algorithms/particles.jl")
 include("algorithms/rbpf.jl")
-
 include("ancestor_sampling.jl")
-
-# Conditional SMC (particle Gibbs trajectory sampling)
 include("algorithms/csmc.jl")
 
-# Integrations (log-density interface for particle Gibbs)
+include("integrations/conditional_logdensity.jl")
 include("integrations/logdensity.jl")
-include("integrations/kalman_rrule.jl")
 include("integrations/particle_gibbs.jl")
 include("integrations/ssm_trajectory.jl")
 
-# Unit-testing helper module
+## TEST UTILITIES ##########################################################################
+
 include("GFTest/GFTest.jl")
 
 end

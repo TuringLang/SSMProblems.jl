@@ -1,8 +1,15 @@
 # # Trend Inflation
 #
-# This example is a replication of the univariate state space model suggested by (Stock &
-# Watson, 2016) using GeneralisedFilters to define a heirarchical model for use in Rao-
-# Blackwellised particle filtering.
+# Inflation measurements combine a persistent trend with short-lived fluctuations. This
+# example estimates both components while allowing their variances to change over time,
+# using an unobserved-components model with stochastic volatility based on Stock and Watson
+# (2007, 2016).
+#
+# The trend follows a Gaussian random walk. Its innovation variance and the observation
+# noise variance are controlled by two latent log variances. Conditional on those log
+# variances, the trend model is linear and Gaussian. A Rao-Blackwellised particle filter
+# therefore samples the log variances and uses a Kalman filter within each particle to
+# integrate out the trend. This avoids sampling all three latent components together.
 
 #nb # Install dependencies so the notebook runs on a fresh Colab runtime. GeneralisedFilters
 #nb # and SSMProblems are added from the repo's main branch (registered versions may be too
@@ -20,16 +27,15 @@
 #nb Pkg.instantiate()
 
 using GeneralisedFilters
-using SSMProblems
 using Distributions
 using Random
 using StatsBase
 using LinearAlgebra
-using PDMats
+using StaticArrays
 
 const GF = GeneralisedFilters
 
-INFL_PATH = joinpath(@__DIR__, "..", "..", "..", "examples", "trend-inflation"); #hide
+INFL_PATH = joinpath(pkgdir(GeneralisedFilters), "examples", "trend-inflation"); #hide
 include(joinpath(INFL_PATH, "utilities.jl")); #hide
 #nb # Download the helper script and data so the notebook is self-contained on Colab:
 #nb using Downloads
@@ -42,49 +48,44 @@ include(joinpath(INFL_PATH, "utilities.jl")); #hide
 
 # ## Model Definition
 
-# We begin by defining the local level trend model, a linear Gaussian model with a weakly
-# stationary random walk component. The dynamics of which are as follows:
-
+# Let $z_t$ denote trend inflation and $y_t$ observed inflation. The local level model is
+#
 # ```math
 # \begin{aligned}
-#     y_{t} &= x_{t} + \eta_{t} \\
-#     x_{t+1} &= x_{t} + \varepsilon_{t}
+#     z_t &= z_{t-1} + \varepsilon_t, & \varepsilon_t &\sim N(0, \exp(h_{\varepsilon,t})), \\
+#     y_t &= z_t + \eta_t, & \eta_t &\sim N(0, \exp(h_{\eta,t})).
 # \end{aligned}
 # ```
-
-# However, this model is not enough to capture trend dynamics when faced with structural
-# breaks. (Stock & Watson, 2007) suggest adding a stochastic volatiltiy component, defined
-# like so:
-
+#
+# The two log variances also follow random walks:
+#
 # ```math
-# \begin{aligned}
-#     \log \sigma_{\eta, t+1} = \log \sigma_{\eta, t} + \nu_{\eta, t} \\
-#     \log \sigma_{\varepsilon, t+1} = \log \sigma_{\varepsilon, t} + \nu_{\varepsilon, t}
-# \end{aligned}
+# h_{j,t} = h_{j,t-1} + \gamma_j u_{j,t}, \qquad
+# u_{j,t} \sim N(0,1), \quad j \in \{\varepsilon,\eta\}.
 # ```
-
-# where $\nu_{z,t} \sim N(0, \gamma)$ for $z \in \{ \varepsilon, \eta \}$.
-
-# Using `GeneralisedFilters`, we can construct a heirarchical version of this model such
-# that the local level trend component is conditionally linear Gaussian on the volatility
-# draws.
-
+#
+# In the implementation below, the outer state is
+# $x_t = (h_{\varepsilon,t}, h_{\eta,t})$. The values in `γ` are the standard deviations
+# of the log-variance innovations. The initial log variances have independent standard
+# normal priors, and the initial trend has a $N(0,100)$ prior.
+#
 # #### Stochastic Volatility Process
-
-# We begin by defining the non-linear dynamics, which aren't conditioned contemporaneous
-# states. Since these processes are traditionally non-linear/non-Gaussian we use the
-# SSMProblems interface to define the stochastic volatility components.
+#
+# Define the prior and transition for the outer state using the process interface.
+# Although the log variances themselves follow Gaussian random walks, their effect on the
+# observations is nonlinear. This is the part of the model represented by particles.
 
 struct StochasticVolatilityPrior{T<:Real} <: StatePrior end
 
 # 
 
-function SSMProblems.distribution(prior::StochasticVolatilityPrior{T}; kwargs...) where {T}
+function GF.distribution(prior::StochasticVolatilityPrior{T}) where {T}
     return product_distribution(Normal(zero(T), T(1)), Normal(zero(T), T(1)))
 end
 
-# For the dynamics, instead of using the `SSMProblems.distribution` utility, we only define
-# the `simulate` method, which is sufficient for the RBPF.
+# This bootstrap particle filter only needs to simulate the outer transition, so a
+# `simulate` method is sufficient here. Algorithms that evaluate its density would also
+# need a transition `logdensity` or `distribution` method.
 
 struct StochasticVolatility{ΓT<:AbstractVector} <: LatentDynamics
     γ::ΓT
@@ -92,12 +93,8 @@ end
 
 # 
 
-function SSMProblems.simulate(
-    rng::AbstractRNG,
-    proc::StochasticVolatility,
-    step::Integer,
-    state::AbstractVector{T};
-    kwargs...,
+function GF.simulate(
+    rng::AbstractRNG, proc::StochasticVolatility, step::Integer, state::AbstractVector{T}
 ) where {T<:Real}
     new_state = deepcopy(state)
     new_state[1:2] += proc.γ .* randn(rng, T, 2)
@@ -106,100 +103,87 @@ end
 
 # #### Local Level Trend Process
 #
-# For the conditionally linear and Gaussian components, we subtype the model and provide a
-# keyword argument as the conditional element. In this case $A$ and $b$ remain constant, but
-# $Q$ is conditional on the log variance, stored in `new_outer` (the nomenclature chosen for
-# heirarchical modeling).
-
-struct LocalLevelTrend <: LinearGaussianLatentDynamics end
-
-# 
-
-GF.calc_A(::LocalLevelTrend, ::Integer; kwargs...) = [1;;]
-GF.calc_b(::LocalLevelTrend, ::Integer; kwargs...) = [0;]
-function GF.calc_Q(::LocalLevelTrend, ::Integer; new_outer, kwargs...)
-    return PDMat([exp(new_outer[1]);;])
+# Define the conditional trend transition and observation model as functions of the outer
+# state. `ctx.x_new` holds the log variances at the end of a transition, while `ctx.x`
+# holds them at the observation time. Each function returns a Gaussian atom containing
+# the matrix, offset and covariance for that step. Static arrays suit this small inner
+# model and let the Kalman filter keep its state in fixed-size storage.
+function local_level(ctx)
+    return LinearGaussianDynamics(
+        @SMatrix([1.0;;]), @SVector([0.0]), SMatrix{1,1}(exp(ctx.x_new[1]))
+    )
 end
-
-# Similarly, we define the observation process conditional on a separate log variance.
-
-struct SimpleObservation <: LinearGaussianObservationProcess end
-
-# 
-
-GF.calc_H(::SimpleObservation, ::Integer; kwargs...) = [1;;]
-GF.calc_c(::SimpleObservation, ::Integer; kwargs...) = [0;]
-function GF.calc_R(::SimpleObservation, ::Integer; new_outer, kwargs...)
-    return PDMat([exp(new_outer[2]);;])
+function simple_observation(ctx)
+    return LinearGaussianObservation(
+        @SMatrix([1.0;;]), @SVector([0.0]), SMatrix{1,1}(exp(ctx.x[2]))
+    )
 end
 
 # ### Unobserved Components with Stochastic Volatility
 
-# The state space model suggested by (Stock & Watson, 2007) can be constructed with the
-# following method:
+# Combine the outer prior and transition with the inner Gaussian prior, transition and
+# observation model. Both log variances use the same innovation standard deviation `γ`.
 
 function UCSV(γ::T) where {T<:Real}
     stoch_vol_prior = StochasticVolatilityPrior{T}()
     stoch_vol_process = StochasticVolatility(fill(γ, 2))
 
-    local_level_model = StateSpaceModel(
-        GF.HomogeneousGaussianPrior(zeros(T, 1), PDMat([100.0;;])),
-        LocalLevelTrend(),
-        SimpleObservation(),
+    return StateSpaceModel(
+        stoch_vol_prior,
+        stoch_vol_process,
+        GaussianPrior(@SVector([0.0]), @SMatrix([100.0;;])),
+        local_level,
+        simple_observation,
     )
-
-    return HierarchicalSSM(stoch_vol_prior, stoch_vol_process, local_level_model)
 end;
 
-# For plotting, we can extract the ancestry of the Rao Blackwellised particles using the
-# callback system. For our inflation data, this reduces to the following:
+# Run the Rao-Blackwellised filter with 4096 bootstrap particles and a Kalman filter for
+# each particle's trend distribution. The `filter_with_ancestry` helper records the
+# particle ancestry for plotting.
 
 rng = MersenneTwister(1234);
-sparse_ancestry = GF.AncestorCallback(nothing);
-states, ll = GF.filter(
+states, ll, tree = filter_with_ancestry(
     rng,
     UCSV(0.2),
     RBPF(BF(2^12), KalmanFilter()),
-    [[pce] for pce in fred_data.value];
-    callback=sparse_ancestry,
+    [SVector(pce) for pce in fred_data.value],
 );
 
-# The `sparse_ancestry` object stores a sparse ancestry tree which we can use to approximate
-# the smoothed series without an additional backwards pass. We can convert this data
-# structure to a human readable array by using `GeneralisedFilters.get_ancestry` and then
-# take the mean path by passing a custom function.
+# `get_ancestry` recovers the surviving paths through the particle tree. The `mean_path`
+# helper averages them using the final particle weights. For the trend, it averages the
+# Gaussian filtering means stored along those paths. This gives a useful plot of the
+# inferred trend, but does not perform Gaussian backward smoothing within each path.
+# Ancestral paths can also lose diversity at earlier times as resampling removes particles.
 
-trends, volatilities = mean_path(GF.get_ancestry(sparse_ancestry.tree), states);
+trends, volatilities = mean_path(GF.get_ancestry(tree), states);
 plot_ucsv(trends[1, :], eachrow(volatilities), fred_data)
 
 # #### Outlier Adjustments
 
-# For additional robustness, (Stock & Watson, 2016) account for one-time measurement shocks
-# and suggest an alteration in the observation equation, where
+# To allow occasional large measurement errors, add an independent variance multiplier
+# $s_t$ to the observation model, following the outlier adjustment of Stock and Watson
+# (2016):
 
 # ```math
-# \eta_{t} \sim N(0, s_{t} \cdot \sigma_{\eta, t}^2) \quad \quad s_{t} \sim \begin{cases}
-# U(0,2) & \text{ with probability } p \\
+# \eta_{t} \sim N(0, s_{t} \exp(h_{\eta,t})) \quad \quad s_{t} \sim \begin{cases}
+# U(2,10) & \text{ with probability } p \\
 # \delta(1) & \text{ with probability } 1 - p
 # \end{cases}
 # ```
 
-# The prior is the same as before, but with additional state which we can assume will always
-# be 1; using the `Distributions` interface this is just `Dirac(1)`
+# Add the multiplier as a third component of the outer state. Its initial value is fixed
+# at one with `Dirac(1)`. Subsequent values are drawn independently at each transition.
 
 struct OutlierAdjustedVolatilityPrior{T<:Real} <: StatePrior end
 
 # 
 
-function SSMProblems.distribution(
-    prior::OutlierAdjustedVolatilityPrior{T}; kwargs...
-) where {T}
+function GF.distribution(prior::OutlierAdjustedVolatilityPrior{T}) where {T}
     return product_distribution(Normal(zero(T), T(1)), Normal(zero(T), T(1)), Dirac(one(T)))
 end
 
-# In terms of the model definition, we can construct a separate `LatentDynamics` which
-# contains the same volatility process as before, but with the respective draw in the third
-# component.
+# The new transition contains the original log-variance process and the two distributions
+# used to draw the multiplier.
 
 struct OutlierAdjustedVolatility{ΓT} <: LatentDynamics
     volatility::StochasticVolatility{ΓT}
@@ -207,38 +191,32 @@ struct OutlierAdjustedVolatility{ΓT} <: LatentDynamics
     outlier_dist::Uniform
 end
 
-# The simulation then calls the volatility process, and computes the outlier term in the
-# third state
+# Simulate the log variances, then replace the third component with the new multiplier.
 
-function SSMProblems.simulate(
+function GF.simulate(
     rng::AbstractRNG,
     proc::OutlierAdjustedVolatility,
     step::Integer,
-    state::AbstractVector{T};
-    kwargs...,
+    state::AbstractVector{T},
 ) where {T<:Real}
-    new_state = SSMProblems.simulate(rng, proc.volatility, step, state; kwargs...)
+    new_state = GF.simulate(rng, proc.volatility, step, state)
     new_state[3] = rand(rng, proc.switch_dist) ? rand(rng, proc.outlier_dist) : one(T)
     return new_state
 end
 
-# For the observation process, we define a new object where $R$ is dependent on both the
-# measurement volatility as well as this outlier adjustment coefficient.
+# Multiply the observation variance by the third component. Conditional on the complete
+# outer state, the observation model is still Gaussian.
 
-struct OutlierAdjustedObservation <: LinearGaussianObservationProcess end
-
-# 
-
-GF.calc_H(::OutlierAdjustedObservation, ::Integer; kwargs...) = [1;;]
-GF.calc_c(::OutlierAdjustedObservation, ::Integer; kwargs...) = [0;]
-function GF.calc_R(::OutlierAdjustedObservation, ::Integer; new_outer, kwargs...)
-    return PDMat([new_outer[3] * exp(new_outer[2]);;])
+function outlier_observation(ctx)
+    return LinearGaussianObservation(
+        @SMatrix([1.0;;]), @SVector([0.0]), SMatrix{1,1}(ctx.x[3] * exp(ctx.x[2]))
+    )
 end
 
 # ### Outlier Adjusted UCSV
 
-# The state space model suggested by (Stock & Watson, 2007) can be constructed with the
-# following method:
+# Assemble the model with the new outer process and observation function. The inner prior
+# and trend transition are unchanged.
 
 function UCSVO(γ::T, prob::T) where {T<:Real}
     stoch_vol_prior = OutlierAdjustedVolatilityPrior{T}()
@@ -246,30 +224,28 @@ function UCSVO(γ::T, prob::T) where {T<:Real}
         StochasticVolatility(fill(γ, 2)), Bernoulli(prob), Uniform{T}(2, 10)
     )
 
-    local_level_model = StateSpaceModel(
-        GF.HomogeneousGaussianPrior(zeros(T, 1), PDMat([100.0;;])),
-        LocalLevelTrend(),
-        OutlierAdjustedObservation(),
+    return StateSpaceModel(
+        stoch_vol_prior,
+        stoch_vol_process,
+        GaussianPrior(@SVector([0.0]), @SMatrix([100.0;;])),
+        local_level,
+        outlier_observation,
     )
-
-    return HierarchicalSSM(stoch_vol_prior, stoch_vol_process, local_level_model)
 end;
 
-# We then repeat the same experiment, this time with an outlier probability of $p = 0.05$
+# Repeat the filtering calculation with an outlier probability of $p = 0.05$.
 
 rng = MersenneTwister(1234);
-sparse_ancestry = GF.AncestorCallback(nothing)
-states, ll = GF.filter(
+states, ll, tree = filter_with_ancestry(
     rng,
     UCSVO(0.2, 0.05),
     RBPF(BF(2^12), KalmanFilter()),
-    [[pce] for pce in fred_data.value];
-    callback=sparse_ancestry,
+    [SVector(pce) for pce in fred_data.value],
 );
 
-# this process is identical to the last, except with an additional `volatilities` state
-# which captures the outlier distance. We omit this feature in the plots, but the impact is
-# clear when comparing the maximum transitory noise around the GFC.
+# Plot the trend and the two baseline volatility components as before. The third component
+# contains the variance multipliers and is omitted from the plots. Large measurement errors
+# can now be explained by a temporary multiplier as well as a change in baseline volatility.
 
-trends, volatilities = mean_path(GF.get_ancestry(sparse_ancestry.tree), states);
+trends, volatilities = mean_path(GF.get_ancestry(tree), states);
 plot_ucsv(trends[1, :], eachrow(volatilities), fred_data)

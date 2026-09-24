@@ -5,48 +5,49 @@ export DiscreteSmoother
 """
     DiscreteFilter <: AbstractFilter
 
-Forward filtering algorithm for discrete (finite) state space models.
-
-Computes the filtered distribution π_t(i) = p(x_t = i | y_{1:t}) recursively.
+Forward filtering algorithm for discrete (finite) state-space models. Computes the filtered
+distribution `π_t(i) = p(x_t = i | y_{1:t})`.
 """
 struct DiscreteFilter <: AbstractFilter end
 const DF = DiscreteFilter
 
-function initialise(rng::AbstractRNG, prior::DiscretePrior, ::DiscreteFilter; kwargs...)
-    return calc_α0(prior; kwargs...)
+function initialise(
+    ::AbstractRNG, prior::DiscretePrior, ::DiscreteFilter; ref_state=nothing
+)
+    return prior.α0
 end
 
 function predict(
-    rng::AbstractRNG,
-    dyn::DiscreteLatentDynamics,
-    filter::DiscreteFilter,
-    step::Integer,
-    states::AbstractVector,
-    observation;
-    kwargs...,
+    ::AbstractRNG,
+    dyn,
+    ::DiscreteFilter,
+    t::Integer,
+    π::AbstractVector,
+    y;
+    ref_state=nothing,
 )
-    P = calc_P(dyn, step; kwargs...)
-    return (states' * P)'
+    return vec(π' * resolve(dyn, (; t)).P)
 end
 
-function update(
-    obs::ObservationProcess,
-    filter::DiscreteFilter,
-    step::Integer,
-    states::AbstractVector,
-    observation;
-    kwargs...,
+function update(obs, ::DiscreteFilter, t::Integer, π::AbstractVector, y)
+    o = resolve(obs, (; t))
+    log_weights = map(i -> log(π[i]) + logdensity(o, t, i, y), eachindex(π))
+    ll = logsumexp(log_weights)
+    # Impossible observations have zero evidence; avoid manufacturing NaN beliefs.
+    ll == -Inf && return zero.(π), ll
+    return exp.(log_weights .- ll), ll
+end
+
+"""
+    marginal_loglikelihood(model, ::DiscreteFilter, ys)
+
+Evaluate a finite-state model's deterministic forward likelihood. Emission weights are
+normalised in log space; impossible observations return `-Inf`.
+"""
+function marginal_loglikelihood(
+    model::AbstractStateSpaceModel, af::DiscreteFilter, ys::AbstractVector
 )
-    # Compute emission probability vector
-    # TODO: should we define density as part of the interface or run the whole algorithm in
-    # log space?
-    b = map(
-        x -> exp(SSMProblems.logdensity(obs, step, x, observation; kwargs...)),
-        eachindex(states),
-    )
-    filtered_states = b .* states
-    likelihood = sum(filtered_states)
-    return (filtered_states / likelihood), log(likelihood)
+    return last(filter(model, af, ys))
 end
 
 ## BACKWARD DISCRETE PREDICTOR #############################################################
@@ -54,87 +55,39 @@ end
 """
     BackwardDiscretePredictor <: AbstractBackwardPredictor
 
-Algorithm to recursively compute the backward likelihood β_t(i) = p(y_{t:T} | x_t = i)
-for discrete state space models.
-
-All computations are performed in log-space using logsumexp for numerical stability.
-The resulting `DiscreteLikelihood` stores log β values internally.
+Recursively computes the backward likelihood `β_t(i) = p(y_{t:T} | x_t = i)` for discrete
+state-space models, in log-space for numerical stability.
 """
 struct BackwardDiscretePredictor <: AbstractBackwardPredictor end
 
-"""
-    backward_initialise(rng, obs, algo::BackwardDiscretePredictor, iter, y; kwargs...)
-
-Initialize the backward likelihood at time T with observation y_T.
-
-Returns a `DiscreteLikelihood` where log β_T(i) = log p(y_T | x_T = i).
-"""
 function backward_initialise(
-    rng::AbstractRNG,
-    obs::ObservationProcess,
-    ::BackwardDiscretePredictor,
-    iter::Integer,
-    y;
-    num_states::Integer,
-    kwargs...,
+    ::BackwardDiscretePredictor, obs, t::Integer, y, num_states::Integer
 )
-    log_β = map(i -> SSMProblems.logdensity(obs, iter, i, y; kwargs...), 1:num_states)
+    o = resolve(obs, (; t))
+    log_β = map(i -> logdensity(o, t, i, y), 1:num_states)
     return DiscreteLikelihood(log_β)
 end
 
-"""
-    backward_predict(rng, dyn, algo::BackwardDiscretePredictor, iter, state; kwargs...)
-
-Backward prediction step: marginalize through dynamics without incorporating observations.
-
-Takes p(y_{t+1:T} | x_{t+1}) and computes p(y_{t+1:T} | x_t) by marginalizing over x_{t+1}:
-    p(y_{t+1:T} | x_t = i) = Σ_j P_{ij} p(y_{t+1:T} | x_{t+1} = j)
-
-In log-space: log p(y_{t+1:T} | x_t = i) = logsumexp_j(log P_{ij} + log p(y_{t+1:T} | x_{t+1} = j))
-"""
 function backward_predict(
-    rng::AbstractRNG,
-    dyn::DiscreteLatentDynamics,
-    ::BackwardDiscretePredictor,
-    iter::Integer,
-    state::DiscreteLikelihood;
-    kwargs...,
+    ::BackwardDiscretePredictor, lik::DiscreteLikelihood, d::DiscreteDynamics
 )
-    log_β_next = log_likelihoods(state)
-    P = calc_P(dyn, iter + 1; kwargs...)
+    log_β_next = log_likelihoods(lik)
+    P = d.P
     K = length(log_β_next)
-
     log_β = map(1:K) do i
-        logsumexp(log.(P[i, :]) .+ log_β_next)
+        return logsumexp(log.(P[i, :]) .+ log_β_next)
     end
-
     return DiscreteLikelihood(log_β)
 end
 
-"""
-    backward_update(obs, algo::BackwardDiscretePredictor, iter, state, y; kwargs...)
-
-Incorporate observation y_t into the backward likelihood.
-
-Updates: log β(i) += log p(y_t | x_t = i)
-
-This transforms p(y_{t+1:T} | x_t) into β_t = p(y_{t:T} | x_t).
-"""
 function backward_update(
-    obs::ObservationProcess,
-    ::BackwardDiscretePredictor,
-    iter::Integer,
-    state::DiscreteLikelihood,
-    y;
-    kwargs...,
+    ::BackwardDiscretePredictor, lik::DiscreteLikelihood, obs, t::Integer, y
 )
-    log_β = log_likelihoods(state)
+    log_β = log_likelihoods(lik)
     K = length(log_β)
-
-    log_emission = map(i -> SSMProblems.logdensity(obs, iter, i, y; kwargs...), 1:K)
-    log_β_new = log_β .+ log_emission
-
-    return DiscreteLikelihood(log_β_new)
+    o = resolve(obs, (; t))
+    log_emission = map(i -> logdensity(o, t, i, y), 1:K)
+    return DiscreteLikelihood(log_β .+ log_emission)
 end
 
 ## DISCRETE SMOOTHER #######################################################################
@@ -142,85 +95,64 @@ end
 """
     DiscreteSmoother <: AbstractSmoother
 
-A forward-backward smoother for discrete state space models.
+Forward-backward smoother for discrete state-space models.
 """
 struct DiscreteSmoother <: AbstractSmoother end
 
-"""
-    backward_smooth(dyn, algo::DiscreteFilter, step, filtered, smoothed_next; predicted, kwargs...)
-
-Perform one step of backward smoothing for discrete state spaces.
-
-Computes γ_t(i) = π_t(i) * Σ_j [P_{ij} * γ_{t+1}(j) / π̂_{t+1}(j)]
-
-where:
-- π_t(i) is the filtered distribution at time t
-- γ_{t+1}(j) is the smoothed distribution at time t+1
-- π̂_{t+1}(j) is the predicted distribution at time t+1
-- P_{ij} is the transition probability from state i to state j
-"""
-function backward_smooth(
-    dyn::DiscreteLatentDynamics,
-    ::DiscreteFilter,
-    step::Integer,
+function _discrete_backward_step(
+    d::DiscreteDynamics,
     filtered::AbstractVector,
-    smoothed_next::AbstractVector;
+    smoothed_next::AbstractVector,
     predicted::AbstractVector,
-    kwargs...,
 )
-    P = calc_P(dyn, step + 1; kwargs...)
+    P = d.P
     K = length(filtered)
-
-    smoothed = map(1:K) do i
+    return map(1:K) do i
         correction = sum(1:K) do j
-            P[i, j] * smoothed_next[j] / predicted[j]
+            # An unreachable state contributes zero, including the 0/0 case.
+            if iszero(predicted[j])
+                zero(smoothed_next[j])
+            else
+                P[i, j] * smoothed_next[j] / predicted[j]
+            end
         end
-        filtered[i] * correction
+        return filtered[i] * correction
     end
-
-    return smoothed
 end
 
-"""
-    smooth(rng, model::DiscreteStateSpaceModel, algo::DiscreteSmoother, observations; t_smooth=1, kwargs...)
-
-Run forward-backward smoothing for discrete state space models.
-
-Returns the smoothed distribution at time `t_smooth` and the log-likelihood.
-"""
 function smooth(
     rng::AbstractRNG,
-    model::DiscreteStateSpaceModel,
+    model::AbstractStateSpaceModel,
     ::DiscreteSmoother,
-    observations::AbstractVector;
+    ys::AbstractVector;
     t_smooth=1,
-    kwargs...,
 )
-    T = length(observations)
+    _validate_observations(model, ys)
+    1 <= t_smooth <= length(ys) ||
+        throw(ArgumentError("smoothing time must lie in 1:length(ys)"))
+    T = length(ys)
     df = DiscreteFilter()
 
-    # Forward pass: store filtered and predicted distributions
     filtered = Vector{Vector{Float64}}(undef, T)
     predicted = Vector{Vector{Float64}}(undef, T)
 
     total_ll = 0.0
-    state = let s = initialise(rng, prior(model), df; kwargs...)
+    state = let s = initialise(rng, SSMProblems.prior(model), df)
         for t in 1:T
-            pred = predict(rng, dyn(model), df, t, s, observations[t]; kwargs...)
+            pred = predict(rng, SSMProblems.dyn(model), df, t, s, ys[t])
             predicted[t] = pred
-            s, ll = update(obs(model), df, t, pred, observations[t]; kwargs...)
+            s, ll = update(SSMProblems.obs(model), df, t, pred, ys[t])
             filtered[t] = s
             total_ll += ll
         end
         s
     end
 
-    # Backward pass
     smoothed = let s = filtered[T]
         for t in (T - 1):-1:t_smooth
-            s = backward_smooth(
-                dyn(model), df, t, filtered[t], s; predicted=predicted[t + 1], kwargs...
-            )
+            # Atom index t+1 parameterises the transition x_t → x_{t+1}.
+            d = resolve(SSMProblems.dyn(model), (; t=t + 1))
+            s = _discrete_backward_step(d, filtered[t], s, predicted[t + 1])
         end
         s
     end
@@ -230,21 +162,16 @@ end
 
 ## TWO-FILTER SMOOTHING ####################################################################
 
-"""
-    two_filter_smooth(filtered::AbstractVector, backward_lik::DiscreteLikelihood)
-
-Combine forward filtered distribution with backward likelihood to get smoothed distribution.
-
-Returns the normalized smoothed distribution γ_t(i) ∝ π_t(i) * β_t(i).
-
-All computations are performed in log-space for numerical stability.
-"""
 function two_filter_smooth(filtered::AbstractVector, backward_lik::DiscreteLikelihood)
     log_filtered = log.(filtered)
     log_β = log_likelihoods(backward_lik)
-
     log_smoothed = log_filtered .+ log_β
-    log_normalizer = logsumexp(log_smoothed)
+    log_normaliser = logsumexp(log_smoothed)
+    return exp.(log_smoothed .- log_normaliser)
+end
 
-    return exp.(log_smoothed .- log_normalizer)
+function compute_marginal_predictive_likelihood(
+    forward::AbstractVector, backward::DiscreteLikelihood
+)
+    return logsumexp(log.(forward) .+ log_likelihoods(backward))
 end

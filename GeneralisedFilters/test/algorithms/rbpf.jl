@@ -3,10 +3,10 @@
 ## RBPF with Kalman Inner Filter ############################################################
 
 @testitem "RBPF Kalman inner" begin
+    using GeneralisedFilters
     using Distributions
     using GeneralisedFilters
     using LinearAlgebra
-    using SSMProblems
     using StableRNGs
     using StatsBase: weights
 
@@ -15,7 +15,7 @@
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, 1, 1, 1; static_arrays=true
     )
-    _, _, ys = sample(rng, full_model, 4)
+    _, _, ys = simulate(rng, full_model, 4)
 
     resampler = GeneralisedFilters.GFTest.AlternatingResampler()
     bf = BF(10^6; resampler=resampler)
@@ -34,7 +34,7 @@
 end
 
 @testitem "RBPF guided Kalman inner" begin
-    using SSMProblems
+    using GeneralisedFilters
     using StableRNGs
     using StatsBase: weights
 
@@ -43,9 +43,9 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, 1, 1, 1; static_arrays=true
     )
-    _, _, ys = sample(rng, full_model, 4)
+    _, _, ys = simulate(rng, full_model, 4)
 
-    prop = GeneralisedFilters.GFTest.OverdispersedProposal(dyn(hier_model).outer_dyn, 1.5)
+    prop = GeneralisedFilters.GFTest.OverdispersedProposal(hier_model.dyn.outer, 1.5)
     resampler = GeneralisedFilters.GFTest.AlternatingResampler()
     gf = ParticleFilter(10^6, prop; resampler=resampler)
     rbgf = RBPF(gf, KalmanFilter())
@@ -62,10 +62,10 @@ end
 end
 
 @testitem "ARBF" begin
+    using GeneralisedFilters
     using Distributions
     using GeneralisedFilters
     using LinearAlgebra
-    using SSMProblems
     using StableRNGs
     using StatsBase: weights
 
@@ -74,7 +74,7 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, 1, 1, 1; static_arrays=true
     )
-    _, _, ys = sample(rng, hier_model, 4)
+    _, _, ys = simulate(rng, hier_model, 4)
 
     resampler = GeneralisedFilters.GFTest.AlternatingResampler()
     bf = BF(10^6; resampler=resampler)
@@ -96,7 +96,7 @@ end
 
 @testitem "RBPF discrete inner" begin
     using GeneralisedFilters
-    using SSMProblems
+    using GeneralisedFilters
     using StableRNGs
     using StatsBase: weights
 
@@ -113,7 +113,7 @@ end
     )
 
     # Sample observations from the hierarchical model
-    _, _, _, _, observations = sample(rng, hier_model, T)
+    _, _, observations = simulate(rng, hier_model, T)
 
     # Run joint forward algorithm on the product space
     joint_state, joint_ll = GeneralisedFilters.filter(rng, joint_model, DF(), observations)
@@ -169,7 +169,7 @@ end
 ## BF on Hierarchical Models ################################################################
 
 @testitem "BF on hierarchical model" begin
-    using SSMProblems
+    using GeneralisedFilters
     using StableRNGs
     using StatsBase: weights
 
@@ -185,7 +185,7 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, D_outer, D_inner, D_obs
     )
-    _, _, ys = sample(rng, full_model, T)
+    _, _, ys = simulate(rng, full_model, T)
 
     # Ground truth Kalman filtering
     kf_states, kf_ll = GeneralisedFilters.filter(rng, full_model, KalmanFilter(), ys)
@@ -209,7 +209,7 @@ end
 ## Ancestry Tracking ########################################################################
 
 @testitem "RBPF ancestry" begin
-    using SSMProblems
+    using GeneralisedFilters
     using StableRNGs
 
     SEED = 1234
@@ -220,13 +220,16 @@ end
     full_model, hier_model = GeneralisedFilters.GFTest.create_dummy_linear_gaussian_model(
         rng, 1, 1, 1
     )
-    _, _, ys = sample(rng, full_model, T)
+    _, _, ys = simulate(rng, full_model, T)
 
-    cb = GeneralisedFilters.AncestorCallback(nothing)
     rbpf = RBPF(BF(N_particles; threshold=0.8), KalmanFilter())
-    GeneralisedFilters.filter(rng, hier_model, rbpf, ys; callback=cb)
-
-    tree = cb.tree
+    initial = GeneralisedFilters.initialise(rng, hier_model.prior, rbpf)
+    state, _ = GeneralisedFilters.step(rng, hier_model, rbpf, 1, initial, ys[1])
+    tree = GeneralisedFilters._init_tree(initial, state)
+    for t in 2:T
+        global state, _ = GeneralisedFilters.step(rng, hier_model, rbpf, t, state, ys[t])
+        GeneralisedFilters._update_tree!(tree, state)
+    end
     paths = GeneralisedFilters.get_ancestry(tree)
 
     # Verify we can retrieve ancestry for all particles
@@ -234,6 +237,7 @@ end
 end
 
 @testitem "Dense ancestry" begin
+    using GeneralisedFilters
     using GeneralisedFilters
     using StableRNGs
     using PDMats
@@ -251,27 +255,82 @@ end
         return [mod1(a - 1, length(weights)) for a in 1:n]
     end
 
+    GeneralisedFilters.supports_conditional(::DummyResampler) = true
+
+    function GeneralisedFilters.conditional_sample_ancestors(
+        ::AbstractRNG, ::DummyResampler, weights::AbstractVector, ref_idx::Integer
+    )
+        n = length(weights)
+        return [a == 1 ? ref_idx : mod1(a - 1, n) for a in 1:n]
+    end
+
     SEED = 1234
     K = 5
     N_particles = max(10, K + 2)
 
     rng = StableRNG(SEED)
     model = GeneralisedFilters.GFTest.create_linear_gaussian_model(rng, 1, 1)
-    _, _, ys = sample(rng, model, K)
+    _, _, ys = simulate(rng, model, K)
 
     ref_traj = ReferenceTrajectory(rand(rng, 1), [rand(rng, 1) for _ in 1:K])
 
     bf = BF(N_particles; threshold=1.0, resampler=DummyResampler())
-    cb = GeneralisedFilters.DenseAncestorCallback(nothing)
-    bf_state, _ = GeneralisedFilters.filter(
-        rng, model, bf, ys; ref_state=ref_traj, callback=cb
+    initial = GeneralisedFilters.initialise(rng, model.prior, bf; ref_state=ref_traj)
+    state, _ = GeneralisedFilters.step(
+        rng, model, bf, 1, initial, ys[1]; ref_state=ref_traj
     )
+    container = GeneralisedFilters._init_container(initial, state)
+    for t in 2:K
+        global state, _ = GeneralisedFilters.step(
+            rng, model, bf, t, state, ys[t]; ref_state=ref_traj
+        )
+        GeneralisedFilters._update_container!(container, state)
+    end
 
-    traj = GeneralisedFilters.get_ancestry(cb.container, N_particles)
-    true_x0 = cb.container.initial_states[N_particles - K]
-    true_xs = [cb.container.states[t][N_particles - K + t] for t in 1:K]
+    traj = GeneralisedFilters.get_ancestry(container, N_particles)
+    true_x0 = container.initial_states[N_particles - K]
+    true_xs = [container.states[t][N_particles - K + t] for t in 1:K]
 
     @test traj.x0 == true_x0
     @test traj.xs == true_xs
-    @test GeneralisedFilters.get_ancestry(cb.container, 1) == ref_traj
+    @test GeneralisedFilters.get_ancestry(container, 1) == ref_traj
+end
+
+@testitem "RB proposal sees filtering belief and returns outer state" begin
+    using GeneralisedFilters
+    using StableRNGs
+    using StaticArrays
+    using Distributions
+    const GF = GeneralisedFilters
+
+    struct BeliefProposal <: AbstractProposal end
+    GF.distribution(::BeliefProposal, t::Integer, s::RBState, y) =
+        GaussianState(s.x + s.z.μ, s.z.Σ)
+
+    rng = StableRNG(97)
+    outer = LinearGaussianDynamics(@SMatrix([0.8;;]), @SVector([0.1]), @SMatrix([0.4;;]))
+    inner = ctx -> LinearGaussianDynamics(@SMatrix([0.7;;]), ctx.x_new, @SMatrix([0.2;;]))
+    dynamics = HierarchicalDynamics(outer, inner)
+    state = RBState(@SVector([0.3]), GaussianState(@SVector([0.5]), @SMatrix([0.6;;])))
+    particle = GF.Particle(state, -0.2, 3)
+    algo = RBPF(ParticleFilter(4, BeliefProposal()), KF())
+    xnew = @SVector([1.1])
+    y = @SVector([0.4])
+    result = GF.predict_particle(rng, dynamics, algo, 1, particle, y, xnew)
+    expected_weight =
+        -0.2 + logdensity(outer, 1, state.x, xnew) -
+        logpdf(GF.distribution(BeliefProposal(), 1, state, y), xnew)
+    @test GF.log_weight(result) ≈ expected_weight
+    @test result.state.x == xnew
+    @test result.state.z.μ ≈ 0.7 * state.z.μ + xnew
+    @test result.ancestor == 3
+
+    # Reinitialisation must use the new conditional prior, not any stored inner belief.
+    prior = HierarchicalPrior(
+        DistributionPrior(Normal()),
+        ctx -> GaussianPrior(@SVector([ctx.x0]), @SMatrix([0.5;;])),
+    )
+    initial = GF.initialise_particle(rng, prior, algo, 2.0)
+    @test initial.state.x == 2.0
+    @test initial.state.z.μ == @SVector([2.0])
 end

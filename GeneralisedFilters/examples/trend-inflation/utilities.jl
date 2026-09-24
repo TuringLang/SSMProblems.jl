@@ -17,13 +17,27 @@ end
 # for normal collections
 mean_path(paths, states) = _mean_path(identity, paths, states)
 
-# for rao blackwellised particles; `get_ancestry` returns `ReferenceTrajectory`s, which we
-# collect into plain vectors before extracting per-time-step state components
-function mean_path(paths::AbstractVector{<:GeneralisedFilters.ReferenceTrajectory}, states)
+# for rao blackwellised particles
+function mean_path(
+    paths::AbstractVector{<:AbstractVector{<:GeneralisedFilters.RBState}}, states
+)
     trajectories = map(collect, paths)
     zs = _mean_path(s -> getproperty.(getproperty.(s, :z), :μ), trajectories, states)
     xs = _mean_path(s -> getproperty.(s, :x), trajectories, states)
     return zs, xs
+end
+
+# Track the state returned by each public filtering step; no callback is needed.
+function filter_with_ancestry(rng, model, algo, ys)
+    initial = GeneralisedFilters.initialise(rng, model.prior, algo)
+    state, ll = GeneralisedFilters.step(rng, model, algo, 1, initial, ys[1])
+    tree = ParticleTree(initial, state)
+    for t in 2:length(ys)
+        state, inc = GeneralisedFilters.step(rng, model, algo, t, state, ys[t])
+        ll += inc
+        push!(tree, state)
+    end
+    return state, ll, tree
 end
 
 function plot_ucsv(trend, volatilities, fred_data)
@@ -37,8 +51,9 @@ function plot_ucsv(trend, volatilities, fred_data)
         xtickformat=dateticks,
     )
 
-    lines!(fig[1:2, 1], vcat(0, fred_data.value...); color=:red, linestyle=:dash)
-    lines!(trend_ax, trend; color=:black)
+    lines!(trend_ax, vcat(0, fred_data.value...); color=:red, linestyle=:dash)
+    # Makie interprets an SVector as one point, rather than a time series.
+    lines!(trend_ax, collect(trend); color=:black)
 
     vol_ax_1 = Axis(fig[1, 2]; title="Volatility", xtickformat=dateticks)
     lines!(vol_ax_1, exp.(0.5 * volatilities[1]); color=:black, label="permanent")
@@ -52,4 +67,7 @@ function plot_ucsv(trend, volatilities, fred_data)
 end
 
 # this is essential for plotting dates
-date_format(dates) = x -> [Dates.format(dates[floor(Int, i) + 1], "yyyy") for i in x]
+function date_format(dates)
+    return x ->
+        [Dates.format(dates[clamp(floor(Int, i), 1, length(dates))], "yyyy") for i in x]
+end

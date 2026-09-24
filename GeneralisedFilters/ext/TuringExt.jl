@@ -2,29 +2,15 @@ module TuringExt
 
 using GeneralisedFilters
 import GeneralisedFilters:
-    SSMTrajectory,
-    _csmc_sample,
-    _build_chains,
-    _get_inner_filter,
-    _outer_trajectory,
-    _state_dim,
-    _flatten_trajectory,
-    ParticleGibbsTransition
+    SSMTrajectory, _csmc_sample, _get_inner_filter, _state_dim, _flatten_trajectory
 using AbstractMCMC: AbstractMCMC
 using Bijectors: Bijectors
 using Bijectors.VectorBijectors: TypedIdentity
 import Bijectors: bijector
-import DifferentiationInterface as DI
 using Distributions: Distributions
 using DynamicPPL: DynamicPPL
-using LinearAlgebra: PosDefException
-using LogDensityProblems: LogDensityProblems
-using MCMCChains: MCMCChains
 using Random: AbstractRNG
-using SSMProblems
 using Turing: Turing
-
-# include("dppl_csmc.jl")
 
 ## BIJECTORS INTEGRATION #######################################################################
 
@@ -42,6 +28,8 @@ Bijectors.VectorBijectors.linked_vec_length(d::SSMTrajectory) = length(d)
 A DynamicPPL leaf context that intercepts `x ~ SSMTrajectory(...)` and, rather than
 evaluating the prior-path log-density, runs conditional SMC to draw a new trajectory.
 """
+# The context exists before encountering the trajectory distribution. Its references can
+# hold different trajectory types; _csmc_sample specialises the numerical loop on the model.
 struct CSMCContext{RT<:AbstractRNG,FT<:ConditionalSMC} <: DynamicPPL.AbstractContext
     rng::RT
     algo::FT
@@ -49,12 +37,18 @@ struct CSMCContext{RT<:AbstractRNG,FT<:ConditionalSMC} <: DynamicPPL.AbstractCon
     sampled_traj::Ref{Any}
 end
 
-# TODO: remove Ref{Any}
 function CSMCContext(rng::AbstractRNG, algo::ConditionalSMC; ref=nothing)
     return CSMCContext(rng, algo, Ref{Any}(ref), Ref{Any}(nothing))
 end
 
 function conditional_smc(ctx::CSMCContext, dist::SSMTrajectory)
+    _get_inner_filter(ctx.algo.pf) == dist.af ||
+        throw(ArgumentError("SSMTrajectory analytical filter must match the CSMC filter"))
+    ctx.sampled_traj[] === nothing || throw(
+        ArgumentError(
+            "ParticleGibbs currently supports exactly one SSMTrajectory variable"
+        ),
+    )
     trajectory, _ = _csmc_sample(
         ctx.rng, dist.model, ctx.algo, dist.observations, ctx.ref_traj[]
     )
@@ -62,11 +56,8 @@ function conditional_smc(ctx::CSMCContext, dist::SSMTrajectory)
 end
 
 function flatten_trajectory(ctx::CSMCContext, dist::SSMTrajectory)
-    af = _get_inner_filter(ctx.algo.pf)
     trajectory = ctx.sampled_traj[]
-    return _flatten_trajectory(
-        _outer_trajectory(trajectory, af), length(dist.observations), _state_dim(dist)
-    )
+    return _flatten_trajectory(trajectory, length(dist.observations), _state_dim(dist))
 end
 
 function DynamicPPL.tilde_assume!!(
@@ -108,39 +99,6 @@ function DynamicPPL.tilde_observe!!(
     )
 end
 
-## CSMC ACCUMULATOR ############################################################################
-
-# TODO: replace the sampling context with one of these eventually...
-struct CSMCFunctor{RT<:AbstractRNG,FT<:ConditionalSMC}
-    rng::RT
-    algo::FT
-    ref::Ref{Any}
-end
-
-function CSMCFunctor(rng::AbstractRNG, algo::ConditionalSMC)
-    return CSMCFunctor(rng, algo, Ref{Any}(nothing))
-end
-
-set_reference!(f::CSMCFunctor, traj) = (f.ref[] = traj)
-
-function (f::CSMCFunctor)(_, _, _, _, dist::SSMTrajectory)
-    trajectory, _ = _csmc_sample(f.rng, dist.model, f.algo, dist.observations, f.ref[])
-    return trajectory
-end
-
-(::CSMCFunctor)(_, _, _, _, _) = DynamicPPL.DoNotAccumulate()
-
-const CSMC_TRAJECTORY = :CSMCTrajectory
-
-function csmc_accumulator(rng::AbstractRNG, algo::ConditionalSMC; ref=nothing)
-    f = CSMCFunctor(rng, algo, Ref{Any}(ref))
-    return DynamicPPL.VNTAccumulator{CSMC_TRAJECTORY}(f), f
-end
-
-function _get_csmc_trajectories(vi::DynamicPPL.AbstractVarInfo)
-    return DynamicPPL.getacc(vi, Val(CSMC_TRAJECTORY)).values
-end
-
 ## TRAJECTORY VNT ACCUMULATOR ##################################################################
 
 const TRAJ_ACCUMULATOR = :StateTrajectory
@@ -154,109 +112,16 @@ function get_trajectory(vi::DynamicPPL.AbstractVarInfo)
     return DynamicPPL.getacc(vi, Val(TRAJ_ACCUMULATOR)).values
 end
 
-## CACHED PREP LDF #############################################################################
-
-"""
-    CachedPrepLDF
-
-Wrapper that reuses the AD preparation (`_adprep`) from an existing `LogDensityFunction`
-while evaluating against a different conditioned model. This avoids calling
-`prepare_gradient` every MCMC iteration when only the conditioned trajectory changes.
-"""
-struct CachedPrepLDF{Tlink,L<:DynamicPPL.LogDensityFunction{Tlink},M}
-    base::L
-    model::M
-end
-
-function LogDensityProblems.capabilities(::Type{<:CachedPrepLDF{T,L}}) where {T,L}
-    return LogDensityProblems.capabilities(L)
-end
-LogDensityProblems.dimension(c::CachedPrepLDF) = c.base._dim
-
-function LogDensityProblems.logdensity(
-    c::CachedPrepLDF{Tlink}, params::AbstractVector
-) where {Tlink}
-    b = c.base
-    try
-        return DynamicPPL.logdensity_at(
-            params,
-            c.model,
-            b._getlogdensity,
-            b._varname_ranges,
-            b.transform_strategy,
-            b._accs,
-        )
-    catch e
-        e isa PosDefException || rethrow()
-        return convert(eltype(params), -Inf)
-    end
-end
-
-function LogDensityProblems.logdensity_and_gradient(
-    c::CachedPrepLDF{Tlink}, params::AbstractVector
-) where {Tlink}
-    b = c.base
-    params = convert(DynamicPPL.get_input_vector_type(b), params)
-    try
-        return if DynamicPPL._use_closure(b.adtype)
-            DI.value_and_gradient(
-                DynamicPPL.LogDensityAt{Tlink}(
-                    c.model,
-                    b._getlogdensity,
-                    b._varname_ranges,
-                    b.transform_strategy,
-                    b._accs,
-                ),
-                b._adprep,
-                b.adtype,
-                params,
-            )
-        else
-            DI.value_and_gradient(
-                DynamicPPL.logdensity_at,
-                b._adprep,
-                b.adtype,
-                params,
-                DI.Constant(c.model),
-                DI.Constant(b._getlogdensity),
-                DI.Constant(b._varname_ranges),
-                DI.Constant(b.transform_strategy),
-                DI.Constant(b._accs),
-            )
-        end
-    catch e
-        e isa PosDefException || rethrow()
-        T = eltype(params)
-        return (convert(T, -Inf), zero(params))
-    end
-end
-
 ## TURING STATE ################################################################################
 
-struct ParticleGibbsTuringState{VIT,TT,PS,LT,VNTT,PT}
+struct ParticleGibbsTuringState{VIT,TT,PS,PT}
     vi::VIT
     trajectory::TT
     param_state::PS
-    ldf::LT
-    vnt_traj::VNTT
     θ::PT
 end
 
 ## ABSTRACTMCMC INTERFACE ######################################################################
-
-# DynamicPPL 0.41 removed ParamsWithStats(vi, model, stats) in favour of
-# ParamsWithStats(InitFromParams(vi.values), model, stats); see DynamicPPL's HISTORY.md.
-if pkgversion(DynamicPPL) >= v"0.41"
-    # COV_EXCL_START: DynamicPPL is capped at "0.40" below, so this branch never runs here.
-    function _params_with_stats(vi, model, stats)
-        return DynamicPPL.ParamsWithStats(
-            DynamicPPL.InitFromParams(vi.values), model, stats
-        )
-    end
-    # COV_EXCL_STOP
-else
-    _params_with_stats(vi, model, stats) = DynamicPPL.ParamsWithStats(vi, model, stats)
-end
 
 function AbstractMCMC.step(
     rng::AbstractRNG,
@@ -265,6 +130,11 @@ function AbstractMCMC.step(
     initial_params=nothing,
     kwargs...,
 )
+    (initial_params === nothing || initial_params isa DynamicPPL.InitFromPrior) || throw(
+        ArgumentError(
+            "Turing ParticleGibbs initial_params is not yet supported; condition fixed values in the model",
+        ),
+    )
     # 1. Sample all variables from prior
     vi = DynamicPPL.setacc!!(DynamicPPL.VarInfo(rng, model), TrajectoryVNTAccumulator())
 
@@ -272,25 +142,23 @@ function AbstractMCMC.step(
     ctx = CSMCContext(rng, pg.csmc)
     _, vi = DynamicPPL.evaluate_nowarn!!(DynamicPPL.setleafcontext(model, ctx), vi)
     trajectory = ctx.sampled_traj[]
+    trajectory === nothing &&
+        throw(ArgumentError("ParticleGibbs requires exactly one SSMTrajectory variable"))
     vnt_traj = get_trajectory(vi)
 
     # 3. Condition on trajectory
     cond_model = model | vnt_traj
     θ = DynamicPPL.subset(vi, Base.filter(vn -> !(vn in keys(vnt_traj)), keys(vi)))
+    θ = DynamicPPL.link!!(θ, cond_model)
     ldf = DynamicPPL.LogDensityFunction(
         cond_model, DynamicPPL.getlogjoint_internal, θ; adtype=pg.adtype
     )
-    cached_ldf = CachedPrepLDF(ldf, cond_model)
     _, param_state = AbstractMCMC.step(
-        rng,
-        AbstractMCMC.LogDensityModel(cached_ldf),
-        pg.param;
-        initial_params=θ[:],
-        kwargs...,
+        rng, AbstractMCMC.LogDensityModel(ldf), pg.param; initial_params=θ[:], kwargs...
     )
 
     # 4. Update VarInfo with new parameters
-    θ_new = AbstractMCMC.getparams(cond_model, param_state)
+    θ_new = AbstractMCMC.getparams(param_state)
     vi = merge(vi, DynamicPPL.unflatten!!(θ, θ_new))
 
     # 5. Conditional CSMC with updated parameters
@@ -298,16 +166,13 @@ function AbstractMCMC.step(
     ctx_next = CSMCContext(rng, pg.csmc; ref=trajectory)
     _, vi = DynamicPPL.evaluate_nowarn!!(DynamicPPL.setleafcontext(model, ctx_next), vi)
     trajectory_new = ctx_next.sampled_traj[]
-    vnt_traj_new = get_trajectory(vi)
 
-    # 6. Re-initialise vi in transformed space
-    init_vi = merge(vi.values, vnt_traj_new)
-    _, vi = DynamicPPL.init!!(
-        rng, model, vi, DynamicPPL.InitFromParams(init_vi), DynamicPPL.LinkAll()
+    transition = DynamicPPL.ParamsWithStats(
+        DynamicPPL.InitFromParams(DynamicPPL.get_values(vi), nothing),
+        model,
+        AbstractMCMC.getstats(param_state),
     )
-
-    transition = _params_with_stats(vi, model, AbstractMCMC.getstats(param_state))
-    state = ParticleGibbsTuringState(vi, trajectory_new, param_state, ldf, vnt_traj_new, θ)
+    state = ParticleGibbsTuringState(vi, trajectory_new, param_state, θ)
     return transition, state
 end
 
@@ -322,18 +187,24 @@ function AbstractMCMC.step(
     vi = state.vi
     cond_model = model | get_trajectory(vi)
 
-    # 2. Reuse AD prep; only swap in new conditioned model
-    cached_ldf = CachedPrepLDF(state.ldf, cond_model)
+    # 2. Rebuild preparation and refresh cached density/gradient for the changed target.
+    ldf = DynamicPPL.LogDensityFunction(
+        cond_model, DynamicPPL.getlogjoint_internal, state.θ; adtype=pg.adtype
+    )
     _, param_state = AbstractMCMC.step(
         rng,
-        AbstractMCMC.LogDensityModel(cached_ldf),
+        AbstractMCMC.LogDensityModel(ldf),
         pg.param,
-        state.param_state;
+        AbstractMCMC.setparams!!(
+            AbstractMCMC.LogDensityModel(ldf),
+            state.param_state,
+            AbstractMCMC.getparams(state.param_state),
+        );
         kwargs...,
     )
 
     # 3. Update VarInfo with new parameters
-    θ_new = AbstractMCMC.getparams(cond_model, param_state)
+    θ_new = AbstractMCMC.getparams(param_state)
     vi = merge(vi, DynamicPPL.unflatten!!(state.θ, θ_new))
 
     # 4. Conditional CSMC with updated parameters
@@ -341,18 +212,13 @@ function AbstractMCMC.step(
     ctx = CSMCContext(rng, pg.csmc; ref=state.trajectory)
     _, vi = DynamicPPL.evaluate_nowarn!!(DynamicPPL.setleafcontext(model, ctx), vi)
     trajectory_new = ctx.sampled_traj[]
-    vnt_traj_new = get_trajectory(vi)
 
-    # 5. Re-initialise vi in linked space for next iteration
-    init_vi = merge(vi.values, vnt_traj_new)
-    _, vi = DynamicPPL.init!!(
-        rng, model, vi, DynamicPPL.InitFromParams(init_vi), DynamicPPL.LinkAll()
+    transition = DynamicPPL.ParamsWithStats(
+        DynamicPPL.InitFromParams(DynamicPPL.get_values(vi), nothing),
+        model,
+        AbstractMCMC.getstats(param_state),
     )
-
-    transition = _params_with_stats(vi, model, AbstractMCMC.getstats(param_state))
-    new_state = ParticleGibbsTuringState(
-        vi, trajectory_new, param_state, state.ldf, vnt_traj_new, state.θ
-    )
+    new_state = ParticleGibbsTuringState(vi, trajectory_new, param_state, state.θ)
     return transition, new_state
 end
 end

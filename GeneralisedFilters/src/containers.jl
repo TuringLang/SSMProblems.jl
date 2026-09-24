@@ -4,70 +4,73 @@ using Random: rand
 
 export AbstractLikelihood, InformationLikelihood, DiscreteLikelihood, log_likelihoods
 export ReferenceTrajectory
-export DenseParticleContainer, ParticleTree
+export DenseParticleContainer, ParticleTree, get_ancestry
 
 """Containers used for storing representations of the filtering distribution."""
 
 ## TYPELESS INITIALIZERS ###################################################################
 
-"""
-    TypelessZero
+# Internal identities defer choosing a scalar type until a density is evaluated.
+struct TypelessZero end
 
-A lazy promotion for uninitialized particle weights whos type is not yet known at the first
-simulation of a particle filter.
-"""
-struct TypelessZero <: Number end
-
-Base.convert(::Type{T}, ::TypelessZero) where {T<:Number} = zero(T)
-Base.convert(::Type{TypelessZero}, ::TypelessZero) = TypelessZero()
-
-Base.:+(::TypelessZero, ::TypelessZero) = TypelessZero()
-
-Base.promote_rule(::Type{TypelessZero}, ::Type{T}) where {T<:Number} = T
-Base.promote_rule(::Type{TypelessZero}, ::Type{TypelessZero}) = TypelessZero
-
-Base.zero(::TypelessZero) = TypelessZero()
-Base.zero(::Type{TypelessZero}) = TypelessZero()
-
-Base.iszero(::TypelessZero) = true
-Base.isone(::TypelessZero) = false
-
-Base.show(io::IO, ::TypelessZero) = print(io, "TypelessZero()")
-
-"""
-    TypelessBaseline
-
-A lazy promotion for the computation of log-likelihood baslines given a collection of
-unweighted particles.
-"""
-struct TypelessBaseline <: Number
-    N::Int64
+struct TypelessBaseline
+    N::Int
 end
 
-# Constructors for compatibility with Base.Number
-TypelessBaseline(x::TypelessBaseline) = x
-TypelessBaseline(x::Base.TwicePrecision) = TypelessBaseline(Int64(x))
-TypelessBaseline(x::AbstractChar) = TypelessBaseline(Int64(x))
+export add_logweight
 
-Base.convert(::Type{T}, b::TypelessBaseline) where {T<:Number} = T(log(b.N))
-Base.promote_rule(::Type{TypelessBaseline}, ::Type{T}) where {T<:Number} = T
+"""
+    add_logweight(a, b)
 
-Base.iszero(::TypelessBaseline) = false
-Base.isone(::TypelessBaseline) = false
+Combine log-weight contributions using ordinary numeric addition. An initial particle
+weight or an exact bootstrap correction may be an internal zero marker; in that case,
+return the other contribution unchanged. Use this operation in custom particle methods
+instead of adding directly to an initial particle's `log_w` field.
+"""
+add_logweight(a::Real, b::Real) = a + b
+add_logweight(::TypelessZero, b::Real) = b
+add_logweight(a::Real, ::TypelessZero) = a
+add_logweight(::TypelessZero, ::TypelessZero) = TypelessZero()
 
-function LogExpFunctions.logsumexp(weights::AbstractVector{TypelessZero})
+_zero_logweight(::Type{T}) where {T<:Real} = zero(T)
+_zero_logweight(::Type{TypelessZero}) = TypelessZero()
+
+# Float16 cannot represent ordinary large particle counts even though log(N) fits.
+_log_count_like(x::Float16, N::Integer) = Float16(log(Float64(N)))
+_log_count_like(x::Real, N::Integer) = log(oftype(x, N))
+
+_weight_logsumexp(weights::AbstractVector{<:Real}) = logsumexp(weights)
+function _weight_logsumexp(weights::AbstractVector{TypelessZero})
     return TypelessBaseline(length(weights))
 end
 
-function LogExpFunctions.softmax(x::AbstractVector{TypelessZero})
-    # TODO: horrible, but theoretically never used... except in the unit tests
-    return fill(1 / length(x), length(x))
+_weight_probabilities(weights::AbstractVector{<:Real}) = softmax(weights)
+function _weight_probabilities(weights::AbstractVector{TypelessZero})
+    # Sampling probabilities before any density is evaluated do not fix the later
+    # likelihood type. Preserve the ordinary uniform resampling representation.
+    return fill(1 / length(weights), length(weights))
 end
 
-Base.:+(::TypelessZero, b::TypelessBaseline) = b
-Base.:+(b::TypelessBaseline, ::TypelessZero) = b
+_add_baseline(a::Real, b::Real) = a + b
+_add_baseline(::TypelessZero, b::Real) = b
+_add_baseline(a::Real, ::TypelessZero) = a
+_add_baseline(::TypelessZero, ::TypelessZero) = TypelessZero()
+_add_baseline(a::TypelessBaseline, ::TypelessZero) = a
+_add_baseline(::TypelessZero, b::TypelessBaseline) = b
+_add_baseline(a::TypelessBaseline, b::Real) = _log_count_like(b, a.N) + b
+_add_baseline(a::Real, b::TypelessBaseline) = a + _log_count_like(a, b.N)
 
-Base.show(io::IO, b::TypelessBaseline) = print(io, "Typeless(log($(b.N)))")
+_subtract_baseline(a::Real, b::Real) = a - b
+_subtract_baseline(a::Real, ::TypelessZero) = a
+_subtract_baseline(::TypelessZero, b::Real) = -b
+_subtract_baseline(::TypelessZero, ::TypelessZero) = TypelessZero()
+_subtract_baseline(a::Real, b::TypelessBaseline) = a - _log_count_like(a, b.N)
+_subtract_baseline(a::TypelessBaseline, b::Real) = _log_count_like(b, a.N) - b
+function _subtract_baseline(a::TypelessBaseline, b::TypelessBaseline)
+    a.N == b.N ||
+        throw(ArgumentError("cannot cancel normalizers with different particle counts"))
+    return TypelessZero()
+end
 
 ## PARTICLES ###############################################################################
 
@@ -127,6 +130,28 @@ mutable struct ParticleDistribution{WT,PT<:Particle,VT<:AbstractVector{PT}}
     ll_baseline::WT
 end
 
+# A completed update establishes a concrete numeric weight representation. Inspect
+# particle storage types rather than values so this check compiles away on stable paths.
+_particle_weight_type(::ParticleDistribution{W,<:Particle{S,T}}) where {W,S,T} = T
+_particle_weight_type(::ParticleDistribution) = Any
+
+function _check_weight_type(before::ParticleDistribution, after::ParticleDistribution, t)
+    T = _particle_weight_type(after)
+    (isconcretetype(T) && T <: Real) || throw(
+        ArgumentError(
+            "Particle updates must produce one concrete real log-weight type, got $T"
+        ),
+    )
+    if t != 1 && _particle_weight_type(before) !== T
+        throw(
+            ArgumentError(
+                "Particle log-weight type changed after the first step from $(_particle_weight_type(before)) to $T at step $t. Use consistent density scalar types after initialization.",
+            ),
+        )
+    end
+    return nothing
+end
+
 # Helper functions to make ParticleDistribution behave like a collection
 Base.collect(state::ParticleDistribution) = state.particles
 Base.length(state::ParticleDistribution) = length(state.particles)
@@ -138,7 +163,7 @@ Base.iterate(state::ParticleDistribution) = iterate(state.particles)
 Base.@propagate_inbounds Base.getindex(state::ParticleDistribution, i) = state.particles[i]
 
 log_weights(state::ParticleDistribution) = map(p -> log_weight(p), state.particles)
-get_weights(state::ParticleDistribution) = softmax(log_weights(state))
+get_weights(state::ParticleDistribution) = _weight_probabilities(log_weights(state))
 
 # Helpers for StatsBase compatibility
 StatsBase.weights(state::ParticleDistribution) = StatsBase.Weights(get_weights(state))
@@ -162,7 +187,7 @@ function marginalise!(state::ParticleDistribution, particles)
     LSE_after = logsumexp(log_weight.(particles))
 
     # Compute log-likelihood increment: works for both PF and APF cases
-    ll_increment = LSE_after - state.ll_baseline
+    ll_increment = _subtract_baseline(LSE_after, state.ll_baseline)
 
     # Create new particles with normalized weights
     particles = map(p -> Particle(p.state, p.log_w - LSE_after, p.ancestor), particles)
@@ -271,13 +296,18 @@ struct ReferenceTrajectory{T0,T,VT<:AbstractVector{T}} <: AbstractVector{Union{T
 end
 
 Base.size(r::ReferenceTrajectory) = (length(r.xs) + 1,)
-Base.axes(r::ReferenceTrajectory) = (0:length(r.xs),)
+# Axes must themselves use the same indices as their values. A plain `0:T`
+# range is indexed 1:T+1 and makes Base.LinearIndices silently become one-based.
+Base.axes(r::ReferenceTrajectory) = (Base.IdentityUnitRange(0:length(r.xs)),)
 Base.IndexStyle(::Type{<:ReferenceTrajectory}) = IndexLinear()
 
 Base.@propagate_inbounds function Base.getindex(r::ReferenceTrajectory, i::Integer)
     return i == 0 ? r.x0 : r.xs[i]
 end
 
+# Shallow copy preserves the initial state's identity and copies the sequence buffer,
+# just as copying a vector of mutable states preserves the individual state objects.
+Base.copy(r::ReferenceTrajectory) = ReferenceTrajectory(r.x0, copy(r.xs))
 Base.map(f, r::ReferenceTrajectory) = ReferenceTrajectory(f(r.x0), map(f, r.xs))
 
 function Base.:(==)(a::ReferenceTrajectory, b::ReferenceTrajectory)
@@ -310,15 +340,29 @@ states with a different type will raise an error.
 
 # Constructors
 
+    DenseParticleContainer(initial, first_state)
     DenseParticleContainer(initial_states)
     DenseParticleContainer(initial_states, T)
     DenseParticleContainer(initial_states, states_t1, weights_t1, ancestors_t1)
 
+With particle distributions, `DenseParticleContainer(initial, first_state)` infers both
+state and weight types from the first completed step. Append later results with
+`push!(history, state)`. For the raw-vector constructors:
+
 - First form: assumes `T == T0`.
 - Second form: explicit subsequent-state type `T` (the container starts empty for t≥1).
+  These two raw-vector forms use Float64 weight storage. Use first-step data to infer
+  a different weight type.
 - Third form: construct directly from the initial states and the time-1 states, weights,
   and ancestors — `T` is inferred from `states_t1`. Prefer this when the initial and
   subsequent state types differ so that `T` is inferred from concrete data.
+
+# Ownership
+
+Constructors and append operations copy collection buffers but retain the state objects
+inside them. Do not mutate stored state objects. Use an explicit `deepcopy` of an input
+particle distribution when snapshots of mutable states are needed. Returned trajectories
+also share their state objects with storage.
 
 # Mutation
 
@@ -334,7 +378,7 @@ end
 
 function DenseParticleContainer(initial_states::Vector{T0}) where {T0}
     return DenseParticleContainer{T0,T0,Float64}(
-        initial_states,
+        copy(initial_states),
         Vector{Vector{T0}}(),
         Vector{Vector{Float64}}(),
         Vector{Vector{Int}}(),
@@ -343,7 +387,7 @@ end
 
 function DenseParticleContainer(initial_states::Vector{T0}, ::Type{T}) where {T0,T}
     return DenseParticleContainer{T0,T,Float64}(
-        initial_states,
+        copy(initial_states),
         Vector{Vector{T}}(),
         Vector{Vector{Float64}}(),
         Vector{Vector{Int}}(),
@@ -356,8 +400,14 @@ function DenseParticleContainer(
     weights_t1::Vector{WT},
     ancestors_t1::AbstractVector{<:Integer},
 ) where {T0,T,WT}
+    _validate_history_step(states_t1, ancestors_t1, length(initial_states))
+    length(weights_t1) == length(states_t1) ||
+        throw(DimensionMismatch("one weight per state is required"))
     return DenseParticleContainer{T0,T,WT}(
-        initial_states, [states_t1], [weights_t1], [Vector{Int}(ancestors_t1)]
+        copy(initial_states),
+        [copy(states_t1)],
+        [copy(weights_t1)],
+        [Vector{Int}(ancestors_t1)],
     )
 end
 
@@ -367,22 +417,35 @@ function Base.push!(
     weights::Vector{WT},
     ancestors::AbstractVector{<:Integer},
 ) where {T0,T,WT}
-    push!(c.states, states)
-    push!(c.weights, weights)
-    push!(c.ancestors, Vector{Int}(ancestors))
+    _validate_history_step(states, ancestors, length(c.initial_states))
+    length(weights) == length(states) ||
+        throw(DimensionMismatch("one weight per state is required"))
+    stored_states, stored_weights, stored_ancestors = copy(states),
+    copy(weights),
+    Vector{Int}(ancestors)
+    push!(c.states, stored_states)
+    push!(c.weights, stored_weights)
+    push!(c.ancestors, stored_ancestors)
     return c
 end
 
 function Base.push!(
     c::DenseParticleContainer{T0,T,WT}, states, weights, ancestors
 ) where {T0,T,WT}
-    throw(
+    if eltype(weights) !== WT
+        throw(
+            ArgumentError(
+                "Particle history weight type changed from $WT to $(eltype(weights)). " *
+                "Establish the weight type from the completed first update and keep it " *
+                "consistent at subsequent steps.",
+            ),
+        )
+    end
+    return throw(
         ArgumentError(
-            "Subsequent states/weights have type ($(eltype(states)), $(eltype(weights))) " *
-            "but the container's subsequent state/weight types are ($T, $WT). If the " *
-            "initial and subsequent types are intentionally different, construct the " *
-            "container with `DenseParticleContainer(initial_states, states_t1, " *
-            "weights_t1, ancestors_t1)` (or `DenseParticleContainer(initial_states, T)`).",
+            "Particle history state type changed from $T to $(eltype(states)). " *
+            "If initial and subsequent states have different types, construct the history " *
+            "with DenseParticleContainer(initial_states, states_t1, weights_t1, ancestors_t1).",
         ),
     )
 end
@@ -450,14 +513,28 @@ subsequent-state buffer grows as needed.
 
 # Constructors
 
+    ParticleTree(initial; capacity)
+    ParticleTree(initial, first_state; capacity)
     ParticleTree(initial_states, M)
     ParticleTree(initial_states, T, M)
     ParticleTree(initial_states, states_t1, ancestors_t1, M)
+
+For particle distributions, `ParticleTree(initial)` assumes the later state type matches
+the initial type. `ParticleTree(initial, first_state)` infers the later type from the first
+completed step and stores that step, including its links to time zero. Append each later
+result with `push!(tree, state)`, which validates input, prunes, and inserts it. `capacity`
+controls the initial storage allocation and grows automatically. For raw-vector inputs:
 
 - First form: assumes `T == T0`.
 - Second form: explicit subsequent-state type `T`.
 - Third form: construct with time-1 data already inserted — `T` is inferred from
   `states_t1`. Prefer this when initial and subsequent types differ.
+
+# Ownership
+
+Collection buffers are copied, but the state objects they contain are shared. Do not mutate
+stored states, including through a retrieved trajectory. Copy an input particle distribution
+explicitly with `deepcopy` when an independent snapshot is needed.
 
 # Reference
 Jacob, P., Murray L., & Rubenthaler S. (2015). Path storage in the particle filter
@@ -479,6 +556,9 @@ function ParticleTree(initial_states::Vector{T0}, M::Integer) where {T0}
 end
 
 function ParticleTree(initial_states::Vector{T0}, ::Type{T}, M::Integer) where {T0,T}
+    isempty(initial_states) &&
+        throw(ArgumentError("particle history requires a nonempty initial population"))
+    M > 0 || throw(ArgumentError("particle tree capacity must be positive"))
     states = Vector{T}(undef, M)
     parents = zeros(Int64, M)
     is_penultimate = fill(false, M)
@@ -487,7 +567,7 @@ function ParticleTree(initial_states::Vector{T0}, ::Type{T}, M::Integer) where {
     append_to_stack!(free_indices, collect(Int64, M:-1:1))
     leaves = collect(Int64, 1:length(initial_states))
     return ParticleTree{T0,T}(
-        initial_states,
+        copy(initial_states),
         states,
         parents,
         is_penultimate,
@@ -535,10 +615,11 @@ end
 function Base.insert!(
     tree::ParticleTree{T0,T}, states::Vector{T}, ancestors::AbstractVector{<:Integer}
 ) where {T0,T}
+    _validate_history_step(states, ancestors, length(tree.leaves))
     parents_of_new = getindex(tree.leaves, ancestors)
     parent_in_initial = tree.leaves_in_initial[]
 
-    if length(tree.free_indices) < length(ancestors)
+    while length(tree.free_indices) < length(ancestors)
         @debug "expanding tree"
         expand!(tree)
     end
@@ -554,11 +635,11 @@ function Base.insert!(
 end
 
 function Base.insert!(tree::ParticleTree{T0,T}, states, ancestors) where {T0,T}
-    throw(
+    return throw(
         ArgumentError(
             "Subsequent particle states have type $(eltype(states)) but the tree's " *
             "subsequent-state type is $T. If the initial and subsequent types are " *
-            "intentionally different, construct the tree with " *
+            "intentionally different, use ParticleTree(initial, first_state), or " *
             "`ParticleTree(initial_states, states_t1, ancestors_t1, M)` (or " *
             "`ParticleTree(initial_states, T, M)`).",
         ),
@@ -628,4 +709,81 @@ function rand(
     end
     reverse!(xs)
     return ReferenceTrajectory(tree.initial_states[j], xs)
+end
+
+# Public history operations accept complete particle populations. Ancestor indices
+# always refer to positions in the preceding population, including time zero.
+function _validate_history_step(states, ancestors, N)
+    N > 0 || throw(ArgumentError("particle history requires a nonempty initial population"))
+    Base.require_one_based_indexing(states, ancestors)
+    length(states) == N || throw(
+        DimensionMismatch("particle history requires a fixed population of $N states")
+    )
+    length(ancestors) == N || throw(DimensionMismatch("one ancestor per state is required"))
+    all(a -> 1 <= a <= N, ancestors) ||
+        throw(ArgumentError("ancestor indices must be in 1:$N"))
+    return nothing
+end
+
+function _tree_capacity(N::Integer)
+    return if N > 0
+        max(N, floor(Int, N * log(N)))
+    else
+        throw(ArgumentError("particle history requires a nonempty initial population"))
+    end
+end
+_history_states(state::ParticleDistribution) = map(p -> p.state, state.particles)
+_history_ancestors(state::ParticleDistribution) = map(p -> p.ancestor, state.particles)
+
+function ParticleTree(
+    initial::ParticleDistribution; capacity::Integer=_tree_capacity(length(initial))
+)
+    return ParticleTree(_history_states(initial), capacity)
+end
+
+function ParticleTree(
+    initial::ParticleDistribution,
+    first_state::ParticleDistribution;
+    capacity::Integer=_tree_capacity(length(initial)),
+)
+    return ParticleTree(
+        _history_states(initial),
+        _history_states(first_state),
+        _history_ancestors(first_state),
+        capacity,
+    )
+end
+
+function Base.push!(tree::ParticleTree{T0,T}, state::ParticleDistribution) where {T0,T}
+    states, ancestors = _history_states(state), _history_ancestors(state)
+    eltype(states) === T || throw(
+        ArgumentError(
+            "Particle history state type changed from $T to $(eltype(states)). If the prior and first filtered state have different types, use ParticleTree(initial, first_state).",
+        ),
+    )
+    _validate_history_step(states, ancestors, length(tree.leaves))
+    ancestors = Vector{Int}(ancestors)
+    offspring = get_offspring(ancestors)
+    # All input checks and metadata conversion precede pruning.
+    prune!(tree, offspring)
+    insert!(tree, states, ancestors)
+    return tree
+end
+
+function DenseParticleContainer(
+    initial::ParticleDistribution, first_state::ParticleDistribution
+)
+    _check_weight_type(initial, first_state, 1)
+    return DenseParticleContainer(
+        _history_states(initial),
+        _history_states(first_state),
+        log_weights(first_state),
+        _history_ancestors(first_state),
+    )
+end
+
+function Base.push!(history::DenseParticleContainer, state::ParticleDistribution)
+    return push!(
+        history, _history_states(state), log_weights(state), _history_ancestors(state)
+    )
 end

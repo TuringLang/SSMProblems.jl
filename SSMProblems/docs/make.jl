@@ -12,10 +12,14 @@ mkpath(EXAMPLES_OUT)
 # Install and precompile all packages
 # Workaround for https://github.com/JuliaLang/Pkg.jl/issues/2219
 examples = filter!(isdir, readdir(joinpath(@__DIR__, "..", "examples"); join=true))
-above = joinpath(@__DIR__, "..")
-let script = "using Pkg; Pkg.activate(ARGS[1]); Pkg.develop(path=\"$(above)\"); Pkg.instantiate()"
+# Keep the example's declared relative source path portable across checkouts.
+let script = "using Pkg; Pkg.activate(ARGS[1]); Pkg.resolve(); Pkg.instantiate()"
     for example in examples
-        if !success(`$(Base.julia_cmd()) -e $script $example`)
+        if !success(
+            pipeline(
+                `$(Base.julia_cmd()) -e $script $example`; stdout=stdout, stderr=stderr
+            ),
+        )
             error(
                 "project environment of example ",
                 basename(example),
@@ -51,7 +55,7 @@ DocMeta.setdocmeta!(SSMProblems, :DocTestSetup, :(using SSMProblems); recursive=
 makedocs(;
     sitename="SSMProblems",
     format=Documenter.HTML(; size_threshold=1000 * 2^11), # 1Mb per page
-    #modules=[SSMProblems],
+    modules=[SSMProblems],
     pages=[
         "Home" => "index.md",
         "Examples" => [

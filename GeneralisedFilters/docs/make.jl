@@ -16,11 +16,15 @@ mkpath(EXAMPLES_OUT)
 examples = filter(readdir(joinpath(@__DIR__, "..", "examples"); join=true)) do path
     return isdir(path) && isfile(joinpath(path, "script.jl"))
 end
-above = joinpath(@__DIR__, "..")
-ssmproblems_path = joinpath(above, "..", "SSMProblems")
-let script = "using Pkg; Pkg.activate(ARGS[1]); Pkg.develop(path=\"$(above)\"); Pkg.develop(path=\"$(ssmproblems_path)\"); Pkg.instantiate()"
+# Example projects declare relative [sources] for both local packages. Resolve
+# those directly: developing absolute paths here rewrites the tracked Project.toml.
+let script = "using Pkg; Pkg.activate(ARGS[1]); Pkg.resolve(); Pkg.instantiate()"
     for example in examples
-        if !success(`$(Base.julia_cmd()) -e $script $example`)
+        if !success(
+            pipeline(
+                `$(Base.julia_cmd()) -e $script $example`; stdout=stdout, stderr=stderr
+            ),
+        )
             error(
                 "project environment of example ",
                 basename(example),
@@ -47,34 +51,26 @@ end
 # Check that all examples were run successfully
 isempty(processes) || success(processes) || error("some examples were not run successfully")
 
-# Building Documenter
 using Documenter
 using GeneralisedFilters
 
 DocMeta.setdocmeta!(
     GeneralisedFilters, :DocTestSetup, :(using GeneralisedFilters); recursive=true
 )
-
 makedocs(;
     sitename="GeneralisedFilters",
-    format=Documenter.HTML(; size_threshold=1000 * 2^11), # 1Mb per page
+    modules=[GeneralisedFilters],
+    # Executed tutorials embed plot output; retain the upstream example-page budget.
+    format=Documenter.HTML(; size_threshold=1000 * 2^11),
     pages=[
-        "Home" => "index.md",
-        "Examples" => [
-            map(
-                (x) -> joinpath("examples", x),
-                filter!(filename -> endswith(filename, ".md"), readdir(EXAMPLES_OUT)),
-            )...,
-        ],
+        "Overview" => "index.md",
+        "Models and conditioning" => "models/linear-gaussian.md",
+        "Particle Gibbs and Turing" => "inference.md",
+        "Recording filtering results" => "history.md",
+        "Examples" =>
+            [joinpath("examples", f) for f in readdir(EXAMPLES_OUT) if endswith(f, ".md")],
+        "API reference" => "api.md",
+        "Upgrading from 0.4.2" => "migration.md",
     ],
-    #strict=true,
     checkdocs=:exports,
-    doctestfilters=[
-        # Older versions will show "0 element Array" instead of "Type[]".
-        r"(Any\[\]|0-element Array{.+,[0-9]+})",
-        # Older versions will show "Array{...,1}" instead of "Vector{...}".
-        r"(Array{.+,\s?1}|Vector{.+})",
-        # Older versions will show "Array{...,2}" instead of "Matrix{...}".
-        r"(Array{.+,\s?2}|Matrix{.+})",
-    ],
 )
