@@ -7,6 +7,10 @@ Julia 1.12.7 and the Turing 0.47–0.49 / DynamicPPL 0.42 integration.
 
 - Define models with Gaussian/discrete atoms and conditioning closures. GeneralisedFilters
   builds on the shared process interface in SSMProblems 0.7; PDMats is no longer a runtime dependency.
+- Re-export SSMProblems' distribution adapters and abstract model/accessor interface.
+  Custom model containers work with filtering, smoothing, conditional likelihoods, CSMC
+  and `SSMTrajectory`. Hierarchical dynamics can depend on time and adjacent outer states.
+  Component factories report invalid return types with guidance on the required interface.
 - Use `condition_inner` to expose a hierarchical model's conditional inner SSM. One
   analytical likelihood evaluator serves both ordinary and conditional models.
 - Share inner component resolution between simulation, densities and Rao–Blackwellised
