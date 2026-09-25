@@ -33,10 +33,17 @@ end
 
 ## KALMAN KERNELS ##########################################################################
 
-function kalman_predict(state::GaussianState, d::LinearGaussianDynamics)
+# Keep numerical values separate from CPU storage normalisation so a batched
+# caller can compose the same equations without materialising host arrays.
+function _kalman_predict_raw(state::GaussianState, d::LinearGaussianDynamics)
     μ̂ = d.A * state.μ + d.b
     Σ̂ = symmetrise(d.A * state.Σ * d.A' + d.Q)
-    return _kalman_state(μ̂, Σ̂)
+    return GaussianState(μ̂, Σ̂)
+end
+
+function kalman_predict(state::GaussianState, d::LinearGaussianDynamics)
+    pred = _kalman_predict_raw(state, d)
+    return _kalman_state(pred.μ, pred.Σ)
 end
 
 """
@@ -46,6 +53,11 @@ Joseph-form Kalman update returning `(filtered_state, ll_increment, cache)`. The
 exposes the intermediates consumed by the analytic reverse pass.
 """
 function kalman_update_cached(state::GaussianState, o::LinearGaussianObservation, y)
+    filt, ll, cache = _kalman_update_raw(state, o, y)
+    return _kalman_state(filt.μ, filt.Σ), ll, cache
+end
+
+function _kalman_update_raw(state::GaussianState, o::LinearGaussianObservation, y)
     μ̂, Σ̂ = state.μ, state.Σ
     H, c, R = o.H, o.c, o.R
 
@@ -62,7 +74,7 @@ function kalman_update_cached(state::GaussianState, o::LinearGaussianObservation
     ll = -(length(c) * log(2 * T(π)) + logdet(Sc) + dot(v, w)) / 2
 
     cache = (; μ̂, Σ̂, H, v, S, Si, K, w)
-    return _kalman_state(μ, Σ), ll, cache
+    return GaussianState(μ, Σ), ll, cache
 end
 
 function kalman_update(
