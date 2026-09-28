@@ -53,4 +53,12 @@
         @test eltype(GF.log_weights(updated)) === T
         @test sum(GF.get_weights(updated)) ≈ one(T)
     end
+
+    # The absolute Float32 logsumexp cannot retain log(3) beside this offset.
+    # Normalized weights must nevertheless sum to one and preserve equal mass.
+    huge = [GF.Particle(p.state, 1.0f8, p.ancestor) for p in particles]
+    normalised, increment = GF.marginalise!(state, huge)
+    @test GF.log_weights(normalised) ≈ fill(-log(3.0f0), 3)
+    @test sum(exp, GF.log_weights(normalised)) ≈ 1.0f0
+    @test increment isa Float32
 end

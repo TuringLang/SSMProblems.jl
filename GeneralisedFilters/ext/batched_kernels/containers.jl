@@ -27,7 +27,7 @@ function GeneralisedFilters.preserve_sample(
         throw(ArgumentError("ancestor storage cannot represent every particle index"))
     ancestors .= Base.OneTo(length(state))
     components = merge(fields, (; ancestor=BatchedCuScalar(ancestors)))
-    particles = BatchedStruct{P,typeof(components)}(components, length(state))
+    particles = BatchedStruct(P, components)
     return ParticleDistribution(particles, state.ll_baseline)
 end
 
@@ -37,21 +37,13 @@ function GeneralisedFilters.marginalise!(
     length(particles) == length(state) || throw(DimensionMismatch("particle counts differ"))
     weights = particles.components.log_w.data
     isempty(weights) && throw(ArgumentError("cannot normalise an empty particle batch"))
-    offset = maximum(weights)
-    isfinite(offset) ||
-        throw(ArgumentError("particle log weights have no finite normalizer"))
-    # Subtract the common offset before the log normalizer. Subtracting the
-    # absolute LSE loses log(N) for large-magnitude Float32 weights.
-    shifted = weights .- offset
-    shifted_normalizer = GeneralisedFilters._weight_logsumexp(shifted)
-    normalizer = offset + shifted_normalizer
-    ll_increment = GeneralisedFilters._subtract_baseline(normalizer, state.ll_baseline)
+    logweights, ll_increment = GeneralisedFilters._normalise_logweights(
+        weights, state.ll_baseline
+    )
     isfinite(ll_increment) ||
         throw(ArgumentError("particle likelihood increment is not finite"))
-    components = merge(
-        particles.components, (; log_w=BatchedCuScalar(shifted .- shifted_normalizer))
-    )
-    normalised = BatchedStruct{Q,typeof(components)}(components, length(particles))
+    components = merge(particles.components, (; log_w=BatchedCuScalar(logweights)))
+    normalised = BatchedStruct(Q, components)
     return ParticleDistribution(normalised, zero(ll_increment)), ll_increment
 end
 
@@ -104,6 +96,6 @@ function GeneralisedFilters.construct_new_state(
         log_w=BatchedCuScalar(zero.(fields.log_w.data)),
         ancestor=BatchedCuScalar(ancestors),
     )
-    particles = BatchedStruct{P,typeof(components)}(components, length(state))
+    particles = BatchedStruct(P, components)
     return ParticleDistribution(particles, zero(W))
 end

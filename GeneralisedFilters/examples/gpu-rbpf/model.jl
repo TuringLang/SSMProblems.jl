@@ -20,8 +20,7 @@ function GeneralisedFilters.inner_dynamics(
     fields = (;
         A=SharedCuMatrix(d.A, n), b=SharedCuVector(d.b, n), Q=BatchedCuMatrix(covariance)
     )
-    D = LinearGaussianDynamics{eltype(fields.A),eltype(fields.b),eltype(fields.Q)}
-    return BatchedStruct{D,typeof(fields)}(fields, n)
+    return BatchedStruct(LinearGaussianDynamics, fields)
 end
 
 """Equivalent static-array CPU and device models; all fixed uploads happen here."""

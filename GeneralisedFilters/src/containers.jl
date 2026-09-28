@@ -168,13 +168,32 @@ get_weights(state::ParticleDistribution) = _weight_probabilities(log_weights(sta
 # Helpers for StatsBase compatibility
 StatsBase.weights(state::ParticleDistribution) = StatsBase.Weights(get_weights(state))
 
+# Shared array arithmetic; representation-specific callers rebuild their particle
+# storage separately. Keep the offset subtraction separate from the small log
+# normalizer so large Float32 weights do not lose the normalization correction.
+function _normalise_logweights(weights::AbstractVector{<:Real}, baseline)
+    if !isempty(weights)
+        offset = maximum(weights)
+        if isfinite(offset)
+            shifted = weights .- offset
+            shifted_normalizer = _weight_logsumexp(shifted)
+            normalizer = offset + shifted_normalizer
+            return shifted .- shifted_normalizer, _subtract_baseline(normalizer, baseline)
+        end
+    end
+    # Preserve the CPU impossible-likelihood behavior for empty or nonfinite
+    # populations. In particular, all -Inf weights give a -Inf increment.
+    normalizer = _weight_logsumexp(weights)
+    return weights .- normalizer, _subtract_baseline(normalizer, baseline)
+end
+
 """
     marginalise!(state::ParticleDistribution)
 
 Compute the log-likelihood increment and normalize particle weights. This function:
 1. Computes LSE of current (post-observation) log-weights
 2. Calculates ll_increment = LSE_after - ll_baseline
-3. Normalizes weights by subtracting LSE_after
+3. Normalizes weights using a maximum shift to preserve small log corrections
 4. Resets ll_baseline to 0.0
 
 The ll_baseline field handles both standard particle filter and auxiliary particle filter
@@ -183,18 +202,13 @@ LSE before adding observation weights. For APF with resampling, it includes firs
 correction terms computed during the APF resampling step.
 """
 function marginalise!(state::ParticleDistribution, particles)
-    # Compute logsumexp after adding observation likelihoods
-    LSE_after = logsumexp(log_weight.(particles))
-
-    # Compute log-likelihood increment: works for both PF and APF cases
-    ll_increment = _subtract_baseline(LSE_after, state.ll_baseline)
-
-    # Create new particles with normalized weights
-    particles = map(p -> Particle(p.state, p.log_w - LSE_after, p.ancestor), particles)
-
-    # Reset baseline for next iteration
-    new_state = ParticleDistribution(particles, zero(ll_increment))
-    return new_state, ll_increment
+    logweights, ll_increment = _normalise_logweights(
+        log_weight.(particles), state.ll_baseline
+    )
+    particles = map(particles, logweights) do p, log_w
+        return Particle(p.state, log_w, p.ancestor)
+    end
+    return ParticleDistribution(particles, zero(ll_increment)), ll_increment
 end
 
 ## LIKELIHOOD CONTAINERS ###################################################################

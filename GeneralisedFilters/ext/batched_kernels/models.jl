@@ -49,8 +49,7 @@ function GeneralisedFilters.inner_prior(
     size(p.Σ0) == (d, d) || throw(DimensionMismatch("inner prior covariance shape"))
     n = length(x)
     fields = (; μ0=SharedCuVector(p.μ0, n), Σ0=SharedCuMatrix(p.Σ0, n))
-    P = GaussianPrior{eltype(fields.μ0),eltype(fields.Σ0)}
-    return BatchedStruct{P,typeof(fields)}(fields, n)
+    return BatchedStruct(GaussianPrior, fields)
 end
 
 function GeneralisedFilters.inner_dynamics(
@@ -67,8 +66,7 @@ function GeneralisedFilters.inner_dynamics(
     fields = (;
         A=SharedCuMatrix(d.A, n), b=SharedCuVector(d.b, n), Q=SharedCuMatrix(d.Q, n)
     )
-    D = LinearGaussianDynamics{eltype(fields.A),eltype(fields.b),eltype(fields.Q)}
-    return BatchedStruct{D,typeof(fields)}(fields, n)
+    return BatchedStruct(LinearGaussianDynamics, fields)
 end
 
 function GeneralisedFilters.inner_observation(
@@ -84,8 +82,7 @@ function GeneralisedFilters.inner_observation(
     fields = (;
         H=SharedCuMatrix(o.H, n), c=SharedCuVector(o.c, n), R=SharedCuMatrix(o.R, n)
     )
-    O = LinearGaussianObservation{eltype(fields.H),eltype(fields.c),eltype(fields.R)}
-    return BatchedStruct{O,typeof(fields)}(fields, n)
+    return BatchedStruct(LinearGaussianObservation, fields)
 end
 
 function GeneralisedFilters.simulate(
@@ -152,16 +149,10 @@ function GeneralisedFilters.initialise(
             copy(fields.Σ0.data)
         end,
     )
-    zfields = (; μ, Σ)
-    Z = GaussianState{eltype(μ),eltype(Σ)}
-    z = BatchedStruct{Z,typeof(zfields)}(zfields, n)
-    statefields = (; x, z)
-    S = RBState{eltype(x),eltype(z)}
-    state = BatchedStruct{S,typeof(statefields)}(statefields, n)
+    z = BatchedStruct(GaussianState, (; μ, Σ))
+    state = BatchedStruct(RBState, (; x, z))
     log_w = BatchedCuScalar(CUDA.zeros(T, n))
     ancestor = BatchedCuScalar(CUDA.zeros(Int32, n))
-    particlefields = (; state, log_w, ancestor)
-    P = Particle{S,T,Int32}
-    particles = BatchedStruct{P,typeof(particlefields)}(particlefields, n)
+    particles = BatchedStruct(Particle, (; state, log_w, ancestor))
     return ParticleDistribution(particles, zero(T))
 end
