@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Add `ThreadedExecution` for evaluating particle populations on several threads, selected
+  with the `execution` keyword of `ParticleFilter` and `BF`. RBPF, auxiliary particle
+  filters and CSMC ancestor sampling and backward simulation use the setting of their
+  particle filter. Results depend on the generator state and `blocksize` but not on the
+  number of threads. `SerialExecution()` remains the default and is unchanged.
+
 ## 0.5.0
 
 This release changes the model interface and requires migration from 0.4.2. It targets
