@@ -47,7 +47,8 @@ given all observations, along with the log marginal likelihood of the observatio
 `marginal_loglikelihood` when you only need that scalar likelihood.
 
 This example uses StaticArrays for its small, fixed-size state. Ordinary Julia vectors and
-matrices work too. Observations start at time one: the filter first propagates the initial
+matrices work too; see the [static arrays example](../examples/static-arrays.md) for a
+performance comparison. Observations start at time one: the filter first propagates the initial
 state, then conditions on the first observation.
 
 ## Distribution functions and analytical components

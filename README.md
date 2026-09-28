@@ -50,6 +50,8 @@ and algorithm interface with a complete filtering example. From there:
   loops and particle ancestry storage.
 - The [trend inflation example](GeneralisedFilters/examples/trend-inflation/script.jl)
   applies Rao–Blackwellised filtering to a model with stochastic volatility.
+- The [static arrays example](GeneralisedFilters/examples/static-arrays/script.jl)
+  benchmarks the speed-up from using StaticArrays for small states.
 
 This repository contains both GeneralisedFilters and SSMProblems, which supplies the shared
 state-space model interface. GeneralisedFilters re-exports that interface, so most users

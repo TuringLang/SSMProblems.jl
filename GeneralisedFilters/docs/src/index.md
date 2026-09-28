@@ -92,7 +92,8 @@ deviations. To obtain only the likelihood, use
 
 The model and `KF()` are separate objects. That separation also applies when you introduce
 time-varying components, custom processes or a hierarchical model. Small, fixed-dimensional
-models can use StaticArrays in place of ordinary arrays.
+models can use StaticArrays in place of ordinary arrays, which is often much faster. The
+[static arrays example](examples/static-arrays.md) measures the speed-up.
 
 ## Where to go next
 
@@ -100,7 +101,8 @@ Read [Models and conditioning](models/linear-gaussian.md) to define a hierarchic
 and see how fixing an outer trajectory gives a conditional inner model. Then follow
 [Particle Gibbs and Turing](inference.md) for joint trajectory and parameter inference.
 Read [Recording filtering results](history.md) for manual loops and particle ancestry
-storage. The **Examples** section works through trend inflation with stochastic volatility.
+storage. The **Examples** section works through trend inflation with stochastic volatility
+and benchmarks filters using static arrays.
 
 The [API reference](api.md) lists the available types and operations. Existing users
 upgrading from 0.4.2 can consult the [migration guide](migration.md).
