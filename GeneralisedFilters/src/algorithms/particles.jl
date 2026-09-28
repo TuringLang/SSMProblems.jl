@@ -59,15 +59,9 @@ function predict(
     observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
-    particles = map(1:num_particles(algo)) do i
-        particle = state.particles[i]
-        ref = if !isnothing(ref_state) && i == 1
-            _trajectory_state(ref_state, iter)
-        else
-            nothing
-        end
-        return predict_particle(rng, dyn, algo, iter, particle, observation, ref)
-    end
+    particles = _predict_particles(
+        rng, dyn, algo, iter, state.particles, observation, ref_state
+    )
 
     # Preserve the incoming weight normalizer; guided proposal corrections belong
     # to the new weights and must not be subtracted from the evidence increment.
@@ -78,6 +72,28 @@ function predict(
     )
 end
 
+# Population traversal is the execution boundary. The scalar hooks retain their
+# dispatch and RNG order; batched storage can select bulk execution here.
+function _predict_particles(
+    rng::AbstractRNG,
+    dyn::LatentDynamics,
+    algo::AbstractParticleFilter,
+    iter::Integer,
+    particles,
+    observation,
+    ref_state,
+)
+    return map(1:num_particles(algo)) do i
+        particle = particles[i]
+        ref = if !isnothing(ref_state) && i == 1
+            _trajectory_state(ref_state, iter)
+        else
+            nothing
+        end
+        return predict_particle(rng, dyn, algo, iter, particle, observation, ref)
+    end
+end
+
 function update(
     obs::ObservationProcess,
     algo::AbstractParticleFilter,
@@ -85,12 +101,22 @@ function update(
     state::ParticleDistribution,
     observation,
 )
-    particles = map(state.particles) do particle
-        return update_particle(obs, algo, iter, particle, observation)
-    end
+    particles = _update_particles(obs, algo, iter, state.particles, observation)
     new_state, ll_increment = marginalise!(state, particles)
 
     return new_state, ll_increment
+end
+
+function _update_particles(
+    obs::ObservationProcess,
+    algo::AbstractParticleFilter,
+    iter::Integer,
+    particles,
+    observation,
+)
+    return map(particles) do particle
+        return update_particle(obs, algo, iter, particle, observation)
+    end
 end
 
 struct ParticleFilter{RS,PT} <: AbstractParticleFilter
