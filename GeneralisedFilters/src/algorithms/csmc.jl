@@ -351,8 +351,11 @@ function _csmc_sample(
             state = resample(rng, rs, state)
         else
             ref_as = _build_ancestor_ref(ref_state, back_liks, t)
-            as_weights = map(state.particles) do particle
-                return ancestor_weight(particle, model.dyn, pf, t, ref_as)
+            # A fresh binding: `state` is reassigned in this function, so capturing it
+            # in the closure would box it.
+            particles = state.particles
+            as_weights = _population_map(execution(pf), length(particles)) do i
+                return ancestor_weight(particles[i], model.dyn, pf, t, ref_as)
             end
             ancestor_idx = StatsBase.sample(rng, StatsBase.Weights(softmax(as_weights)))
             # Draw the WHOLE conditional law given the newly selected ancestor. For
@@ -458,7 +461,7 @@ function _csmc_sample(
 
     for t in (K - 1):-1:1
         ref_next = _build_bs_ref(xs[t + 1], back_lik)
-        backward_ws = map(1:N) do i
+        backward_ws = _population_map(execution(pf), N) do i
             return ancestor_weight(
                 Particle(container, t, i), model.dyn, pf, t + 1, ref_next
             )
@@ -481,8 +484,8 @@ function _csmc_sample(
 
     # Time 0: backward step from t=1 to initial particles.
     ref_at_1 = _build_bs_ref(xs[1], back_lik)
-    backward_ws = map(init_state.particles) do particle
-        return ancestor_weight(particle, model.dyn, pf, 1, ref_at_1)
+    backward_ws = _population_map(execution(pf), N) do i
+        return ancestor_weight(init_state.particles[i], model.dyn, pf, 1, ref_at_1)
     end
     idx = StatsBase.sample(rng, StatsBase.Weights(softmax(backward_ws)))
     x0 = container.initial_states[idx]

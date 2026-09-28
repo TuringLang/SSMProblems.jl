@@ -115,3 +115,85 @@ end
     @test threaded_ll == serial_ll
     @test threaded_state.particles == serial_state.particles
 end
+
+@testitem "Threaded CSMC refreshment" begin
+    using GeneralisedFilters
+    using StableRNGs
+    using StaticArrays
+    using Statistics
+    const GF = GeneralisedFilters
+
+    # The joint Gaussian model of the CSMC posterior test and its hierarchical split.
+    ax, az, u, v = 0.6, 0.7, 0.35, -0.2
+    qx, qz, r = 0.4, 0.25, 0.3
+    outer_prior = GaussianPrior(SVector(0.0), SMatrix{1,1}(0.8))
+    outer_dyn = TimeVaryingDynamics(
+        ((; t),) ->
+            LinearGaussianDynamics(SMatrix{1,1}(ax), SVector(0.03t), SMatrix{1,1}(qx)),
+    )
+    inner_prior_fn = ((; x0),) -> GaussianPrior(SVector(0.3x0[1]), SMatrix{1,1}(0.5))
+    inner_dyn_fn =
+        ((; t, x_prev, x_new),) -> LinearGaussianDynamics(
+            SMatrix{1,1}(az),
+            SVector(u * x_prev[1] + v * x_new[1] + 0.02t),
+            SMatrix{1,1}(qz),
+        )
+    inner_obs =
+        ((; x),) ->
+            LinearGaussianObservation(SMatrix{1,1}(1.0), SVector(0.4x[1]), SMatrix{1,1}(r))
+    hier = StateSpaceModel(outer_prior, outer_dyn, inner_prior_fn, inner_dyn_fn, inner_obs)
+    joint = StateSpaceModel(
+        GaussianPrior(SVector(0.0, 0.0), @SMatrix [0.8 0.24; 0.24 0.572]),
+        TimeVaryingDynamics(
+            ((; t),) -> LinearGaussianDynamics(
+                @SMatrix([ax 0.0; u+v * ax az]),
+                SVector(0.03t, (v * 0.03 + 0.02) * t),
+                @SMatrix([qx v*qx; v*qx qz+v^2 * qx])
+            ),
+        ),
+        LinearGaussianObservation(@SMatrix([0.4 1.0]), SVector(0.0), SMatrix{1,1}(r)),
+    )
+    ys = [SVector(0.2), SVector(-0.4), SVector(0.7)]
+
+    function sampler(strategy, rb, ex)
+        pf = BF(12; resampler=Multinomial(), threshold=0.8, execution=ex)
+        return ConditionalSMC(rb ? RBPF(pf, KF()) : pf, strategy)
+    end
+    function sweeps(model, csmc, n)
+        rng = StableRNG(11)
+        ref = nothing
+        lls = Float64[]
+        for _ in 1:n
+            ref, ll = GF._csmc_sample(rng, model, csmc, ys, ref)
+            push!(lls, ll)
+        end
+        return ref, lls
+    end
+
+    # Refreshed trajectories do not depend on scheduling.
+    for strategy in (AncestorSampling(), BackwardSimulation()), rb in (false, true)
+        model = rb ? hier : joint
+        reference = sweeps(
+            model, sampler(strategy, rb, ThreadedExecution(; blocksize=5, ntasks=1)), 5
+        )
+        for ntasks in (2, 4)
+            ex = ThreadedExecution(; blocksize=5, ntasks)
+            @test sweeps(model, sampler(strategy, rb, ex), 5) == reference
+        end
+    end
+
+    # Threaded Rao–Blackwellised refreshment targets the joint Gaussian posterior.
+    rng = StableRNG(8251)
+    truth, _ = smooth(rng, joint, KalmanSmoother(), ys; t_smooth=1)
+    for strategy in (AncestorSampling(), BackwardSimulation())
+        csmc = sampler(strategy, true, ThreadedExecution(; blocksize=4))
+        draws = Float64[]
+        ref = nothing
+        for i in 1:4200
+            ref, _ = GF._csmc_sample(rng, hier, csmc, ys, ref)
+            i > 200 && push!(draws, only(ref[1]))
+        end
+        @test mean(draws) ≈ truth.μ[1] atol = 0.055
+        @test mean(abs2, draws) ≈ truth.Σ[1, 1] + truth.μ[1]^2 atol = 0.07
+    end
+end
