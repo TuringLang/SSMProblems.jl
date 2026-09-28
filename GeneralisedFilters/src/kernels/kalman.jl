@@ -33,17 +33,10 @@ end
 
 ## KALMAN KERNELS ##########################################################################
 
-# Keep numerical values separate from CPU storage normalisation so a batched
-# caller can compose the same equations without materialising host arrays.
-function _kalman_predict_raw(state::GaussianState, d::LinearGaussianDynamics)
+function kalman_predict(state::GaussianState, d::LinearGaussianDynamics)
     μ̂ = d.A * state.μ + d.b
     Σ̂ = symmetrise(d.A * state.Σ * d.A' + d.Q)
     return GaussianState(μ̂, Σ̂)
-end
-
-function kalman_predict(state::GaussianState, d::LinearGaussianDynamics)
-    pred = _kalman_predict_raw(state, d)
-    return _kalman_state(pred.μ, pred.Σ)
 end
 
 """
@@ -53,11 +46,6 @@ Joseph-form Kalman update returning `(filtered_state, ll_increment, cache)`. The
 exposes the intermediates consumed by the analytic reverse pass.
 """
 function kalman_update_cached(state::GaussianState, o::LinearGaussianObservation, y)
-    filt, ll, cache = _kalman_update_raw(state, o, y)
-    return _kalman_state(filt.μ, filt.Σ), ll, cache
-end
-
-function _kalman_update_raw(state::GaussianState, o::LinearGaussianObservation, y)
     μ̂, Σ̂ = state.μ, state.Σ
     H, c, R = o.H, o.c, o.R
 
@@ -84,7 +72,7 @@ function kalman_update(
     repair::CovarianceRepair=NoRepair(),
 )
     filt, ll, _ = kalman_update_cached(state, o, y)
-    return _kalman_state(filt.μ, repair_covariance(repair, filt.Σ)), ll
+    return GaussianState(filt.μ, repair_covariance(repair, filt.Σ)), ll
 end
 
 """
@@ -146,7 +134,7 @@ function rts_backward_step(
     G = filtered.Σ * d.A' / cholesky(Symmetric(pred.Σ))
     μ = filtered.μ + G * (smoothed_next.μ - pred.μ)
     Σ = symmetrise(filtered.Σ + G * (smoothed_next.Σ - pred.Σ) * G')
-    return _kalman_state(μ, Σ)
+    return GaussianState(μ, Σ)
 end
 
 ## BACKWARD INFORMATION KERNELS ############################################################
@@ -229,7 +217,7 @@ function two_filter_smooth(filtered::GaussianState, backward_lik::InformationLik
 
     Σ_smooth = inv(Ω_smooth)
     μ_smooth = Σ_smooth * λ_smooth
-    return _kalman_state(μ_smooth, symmetrise(Σ_smooth))
+    return GaussianState(μ_smooth, symmetrise(Σ_smooth))
 end
 
 """

@@ -12,5 +12,6 @@ using CUDA
 
 include("batched_kernels/containers.jl")
 include("batched_kernels/models.jl")
+include("batched_kernels/filtering.jl")
 
 end
