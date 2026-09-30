@@ -101,7 +101,8 @@ Read [Models and conditioning](models/linear-gaussian.md) to define a hierarchic
 and see how fixing an outer trajectory gives a conditional inner model. Then follow
 [Particle Gibbs and Turing](inference.md) for joint trajectory and parameter inference.
 Read [Recording filtering results](history.md) for manual loops and particle ancestry
-storage. The **Examples** section works through trend inflation with stochastic volatility
+storage. [Multithreading](threading.md) explains how to evaluate particles in parallel.
+The **Examples** section works through trend inflation with stochastic volatility
 and benchmarks filters using static arrays.
 
 The [API reference](api.md) lists the available types and operations. Existing users

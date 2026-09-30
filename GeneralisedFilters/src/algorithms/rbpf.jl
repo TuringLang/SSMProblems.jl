@@ -19,6 +19,7 @@ end
 
 num_particles(algo::RBPF) = num_particles(algo.pf)
 resampler(algo::RBPF) = resampler(algo.pf)
+execution(algo::RBPF) = execution(algo.pf)
 
 function initialise_particle(
     rng::AbstractRNG, prior::HierarchicalPrior, algo::RBPF, ref_state

@@ -35,6 +35,14 @@ end
 function num_particles end
 function resampler end
 
+"""
+    execution(algo::AbstractParticleFilter) -> AbstractExecution
+
+The [`AbstractExecution`](@ref) used to evaluate the particle population. Particle filters
+without an execution setting evaluate serially.
+"""
+execution(::AbstractParticleFilter) = SerialExecution()
+
 function initialise(
     rng::AbstractRNG,
     prior::StatePrior,
@@ -42,7 +50,7 @@ function initialise(
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
     N = num_particles(algo)
-    particles = map(1:N) do i
+    particles = _population_map(execution(algo), rng, N) do rng, i
         ref = !isnothing(ref_state) && i == 1 ? _trajectory_state(ref_state, 0) : nothing
         return initialise_particle(rng, prior, algo, ref)
     end
@@ -59,15 +67,9 @@ function predict(
     observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
-    particles = map(1:num_particles(algo)) do i
-        particle = state.particles[i]
-        ref = if !isnothing(ref_state) && i == 1
-            _trajectory_state(ref_state, iter)
-        else
-            nothing
-        end
-        return predict_particle(rng, dyn, algo, iter, particle, observation, ref)
-    end
+    particles = _predict_particles(
+        rng, dyn, algo, iter, state.particles, observation, ref_state
+    )
 
     # Preserve the incoming weight normalizer; guided proposal corrections belong
     # to the new weights and must not be subtracted from the evidence increment.
@@ -78,6 +80,28 @@ function predict(
     )
 end
 
+# Population traversal is the execution boundary. The scalar hooks retain their
+# dispatch and RNG order; batched storage can select bulk execution here.
+function _predict_particles(
+    rng::AbstractRNG,
+    dyn::LatentDynamics,
+    algo::AbstractParticleFilter,
+    iter::Integer,
+    particles,
+    observation,
+    ref_state,
+)
+    return _population_map(execution(algo), rng, num_particles(algo)) do rng, i
+        particle = particles[i]
+        ref = if !isnothing(ref_state) && i == 1
+            _trajectory_state(ref_state, iter)
+        else
+            nothing
+        end
+        return predict_particle(rng, dyn, algo, iter, particle, observation, ref)
+    end
+end
+
 function update(
     obs::ObservationProcess,
     algo::AbstractParticleFilter,
@@ -85,32 +109,48 @@ function update(
     state::ParticleDistribution,
     observation,
 )
-    particles = map(state.particles) do particle
-        return update_particle(obs, algo, iter, particle, observation)
-    end
+    particles = _update_particles(obs, algo, iter, state.particles, observation)
     new_state, ll_increment = marginalise!(state, particles)
 
     return new_state, ll_increment
 end
 
-struct ParticleFilter{RS,PT} <: AbstractParticleFilter
+function _update_particles(
+    obs::ObservationProcess,
+    algo::AbstractParticleFilter,
+    iter::Integer,
+    particles,
+    observation,
+)
+    return _population_map(execution(algo), length(particles)) do i
+        return update_particle(obs, algo, iter, particles[i], observation)
+    end
+end
+
+struct ParticleFilter{RS,PT,EX<:AbstractExecution} <: AbstractParticleFilter
     N::Int
     resampler::RS
     proposal::PT
+    execution::EX
 end
 
 const PF = ParticleFilter
 
 function ParticleFilter(
-    N::Integer, proposal::PT; threshold::Real=1.0, resampler::AbstractResampler=Systematic()
+    N::Integer,
+    proposal::PT;
+    threshold::Real=1.0,
+    resampler::AbstractResampler=Systematic(),
+    execution::AbstractExecution=SerialExecution(),
 ) where {PT<:AbstractProposal}
     N > 0 || throw(ArgumentError("particle count must be positive"))
     conditional_resampler = ESSResampler(threshold, resampler)
-    return ParticleFilter(N, conditional_resampler, proposal)
+    return ParticleFilter(N, conditional_resampler, proposal, execution)
 end
 
 num_particles(algo::ParticleFilter) = algo.N
 resampler(algo::ParticleFilter) = algo.resampler
+execution(algo::ParticleFilter) = algo.execution
 
 function initialise_particle(
     rng::AbstractRNG, prior::StatePrior, algo::ParticleFilter, ref_state
@@ -287,6 +327,7 @@ end
 
 resampler(algo::AuxiliaryParticleFilter) = resampler(algo.pf)
 num_particles(algo::AuxiliaryParticleFilter) = num_particles(algo.pf)
+execution(algo::AuxiliaryParticleFilter) = execution(algo.pf)
 
 function initialise(
     rng::AbstractRNG,
@@ -325,9 +366,10 @@ end
 function _step_resampler(
     rng, model, algo::AuxiliaryParticleFilter, iter, state, observation
 )
-    log_ηs = map(state.particles) do particle
+    particles = state.particles
+    log_ηs = _population_map(execution(algo), rng, length(particles)) do rng, i
         return compute_logeta(
-            rng, algo.weight_strategy, model, algo.pf, iter, particle.state, observation
+            rng, algo.weight_strategy, model, algo.pf, iter, particles[i].state, observation
         )
     end
     return AuxiliaryResampler(resampler(algo), log_ηs)

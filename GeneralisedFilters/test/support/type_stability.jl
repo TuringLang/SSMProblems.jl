@@ -1,5 +1,19 @@
 """Type stability tests using JET.jl."""
 
+@testitem "Threaded population map type stability" begin
+    using GeneralisedFilters
+    using StableRNGs
+    using JET
+
+    const GF = GeneralisedFilters
+
+    ex = ThreadedExecution(; blocksize=4, ntasks=2)
+    @test_opt target_modules = (GF,) GF._population_map(i -> 2.0 * i, ex, 10)
+    @test_opt target_modules = (GF,) GF._population_map(
+        (rng, i) -> randn(rng), ex, StableRNG(1), 10
+    )
+end
+
 @testitem "Kalman filter type stability" begin
     using GeneralisedFilters
     using StableRNGs
