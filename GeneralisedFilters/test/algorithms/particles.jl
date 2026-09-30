@@ -110,3 +110,41 @@ end
         logsumexp(likelihood[idxs] - eta[idxs]) - log(3)
     @test actual ≈ expected
 end
+
+@testitem "Population execution preserves scalar hooks and RNG order" begin
+    using Random: AbstractRNG, Xoshiro, rand
+    using LogExpFunctions: logsumexp
+    const GF = GeneralisedFilters
+
+    struct HookDynamics <: GF.LatentDynamics end
+    struct HookObservation <: GF.ObservationProcess end
+    function GF.predict_particle(
+        rng::AbstractRNG,
+        ::HookDynamics,
+        ::GF.BootstrapFilter,
+        t::Integer,
+        p::GF.Particle,
+        y,
+        ref,
+    )
+        return GF.Particle((id=p.state, draw=rand(rng), ref=ref), p.log_w, p.ancestor)
+    end
+    function GF.update_particle(
+        ::HookObservation, ::GF.BootstrapFilter, t::Integer, p::GF.Particle, y
+    )
+        return GF.Particle((:updated, p.state), p.log_w + p.state.draw, p.ancestor)
+    end
+
+    rng, reference_rng = Xoshiro(42), Xoshiro(42)
+    draws = [rand(reference_rng) for _ in 1:3]
+    initial = GF.ParticleDistribution([GF.Particle(i, 0.0, i) for i in 1:3], 0.0)
+    predicted = GF.predict(
+        rng, HookDynamics(), BF(3), 1, initial, nothing; ref_state=[98, 99]
+    )
+    expected = [(id=i, draw=draws[i], ref=i == 1 ? 99 : nothing) for i in 1:3]
+    @test getfield.(predicted.particles, :state) == expected
+    @test rand(rng) == rand(reference_rng)
+    filtered, _ = GF.update(HookObservation(), BF(3), 1, predicted, nothing)
+    @test getfield.(filtered.particles, :state) == [(:updated, p) for p in expected]
+    @test GF.log_weights(filtered) ≈ draws .- logsumexp(draws)
+end

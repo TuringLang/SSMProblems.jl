@@ -102,8 +102,8 @@ end
     using Mooncake
 
     function objective(θ, T)
-        # Mean constants must acquire the covariance's Dual/Float64 scalar type
-        # during state construction, without changing the original prior.
+        # Covariance parameters propagate their Dual/Float64 type through the
+        # arithmetic without requiring the constant prior mean to share it.
         model = StateSpaceModel(
             GaussianPrior(SA[0.0f0, 0.0f0], Diagonal(exp.(SVector{2}(θ)))),
             LinearGaussianDynamics(

@@ -68,7 +68,7 @@ function _kalman_likelihood_step(model, af, state, t, y)
     d = resolve(SSMProblems.dyn(model), (; t))
     o = resolve(SSMProblems.obs(model), (; t))
     state, inc = kalman_step(state, d, o, y)
-    return _kalman_state(state.μ, repair_covariance(af.repair, state.Σ)), inc
+    return GaussianState(state.μ, repair_covariance(af.repair, state.Σ)), inc
 end
 
 Base.@noinline function _kalman_likelihood_tail(model, af, ys, state, ll)

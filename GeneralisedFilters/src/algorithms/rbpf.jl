@@ -38,23 +38,36 @@ function predict_particle(
     observation,
     ref_state,
 )
+    state, logw_inc = _predict_rb_state(
+        rng, dyn, algo, iter, particle.state, observation, ref_state
+    )
+    return Particle(state, add_logweight(log_weight(particle), logw_inc), particle.ancestor)
+end
+
+# The RBPF recipe acts on an RBState whose fields may be scalar beliefs/samples
+# or batched collections. Propagation and the analytical filter select execution
+# through their existing dispatch, keeping the conditional model logic shared.
+function _predict_rb_state(
+    rng::AbstractRNG,
+    dyn::HierarchicalDynamics,
+    algo::RBPF,
+    iter::Integer,
+    state::RBState,
+    observation,
+    ref_state,
+)
     new_x, logw_inc = propagate(
-        rng, dyn.outer, algo.pf, iter, particle.state, observation, ref_state
+        rng, dyn.outer, algo.pf, iter, state, observation, ref_state
     )
     new_z = predict(
         rng,
-        _component(inner_dynamics(dyn, iter, particle.state.x, new_x)),
+        _component(inner_dynamics(dyn, iter, state.x, new_x)),
         algo.af,
         iter,
-        particle.state.z,
+        state.z,
         observation,
     )
-
-    return Particle(
-        RBState(new_x, new_z),
-        add_logweight(log_weight(particle), logw_inc),
-        particle.ancestor,
-    )
+    return RBState(new_x, new_z), logw_inc
 end
 
 function update_particle(
@@ -64,18 +77,23 @@ function update_particle(
     particle::Particle{<:RBState},
     observation,
 )
+    state, log_increment = _update_rb_state(obs, algo, iter, particle.state, observation)
+    return Particle(
+        state, add_logweight(log_weight(particle), log_increment), particle.ancestor
+    )
+end
+
+function _update_rb_state(
+    obs::ObservationProcess, algo::RBPF, iter::Integer, state::RBState, observation
+)
     new_z, log_increment = update(
-        _component(inner_observation(obs, iter, particle.state.x)),
+        _component(inner_observation(obs, iter, state.x)),
         algo.af,
         iter,
-        particle.state.z,
+        state.z,
         observation,
     )
-    return Particle(
-        RBState(particle.state.x, new_z),
-        add_logweight(log_weight(particle), log_increment),
-        particle.ancestor,
-    )
+    return RBState(state.x, new_z), log_increment
 end
 
 function predictive_state(

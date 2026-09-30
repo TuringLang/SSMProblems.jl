@@ -68,6 +68,7 @@ makedocs(;
         "Particle Gibbs and Turing" => "inference.md",
         "Recording filtering results" => "history.md",
         "Multithreading" => "threading.md",
+        "GPU Rao–Blackwellised filtering" => "gpu-rbpf.md",
         "Examples" =>
             [joinpath("examples", f) for f in readdir(EXAMPLES_OUT) if endswith(f, ".md")],
         "API reference" => "api.md",
