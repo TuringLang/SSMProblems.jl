@@ -3,6 +3,8 @@ module BatchedKernelsExt
 using GeneralisedFilters: GeneralisedFilters, Particle, ParticleDistribution
 using BatchedKernels:
     BatchedStruct,
+    BatchedRNG,
+    fuse,
     BatchedCuScalar,
     BatchedCuVector,
     BatchedCuMatrix,

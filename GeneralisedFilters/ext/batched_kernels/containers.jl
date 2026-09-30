@@ -55,26 +55,6 @@ function GeneralisedFilters.construct_new_state(
     )
 end
 
-# Scalar indexing a BatchedStruct reconstructs one particle, including a device
-# scalar weight/ancestor. Gather leaf arrays instead, retaining the same mapping
-# across the complete nested state. No particle data is downloaded to the host.
-_gather_batch(x::BatchedCuMatrix, idxs) = BatchedCuMatrix(x.data[:, :, idxs])
-_gather_batch(x::BatchedCuVector, idxs) = BatchedCuVector(x.data[:, idxs])
-_gather_batch(x::BatchedCuScalar, idxs) = BatchedCuScalar(x.data[idxs])
-_gather_batch(x::SharedCuMatrix, idxs) = SharedCuMatrix(x.data, length(idxs))
-_gather_batch(x::SharedCuVector, idxs) = SharedCuVector(x.data, length(idxs))
-function _gather_batch(x::BatchedStruct{T}, idxs) where {T}
-    components = map(c -> _gather_batch(c, idxs), x.components)
-    # Contiguous input/output storage has identical scalar view types. Reject
-    # other storage forms explicitly rather than misdeclaring composite eltypes.
-    all(
-        eltype(a) === eltype(b) for (a, b) in zip(values(x.components), values(components))
-    ) || throw(
-        ArgumentError("batched gather requires matching input/output leaf element types"),
-    )
-    return BatchedStruct{T,typeof(components)}(components, length(idxs))
-end
-
 function GeneralisedFilters.construct_new_state(
     state::ParticleDistribution{W,P,B}, idxs::CuVector{<:Integer}, ::Nothing
 ) where {W,P<:Particle,B<:BatchedStruct{P}}
@@ -83,8 +63,6 @@ function GeneralisedFilters.construct_new_state(
     length(idxs) == length(state) ||
         throw(DimensionMismatch("one ancestor per particle is required"))
     isempty(idxs) && throw(ArgumentError("cannot resample an empty particle batch"))
-    n = length(state)
-    all(i -> 1 <= i <= n, idxs) || throw(BoundsError(state.particles, idxs))
     fields = state.particles.components
     ancestors = similar(fields.ancestor.data)
     # Ancestor storage may use a narrower integer type than the resampler output.
@@ -92,10 +70,10 @@ function GeneralisedFilters.construct_new_state(
         throw(ArgumentError("ancestor storage cannot represent every particle index"))
     ancestors .= idxs
     components = (;
-        state=_gather_batch(fields.state, idxs),
+        state=fields.state[idxs],
         log_w=BatchedCuScalar(zero.(fields.log_w.data)),
         ancestor=BatchedCuScalar(ancestors),
     )
-    particles = BatchedStruct(P, components)
+    particles = BatchedStruct(Particle, components)
     return ParticleDistribution(particles, zero(W))
 end

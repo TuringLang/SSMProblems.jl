@@ -85,17 +85,44 @@ function GeneralisedFilters.inner_observation(
     return BatchedStruct(LinearGaussianObservation, fields)
 end
 
+# Factor shared covariances once on the host-controlled path, then fuse the
+# per-particle draw and affine transformation.
+_gaussian_draw(rng, μ, root) = μ + root * randn(rng, eltype(root), size(root, 2))
+_gaussian_transition(rng, A, b, root, x) = A * x + _gaussian_draw(rng, b, root)
+
+function _draw_outer(rng::CUDA.RNG, μ, root, n)
+    return BatchedCuVector(root * randn(rng, eltype(μ), (size(root, 2), n)) .+ μ)
+end
+function _draw_outer(rng::BatchedRNG, μ, root, n)
+    return fuse(_gaussian_draw, rng, SharedCuVector(μ, n), SharedCuMatrix(root, n))
+end
+function _transition_outer(rng::CUDA.RNG, A, b, root, x)
+    noise = randn(rng, eltype(x.data), (size(root, 2), length(x)))
+    return BatchedCuVector(A * x.data .+ b .+ root * noise)
+end
+function _transition_outer(rng::BatchedRNG, A, b, root, x)
+    n = length(x)
+    return fuse(
+        _gaussian_transition,
+        rng,
+        SharedCuMatrix(A, n),
+        SharedCuVector(b, n),
+        SharedCuMatrix(root, n),
+        x,
+    )
+end
+
 function GeneralisedFilters.simulate(
     rng::AbstractRNG, d::DeviceSamplingDynamics, ::Integer, x::BatchedCuVector{T}
 ) where {T}
-    rng isa CUDA.RNG || throw(ArgumentError("batched Gaussian sampling requires CUDA.RNG"))
+    rng isa Union{CUDA.RNG,BatchedRNG} ||
+        throw(ArgumentError("batched Gaussian sampling requires CUDA.RNG or BatchedRNG"))
     _check_device_model_arrays(T, d.A, d.b, _sampling_storage(d.Q), x.data)
     k, n = size(x.data)
     size(d.A) == size(d.Q) == (k, k) && length(d.b) == k ||
         throw(DimensionMismatch("outer transition shapes"))
     root = _sampling_root(d.Q)
-    noise = randn(rng, T, (size(root, 2), n))
-    return BatchedCuVector(d.A * x.data .+ d.b .+ root * noise)
+    return _transition_outer(rng, d.A, d.b, root, x)
 end
 
 function GeneralisedFilters.initialise(
@@ -104,7 +131,8 @@ function GeneralisedFilters.initialise(
     algo::RBPF{<:BootstrapFilter,<:KalmanFilter};
     ref_state=nothing,
 )
-    rng isa CUDA.RNG || throw(ArgumentError("batched GPU initialisation requires CUDA.RNG"))
+    rng isa Union{CUDA.RNG,BatchedRNG} ||
+        throw(ArgumentError("batched GPU initialisation requires CUDA.RNG or BatchedRNG"))
     isnothing(ref_state) ||
         throw(ArgumentError("GPU reference trajectories are not supported"))
     algo.af.repair isa NoRepair ||
@@ -119,7 +147,7 @@ function GeneralisedFilters.initialise(
     n <= typemax(Int32) ||
         throw(ArgumentError("particle count exceeds Int32 ancestor storage"))
     root = _sampling_root(p.outer.Σ0)
-    x = BatchedCuVector(root * randn(rng, T, (size(root, 2), n)) .+ p.outer.μ0)
+    x = _draw_outer(rng, p.outer.μ0, root, n)
     ip = GeneralisedFilters.inner_prior(p, x)
     ip isa BatchedStruct{<:GaussianPrior} || throw(
         ArgumentError("GPU inner_prior must return a BatchedStruct of GaussianPrior atoms"),

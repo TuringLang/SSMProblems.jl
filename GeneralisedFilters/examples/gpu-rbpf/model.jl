@@ -76,6 +76,26 @@ function observations(model, steps=20)
     end
 end
 
+# Temporary example-level separation until BK supports ordinary resampling draws.
+# Both streams are supplied by the caller and persist across all time steps.
+function filter_gpu(
+    particle_rng::BatchedRNG, resampling_rng::AbstractRNG, model, algo::RBPF, ys
+)
+    isempty(ys) && throw(ArgumentError("filter requires nonempty observations"))
+    state = initialise(particle_rng, model.prior, algo)
+    total = zero(eltype(GeneralisedFilters.log_weights(state)))
+    for t in eachindex(ys)
+        state = GeneralisedFilters.maybe_resample(
+            resampling_rng, GeneralisedFilters.resampler(algo), state
+        )
+        state, increment = GeneralisedFilters.move(
+            particle_rng, model, algo, t, state, ys[t]
+        )
+        total += increment
+    end
+    return state, total
+end
+
 # Only the final summary is downloaded. No particle-sized host copy is needed.
 function inner_mean(state)
     w = GeneralisedFilters.get_weights(state)

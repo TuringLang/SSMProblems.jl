@@ -11,8 +11,10 @@ gathering operate on the GPU.
 
 This example requires the local BatchedKernels development version with traced
 `one`, division, matrix-plus-adjoint and distinct-vector `dot` support, plus the
-`BatchedStruct(Type, components)` constructor. It is not
-supported by an arbitrary released version of BatchedKernels. A CUDA GPU is required;
+`BatchedStruct(Type, components)` constructor, batch gathering via `batch[indices]`,
+and fused random sampling with `BatchedRNG`. It is not
+supported by an arbitrary released version of BatchedKernels. This example was
+validated with BatchedKernels commit `a4641a0` and CUDA.jl 5.11.3. A CUDA GPU is required;
 the ordinary documentation build does not execute this example.
 
 ## Model and execution
@@ -24,15 +26,23 @@ StaticArrays, with both development packages selected using `Pkg.develop(path=..
 
 ```julia
 include("examples/gpu-rbpf/model.jl")
-using .GPUVolatilityExample, GeneralisedFilters, CUDA, Random
+using .GPUVolatilityExample, GeneralisedFilters, CUDA, BatchedKernels, Random
 CUDA.allowscalar(false)
 cpu_model, gpu_model = GPUVolatilityExample.models(16, 4, Float32)
 ys = GPUVolatilityExample.observations(cpu_model, 20)
 device_ys = [CuArray(Vector(y)) for y in ys]
 algo = RBPF(BF(8192; threshold=0.5), KF())
-state, log_evidence = GeneralisedFilters.filter(CUDA.RNG(1), gpu_model, algo, device_ys)
+state, log_evidence = GPUVolatilityExample.filter_gpu(
+    BatchedRNG(1), CUDA.RNG(2), gpu_model, algo, device_ys
+)
 mean = GPUVolatilityExample.inner_mean(state)
 ```
+
+The example temporarily uses two explicit RNGs: `BatchedRNG` for fused particle
+initialisation and transitions, and `CUDA.RNG` for resampling. Its small
+`filter_gpu` loop uses the existing resampling and filtering operations; it does
+not change the package filtering interface. The original single-`CUDA.RNG` route
+through `GeneralisedFilters.filter` remains supported.
 
 The outer state is scalar log volatility. Conditional on it, a 16-dimensional
 Gaussian factor process has process covariance `exp(x_t) * Q`. Each particle thus
@@ -52,6 +62,8 @@ device-backed outer Gaussian prior; there is no preparation object.
 The initial route supports bootstrap RBPF with a covariance-form Kalman filter,
 `NoRepair`, device Gaussian outer sampling, explicit batch model methods and device
 observation vectors. It returns the final particle population and log evidence.
+The `SerialExecution` and `ThreadedExecution` settings control CPU population traversal;
+device-backed populations use BatchedKernels regardless of that setting.
 Reference trajectories, GPU AD, smoothing and arbitrary GPU samplers are outside
 this example. Filtering summaries can be reduced on device as shown above.
 

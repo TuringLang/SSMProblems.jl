@@ -153,4 +153,26 @@
     @test_throws ArgumentError inner_prior(wrong_type, x)
     wrong_shape = GaussianPrior(CUDA.zeros(Float32, 2), CUDA.zeros(Float32, 3, 3))
     @test_throws DimensionMismatch inner_prior(wrong_shape, x)
+
+    # Check the fused affine draw against independent arithmetic with the same
+    # Philox draws; replay alone would not catch a wrong covariance orientation.
+    factor = Float32[0.2 0; 0.1 0.3]
+    μ0 = Float32[0.1, -0.2]
+    prior = HierarchicalPrior(
+        GaussianPrior(CuArray(μ0), CovarianceFactor(CuArray(factor))),
+        GaussianPrior(CUDA.zeros(Float32, 1), CUDA.ones(Float32, 1, 1)),
+    )
+    rng = BatchedRNG(29)
+    sample_noise(r) = randn(r, Float32, 2)
+    noise = Array(fuse(sample_noise, copy(rng); batch_size=5).data)
+    initial = initialise(rng, prior, RBPF(BF(5), KF()))
+    x = initial.particles.components.state.components.x
+    @test Array(x.data) ≈ μ0 .+ factor * noise
+    checkpoint = copy(rng)
+    noise = Array(fuse(sample_noise, copy(rng); batch_size=5).data)
+    A = Float32[0.8 0.1; 0 0.9]
+    dyn = LinearGaussianDynamics(CuArray(A), CuArray(μ0), CovarianceFactor(CuArray(factor)))
+    draw = simulate(rng, dyn, 1, x)
+    @test Array(draw.data) ≈ A * Array(x.data) .+ μ0 .+ factor * noise
+    @test Array(simulate(checkpoint, dyn, 1, x).data) == Array(draw.data)
 end
