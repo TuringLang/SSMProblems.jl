@@ -127,6 +127,15 @@ function _update_particles(
     end
 end
 
+"""
+    ParticleFilter(N, proposal; threshold=1.0, resampler=Systematic(), execution=SerialExecution())
+
+Particle filter with `N` particles drawn from `proposal`, an [`AbstractProposal`](@ref).
+Particles are resampled with `resampler` when the effective sample size falls below
+`threshold * N`. `execution` chooses how the particle population is evaluated; see
+[`AbstractExecution`](@ref). `BootstrapFilter(N; kwargs...)` proposes from the latent
+dynamics.
+"""
 struct ParticleFilter{RS,PT,EX<:AbstractExecution} <: AbstractParticleFilter
     N::Int
     resampler::RS
