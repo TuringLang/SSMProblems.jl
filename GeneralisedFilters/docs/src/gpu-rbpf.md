@@ -74,3 +74,21 @@ review; this route does not provide the CPU factorisation's runtime exception
 contract or a full positive-semidefiniteness certificate. Float32 through
 inner dimension 16 is the primary target; larger shapes and Float64 require
 separate shared-memory and accuracy checks.
+
+## Population ownership and execution
+
+The bootstrap/Kalman RBPF path shares population orchestration between ordinary
+CPU particle arrays and `BatchedStruct` populations. Internal
+`_rb_population_fields` / `_assemble_rb_population` adapters separate storage from
+execution. Field extraction supplies borrowed inputs, not a writable projection:
+replacing an entry in a collected CPU field does not replace the original particle.
+Assembly borrows supplied leaves without a deep copy; already-assembled CPU
+results are retained directly. History preservation remains responsible for
+obtaining independent storage.
+
+CPU execution retains `predict_particle` / `update_particle` hooks and the existing
+serial or threaded RNG traversal. The device adapter evaluates the same RBPF
+state recipe on whole field batches. Ancestry remains integer storage outside
+floating-point fusion. Custom model adapters may lift a common per-particle
+numerical function with BK broadcast; arbitrary CPU callbacks are not
+automatically GPU-compatible.
