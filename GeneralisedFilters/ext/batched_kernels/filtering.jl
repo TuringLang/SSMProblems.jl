@@ -7,6 +7,24 @@ function _rb_particles(state::RBState, log_w, ancestor)
     return BatchedStruct(Particle, (; state=states, log_w, ancestor))
 end
 
+function GeneralisedFilters._rb_population_fields(
+    particles::BatchedStruct{<:Particle{<:RBState}}
+)
+    fields = particles.components
+    return (;
+        state=RBState(fields.state.components.x, fields.state.components.z),
+        log_w=fields.log_w,
+        ancestor=fields.ancestor,
+    )
+end
+
+function GeneralisedFilters._assemble_rb_population(
+    particles::BatchedStruct{<:Particle{<:RBState}}, fields::NamedTuple
+)
+    GeneralisedFilters._check_rb_population_fields(particles, fields)
+    return _rb_particles(fields.state, fields.log_w, fields.ancestor)
+end
+
 GeneralisedFilters.add_logweight(w::BatchedCuScalar, ::GeneralisedFilters.TypelessZero) = w
 function GeneralisedFilters.add_logweight(w::BatchedCuScalar, increment::BatchedCuScalar)
     return BatchedCuScalar(w.data .+ increment.data)
@@ -54,7 +72,7 @@ end
 
 # Bulk execution changes traversal and packing, not the RBPF recipe. The plain
 # RBState here contains batched fields and is never a single sampled particle.
-function GeneralisedFilters._predict_particles(
+function GeneralisedFilters._predict_rb_population(
     rng::AbstractRNG,
     dyn::HierarchicalDynamics,
     algo::RBPF{<:BootstrapFilter,<:KalmanFilter},
@@ -64,16 +82,16 @@ function GeneralisedFilters._predict_particles(
     ref_state,
 ) where {P<:Particle{<:RBState}}
     _check_batched_filter(algo.af, ref_state)
-    fields = particles.components
-    state = RBState(fields.state.components.x, fields.state.components.z)
+    fields = GeneralisedFilters._rb_population_fields(particles)
+    state = fields.state
     predicted, increment = GeneralisedFilters._predict_rb_state(
         rng, dyn, algo, t, state, observation, ref_state
     )
     weights = GeneralisedFilters.add_logweight(fields.log_w, increment)
-    return _rb_particles(predicted, weights, fields.ancestor)
+    return (; state=predicted, log_w=weights, ancestor=fields.ancestor)
 end
 
-function GeneralisedFilters._update_particles(
+function GeneralisedFilters._update_rb_population(
     obs::HierarchicalObservation,
     algo::RBPF{<:BootstrapFilter,<:KalmanFilter},
     t::Integer,
@@ -81,13 +99,13 @@ function GeneralisedFilters._update_particles(
     observation,
 ) where {P<:Particle{<:RBState}}
     _check_batched_filter(algo.af)
-    fields = particles.components
-    state = RBState(fields.state.components.x, fields.state.components.z)
+    fields = GeneralisedFilters._rb_population_fields(particles)
+    state = fields.state
     filtered, increment = GeneralisedFilters._update_rb_state(
         obs, algo, t, state, observation
     )
     weights = GeneralisedFilters.add_logweight(fields.log_w, increment)
-    return _rb_particles(filtered, weights, fields.ancestor)
+    return (; state=filtered, log_w=weights, ancestor=fields.ancestor)
 end
 
 # Adapt batched model/belief containers to the shared numerical API.
