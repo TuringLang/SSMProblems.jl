@@ -162,11 +162,15 @@ end
 
 ## TRAJECTORY SAMPLING #####################################################################
 
+function _sample_index(rng::AbstractRNG, weights::AbstractVector)
+    return StatsBase.sample(rng, StatsBase.Weights(weights))
+end
+
 function _sample_trajectory(
     rng::AbstractRNG, container::DenseParticleContainer, state::ParticleDistribution
 )
     ws = get_weights(state)
-    idx = StatsBase.sample(rng, StatsBase.Weights(ws))
+    idx = _sample_index(rng, ws)
     return get_ancestry(container, idx)
 end
 
@@ -186,7 +190,11 @@ end
 function _init_container(initial::ParticleDistribution, state::ParticleDistribution)
     return DenseParticleContainer(initial, state)
 end
-_update_tree!(tree::ParticleTree, state::ParticleDistribution) = push!(tree, state)
+function _update_tree!(
+    tree::Union{ParticleTree,DenseParticleContainer}, state::ParticleDistribution
+)
+    return push!(tree, state)
+end
 function _update_container!(history::DenseParticleContainer, state::ParticleDistribution)
     return push!(history, state)
 end
@@ -212,7 +220,7 @@ function _backward_start(
     y,
     x,
 )
-    return backward_initialise(bp, _component(inner_observation(model, t, x)), y)
+    return backward_initialise(bp, _component(_selected_observation(model, t, x)), y)
 end
 function _backward_start(bp::BackwardDiscretePredictor, model, pf, t, y, x)
     n = length(_component(inner_prior(model, x)).α0)
@@ -255,10 +263,10 @@ function _compute_backward_likelihoods(
     liks = Vector{typeof(pred_lik)}(undef, K)
     liks[K] = pred_lik
     for t in (K - 1):-1:1
-        d = _component(inner_dynamics(model, t + 1, ref_state[t], ref_state[t + 1]))
+        d = _component(_selected_dynamics(model, t + 1, ref_state[t], ref_state[t + 1]))
         pred_lik = backward_predict(bp, pred_lik, d)
         pred_lik = _backward_observe(
-            bp, pred_lik, inner_observation(model, t, ref_state[t]), t, observations[t]
+            bp, pred_lik, _selected_observation(model, t, ref_state[t]), t, observations[t]
         )
         liks = _store_backward_likelihood(liks, t, pred_lik)
     end
@@ -351,13 +359,8 @@ function _csmc_sample(
             state = resample(rng, rs, state)
         else
             ref_as = _build_ancestor_ref(ref_state, back_liks, t)
-            # A fresh binding: `state` is reassigned in this function, so capturing it
-            # in the closure would box it.
-            particles = state.particles
-            as_weights = _population_map(execution(pf), length(particles)) do i
-                return ancestor_weight(particles[i], model.dyn, pf, t, ref_as)
-            end
-            ancestor_idx = StatsBase.sample(rng, StatsBase.Weights(softmax(as_weights)))
+            as_weights = _ancestor_weights(state, model.dyn, pf, t, ref_as)
+            ancestor_idx = _sample_index(rng, softmax(as_weights))
             # Draw the WHOLE conditional law given the newly selected ancestor. For
             # dependent schemes, sampling conditional on ancestor 1 and overwriting it
             # afterwards gives the wrong distribution for all the other offspring.
@@ -410,10 +413,10 @@ function _bs_step_back_lik(
     strategy,
 )
     bp = _backward_predictor(pf, strategy)
-    d = _component(inner_dynamics(model, t + 1, prev_state.x, next_state.x))
+    d = _component(_selected_dynamics(model, t + 1, prev_state.x, next_state.x))
     pred_lik = backward_predict(bp, back_lik, d)
     return _backward_observe(
-        bp, pred_lik, inner_observation(model, t, prev_state.x), t, observations[t]
+        bp, pred_lik, _selected_observation(model, t, prev_state.x), t, observations[t]
     )
 end
 
@@ -428,7 +431,6 @@ function _csmc_sample(
     _validate_csmc(model, csmc, observations, ref_traj)
     pf = csmc.pf
     K = length(observations)
-    N = num_particles(pf)
     ref_state = _make_ref_state(ref_traj)
 
     # Forward filtering pass: store full history in a DenseParticleContainer.
@@ -443,8 +445,8 @@ function _csmc_sample(
     end
 
     # Backward simulation pass
-    idx = StatsBase.sample(rng, StatsBase.Weights(get_weights(state)))
-    sampled_state = container.states[K][idx]
+    idx = _sample_index(rng, get_weights(state))
+    sampled_state = _history_index(container.states[K], idx)
 
     back_lik = _bs_init_back_lik(
         rng,
@@ -461,13 +463,9 @@ function _csmc_sample(
 
     for t in (K - 1):-1:1
         ref_next = _build_bs_ref(xs[t + 1], back_lik)
-        backward_ws = _population_map(execution(pf), N) do i
-            return ancestor_weight(
-                Particle(container, t, i), model.dyn, pf, t + 1, ref_next
-            )
-        end
-        idx = StatsBase.sample(rng, StatsBase.Weights(softmax(backward_ws)))
-        xs[t] = container.states[t][idx]
+        backward_ws = _ancestor_weights(container, t, model.dyn, pf, t + 1, ref_next)
+        idx = _sample_index(rng, softmax(backward_ws))
+        xs[t] = _history_index(container.states[t], idx)
 
         back_lik = _bs_step_back_lik(
             rng,
@@ -484,11 +482,9 @@ function _csmc_sample(
 
     # Time 0: backward step from t=1 to initial particles.
     ref_at_1 = _build_bs_ref(xs[1], back_lik)
-    backward_ws = _population_map(execution(pf), N) do i
-        return ancestor_weight(init_state.particles[i], model.dyn, pf, 1, ref_at_1)
-    end
-    idx = StatsBase.sample(rng, StatsBase.Weights(softmax(backward_ws)))
-    x0 = container.initial_states[idx]
+    backward_ws = _ancestor_weights(init_state, model.dyn, pf, 1, ref_at_1)
+    idx = _sample_index(rng, softmax(backward_ws))
+    x0 = _history_index(container.initial_states, idx)
 
     return _make_ref_state(ReferenceTrajectory(x0, xs)), ll
 end

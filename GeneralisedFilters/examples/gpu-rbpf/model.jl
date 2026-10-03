@@ -79,17 +79,22 @@ end
 # Temporary example-level separation until BK supports ordinary resampling draws.
 # Both streams are supplied by the caller and persist across all time steps.
 function filter_gpu(
-    particle_rng::BatchedRNG, resampling_rng::AbstractRNG, model, algo::RBPF, ys
+    particle_rng::BatchedRNG,
+    resampling_rng::AbstractRNG,
+    model,
+    algo::RBPF,
+    ys;
+    ref_state=nothing,
 )
     isempty(ys) && throw(ArgumentError("filter requires nonempty observations"))
-    state = initialise(particle_rng, model.prior, algo)
+    state = initialise(particle_rng, model.prior, algo; ref_state)
     total = zero(eltype(GeneralisedFilters.log_weights(state)))
     for t in eachindex(ys)
         state = GeneralisedFilters.maybe_resample(
-            resampling_rng, GeneralisedFilters.resampler(algo), state
+            resampling_rng, GeneralisedFilters.resampler(algo), state; ref_state
         )
         state, increment = GeneralisedFilters.move(
-            particle_rng, model, algo, t, state, ys[t]
+            particle_rng, model, algo, t, state, ys[t]; ref_state
         )
         total += increment
     end

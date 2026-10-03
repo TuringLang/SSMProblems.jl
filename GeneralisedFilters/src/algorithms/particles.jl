@@ -50,8 +50,9 @@ function initialise(
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
     N = num_particles(algo)
+    reference = _reference_state(ref_state, 0)
     particles = _population_map(execution(algo), rng, N) do rng, i
-        ref = !isnothing(ref_state) && i == 1 ? _trajectory_state(ref_state, 0) : nothing
+        ref = i == 1 ? reference : nothing
         return initialise_particle(rng, prior, algo, ref)
     end
 
@@ -91,13 +92,10 @@ function _predict_particles(
     observation,
     ref_state,
 )
+    reference = _reference_state(ref_state, iter)
     return _population_map(execution(algo), rng, num_particles(algo)) do rng, i
         particle = particles[i]
-        ref = if !isnothing(ref_state) && i == 1
-            _trajectory_state(ref_state, iter)
-        else
-            nothing
-        end
+        ref = i == 1 ? reference : nothing
         return predict_particle(rng, dyn, algo, iter, particle, observation, ref)
     end
 end
@@ -209,6 +207,7 @@ function step(
     observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
+    _reference_state(ref_state, iter)
     rs = resampler(algo)
     incoming = state
     state = maybe_resample(rng, rs, state; ref_state)
@@ -356,6 +355,7 @@ function step(
     observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
+    _reference_state(ref_state, iter)
     rs = _step_resampler(rng, model, algo, iter, state, observation)
     incoming = state
     state = maybe_resample(rng, rs, state; ref_state)

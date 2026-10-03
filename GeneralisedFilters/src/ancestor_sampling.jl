@@ -93,7 +93,7 @@ function future_conditional_density(
     )
 
     marginal_pred_lik = compute_marginal_predictive_likelihood(pred_dist, back_info)
-    return trans_density + marginal_pred_lik
+    return add_logweight(trans_density, marginal_pred_lik)
 end
 
 @doc raw"""
@@ -138,4 +138,17 @@ function future_conditional_density(
     kwargs...,
 )
     return future_conditional_density(dyn, algo.pf, iter, state, ref_state; kwargs...)
+end
+
+# Population execution is separate from the single-particle backward-weight formula.
+function _ancestor_weights(state::ParticleDistribution, dyn, algo, t, ref)
+    particles = state.particles
+    return _population_map(execution(algo), length(particles)) do i
+        return ancestor_weight(particles[i], dyn, algo, t, ref)
+    end
+end
+function _ancestor_weights(history::DenseParticleContainer, time, dyn, algo, t, ref)
+    return _population_map(execution(algo), length(history.states[time])) do i
+        return ancestor_weight(Particle(history, time, i), dyn, algo, t, ref)
+    end
 end

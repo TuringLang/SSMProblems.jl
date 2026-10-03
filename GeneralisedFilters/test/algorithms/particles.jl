@@ -144,6 +144,19 @@ end
     expected = [(id=i, draw=draws[i], ref=i == 1 ? 99 : nothing) for i in 1:3]
     @test getfield.(predicted.particles, :state) == expected
     @test rand(rng) == rand(reference_rng)
+    indexed = GF.predict(
+        Xoshiro(42),
+        HookDynamics(),
+        BF(3),
+        1,
+        initial,
+        nothing;
+        ref_state=ReferenceTrajectory(98, [99]),
+    )
+    @test indexed.particles == predicted.particles
+    @test_throws ArgumentError GF.predict(
+        Xoshiro(42), HookDynamics(), BF(3), 1, initial, nothing; ref_state=[98]
+    )
     filtered, _ = GF.update(HookObservation(), BF(3), 1, predicted, nothing)
     @test getfield.(filtered.particles, :state) == [(:updated, p) for p in expected]
     @test GF.log_weights(filtered) ≈ draws .- logsumexp(draws)

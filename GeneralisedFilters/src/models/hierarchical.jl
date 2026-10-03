@@ -142,6 +142,15 @@ end
 _trajectory_state(xs::AbstractVector, t::Integer) = xs[t + 1]
 _trajectory_state(xs::ReferenceTrajectory, t::Integer) = xs[t]
 
+# Select a prescribed state once per population, independently of its storage.
+_reference_state(::Nothing, ::Integer) = nothing
+function _reference_state(xs::AbstractVector, t::Integer)
+    _validate_trajectory(xs)
+    0 <= t < length(xs) ||
+        throw(ArgumentError("reference trajectory does not cover time $t"))
+    return _trajectory_state(xs, t)
+end
+
 function _validate_trajectory_time(xs, t::Integer)
     1 <= t < length(xs) || throw(
         ArgumentError(
@@ -151,6 +160,20 @@ function _validate_trajectory_time(xs, t::Integer)
     return nothing
 end
 
+# Resolve one selected trajectory through the same conditional model interface.
+# Device extensions represent its outer states as batches of size one.
+_selected_state(x) = x
+_selected_component(c) = c
+_selected_prior(model, x) = _selected_component(inner_prior(model, _selected_state(x)))
+function _selected_dynamics(model, t, xp, xn)
+    return _selected_component(
+        inner_dynamics(model, t, _selected_state(xp), _selected_state(xn))
+    )
+end
+function _selected_observation(model, t, x)
+    return _selected_component(inner_observation(model, t, _selected_state(x)))
+end
+
 struct ConditionalDynamics{D,X}
     component::D
     trajectory::X
@@ -158,7 +181,7 @@ end
 function (d::ConditionalDynamics)(ctx)
     t = ctx.t
     _validate_trajectory_time(d.trajectory, t)
-    return inner_dynamics(
+    return _selected_dynamics(
         d.component,
         t,
         _trajectory_state(d.trajectory, t - 1),
@@ -173,7 +196,7 @@ end
 function (o::ConditionalObservation)(ctx)
     t = ctx.t
     _validate_trajectory_time(o.trajectory, t)
-    return inner_observation(o.component, t, _trajectory_state(o.trajectory, t))
+    return _selected_observation(o.component, t, _trajectory_state(o.trajectory, t))
 end
 
 """
@@ -196,7 +219,7 @@ filter is still required, and backward prediction/ancestor sampling support is s
 function condition_inner(model::HierarchicalSSM, xs::AbstractVector)
     _validate_trajectory(xs)
     return StateSpaceModel(
-        inner_prior(model, _trajectory_state(xs, 0)),
+        _selected_prior(model, _trajectory_state(xs, 0)),
         TimeVaryingDynamics(ConditionalDynamics(SSMProblems.dyn(model).inner, xs)),
         TimeVaryingObservation(ConditionalObservation(SSMProblems.obs(model).inner, xs)),
     )

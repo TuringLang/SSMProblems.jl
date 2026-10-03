@@ -347,10 +347,12 @@ particle states. When they match, use the one-argument constructor — pushing s
 states with a different type will raise an error.
 
 # Fields
-- `initial_states::Vector{T0}`: Time-0 particle states (fixed length N)
-- `states::Vector{Vector{T}}`: Particle states at times 1..T
-- `weights::Vector{Vector{WT}}`: Log weights at times 1..T
-- `ancestors::Vector{Vector{Int}}`: Ancestor indices at times 1..T
+- `initial_states`: Time-0 particle states (fixed length N)
+- `states`: Vector of particle populations at times 1..T
+- `weights`: Vector of log-weight arrays at times 1..T
+- `ancestors`: Vector of integer ancestor arrays at times 1..T
+
+Each population retains its CPU or device storage; the outer time vectors live on the CPU.
 
 # Constructors
 
@@ -376,19 +378,39 @@ state and weight types from the first completed step. Append later results with
 Constructors and append operations copy collection buffers but retain the state objects
 inside them. Do not mutate stored state objects. Use an explicit `deepcopy` of an input
 particle distribution when snapshots of mutable states are needed. Returned trajectories
-also share their state objects with storage.
+may share their state objects with storage. Device batches copy their batched leaves;
+trajectory extraction copies selected members so a returned path does not retain full
+particle populations.
 
 # Mutation
 
 Use `push!(container, states, weights, ancestors)` to append a new time step. Passing
 a `states` vector whose eltype does not match `T` raises an `ArgumentError`.
 """
-struct DenseParticleContainer{T0,T,WT}
-    initial_states::Vector{T0}
-    states::Vector{Vector{T}}
-    weights::Vector{Vector{WT}}
-    ancestors::Vector{Vector{Int}}
+struct DenseParticleContainer{
+    T0,
+    T,
+    WT,
+    V0<:AbstractVector{T0},
+    V<:AbstractVector{T},
+    W<:AbstractVector{WT},
+    A<:AbstractVector{<:Integer},
+}
+    initial_states::V0
+    states::Vector{V}
+    weights::Vector{W}
+    ancestors::Vector{A}
 end
+
+function DenseParticleContainer{T0,T,WT}(
+    initial::V0, states::Vector{V}, weights::Vector{W}, ancestors::Vector{A}
+) where {T0,T,WT,V0,V,W,A}
+    return DenseParticleContainer{T0,T,WT,V0,V,W,A}(initial, states, weights, ancestors)
+end
+
+# Storage adapters keep the history and ancestry algorithms independent of device.
+_history_copy(xs::AbstractVector) = copy(xs)
+_history_index(xs::AbstractVector, i::Integer) = xs[i]
 
 function DenseParticleContainer(initial_states::Vector{T0}) where {T0}
     return DenseParticleContainer{T0,T0,Float64}(
@@ -409,34 +431,32 @@ function DenseParticleContainer(initial_states::Vector{T0}, ::Type{T}) where {T0
 end
 
 function DenseParticleContainer(
-    initial_states::Vector{T0},
-    states_t1::Vector{T},
-    weights_t1::Vector{WT},
+    initial_states::AbstractVector{T0},
+    states_t1::AbstractVector{T},
+    weights_t1::AbstractVector{WT},
     ancestors_t1::AbstractVector{<:Integer},
 ) where {T0,T,WT}
     _validate_history_step(states_t1, ancestors_t1, length(initial_states))
     length(weights_t1) == length(states_t1) ||
         throw(DimensionMismatch("one weight per state is required"))
-    return DenseParticleContainer{T0,T,WT}(
-        copy(initial_states),
-        [copy(states_t1)],
-        [copy(weights_t1)],
-        [Vector{Int}(ancestors_t1)],
+    initial, states = _history_copy(initial_states), _history_copy(states_t1)
+    return DenseParticleContainer{eltype(initial),eltype(states),WT}(
+        initial, [states], [copy(weights_t1)], [copy(ancestors_t1)]
     )
 end
 
 function Base.push!(
     c::DenseParticleContainer{T0,T,WT},
-    states::Vector{T},
-    weights::Vector{WT},
+    states::AbstractVector{T},
+    weights::AbstractVector{WT},
     ancestors::AbstractVector{<:Integer},
 ) where {T0,T,WT}
     _validate_history_step(states, ancestors, length(c.initial_states))
     length(weights) == length(states) ||
         throw(DimensionMismatch("one weight per state is required"))
-    stored_states, stored_weights, stored_ancestors = copy(states),
+    stored_states, stored_weights, stored_ancestors = _history_copy(states),
     copy(weights),
-    Vector{Int}(ancestors)
+    copy(ancestors)
     push!(c.states, stored_states)
     push!(c.weights, stored_weights)
     push!(c.ancestors, stored_ancestors)
@@ -471,7 +491,11 @@ Reconstruct the `Particle` at time `t ≥ 1`, index `i`, from the container's st
 state, weight, and ancestor index.
 """
 function Particle(c::DenseParticleContainer, t::Integer, i::Integer)
-    return Particle(c.states[t][i], c.weights[t][i], c.ancestors[t][i])
+    return Particle(
+        _history_index(c.states[t], i),
+        _history_index(c.weights[t], i),
+        _history_index(c.ancestors[t], i),
+    )
 end
 
 """
@@ -483,15 +507,15 @@ ancestry backwards from the final time to time 0.
 function get_ancestry(c::DenseParticleContainer{T0,T}, i::Integer) where {T0,T}
     Tlen = length(c.ancestors)
     if Tlen == 0
-        return ReferenceTrajectory(c.initial_states[i], T[])
+        return ReferenceTrajectory(_history_index(c.initial_states, i), T[])
     end
     xs = Vector{T}(undef, Tlen)
     a = i
     for t in Tlen:-1:1
-        xs[t] = c.states[t][a]
-        a = c.ancestors[t][a]
+        xs[t] = _history_index(c.states[t], a)
+        a = _history_index(c.ancestors[t], a)
     end
-    x0 = c.initial_states[a]
+    x0 = _history_index(c.initial_states, a)
     return ReferenceTrajectory(x0, xs)
 end
 
