@@ -115,6 +115,7 @@ end
 function GeneralisedFilters.simulate(
     rng::AbstractRNG, d::DeviceSamplingDynamics, ::Integer, x::BatchedCuVector{T}
 ) where {T}
+    rng = GeneralisedFilters.gpu_rng(rng)
     rng isa Union{CUDA.RNG,BatchedRNG} ||
         throw(ArgumentError("batched Gaussian sampling requires CUDA.RNG or BatchedRNG"))
     _check_device_model_arrays(T, d.A, d.b, _sampling_storage(d.Q), x.data)
@@ -143,6 +144,7 @@ function GeneralisedFilters.initialise(
     algo::RBPF{<:BootstrapFilter,<:KalmanFilter};
     ref_state=nothing,
 )
+    rng = GeneralisedFilters.gpu_rng(rng)
     rng isa Union{CUDA.RNG,BatchedRNG} ||
         throw(ArgumentError("batched GPU initialisation requires CUDA.RNG or BatchedRNG"))
     algo.af.repair isa NoRepair ||

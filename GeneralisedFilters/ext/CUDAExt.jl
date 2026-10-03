@@ -15,13 +15,31 @@ using GeneralisedFilters: ReferenceTrajectory
 
 using AcceleratedKernels: searchsortedfirst, foreachindex
 using CUDA
-using Random: AbstractRNG
+using Random: Random, AbstractRNG
+
+# Explicit device destinations select the bundled GPU RNG. Allocating ordinary
+# arrays and scalar draws continue to use the CPU child through the core interface.
+Random.rand!(rng::GeneralisedFilters.CombinedRNG, A::CUDA.AnyCuArray) =
+    Random.rand!(GeneralisedFilters.gpu_rng(rng), A)
+Random.randn!(rng::GeneralisedFilters.CombinedRNG, A::CUDA.AnyCuArray) =
+    Random.randn!(GeneralisedFilters.gpu_rng(rng), A)
+# Resolve the intersection with GPUArrays' floating-array fallback.
+Random.randn!(
+    rng::GeneralisedFilters.CombinedRNG,
+    A::CUDA.AnyCuArray{<:Union{AbstractFloat,Complex{<:AbstractFloat}}},
+) = Random.randn!(GeneralisedFilters.gpu_rng(rng), A)
 
 ## GPU RESAMPLING ##########################################################################
 
 # Respect either a host RNG or a CUDA RNG; broadcasts below must use device arrays.
 _device_uniforms(rng::AbstractRNG, ::Type{T}, n::Int) where {T} = CuArray(rand(rng, T, n))
 _uniform_scalar(rng::AbstractRNG, ::Type{T}) where {T} = rand(rng, T)
+function _device_uniforms(rng::GeneralisedFilters.CombinedRNG, ::Type{T}, n::Int) where {T}
+    return Random.rand!(rng, CuArray{T}(undef, n))
+end
+# Systematic offsets and conditional reference offsets are host scalar decisions.
+_uniform_scalar(rng::GeneralisedFilters.CombinedRNG, ::Type{T}) where {T} =
+    rand(GeneralisedFilters.cpu_rng(rng), T)
 # CUDA 6 RNGs provide bulk draws but not Random's host scalar API.
 function _uniform_scalar(rng::CUDA.RNG, ::Type{T}) where {T}
     return only(Array(_device_uniforms(rng, T, 1)))
