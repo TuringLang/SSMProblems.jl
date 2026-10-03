@@ -20,6 +20,7 @@ abstract type AbstractBackwardPredictor <: AbstractSampler end
 
 ## CORE TYPES AND CONTAINERS ###############################################################
 
+include("random.jl")
 include("gaussian.jl")
 include("containers.jl")
 include("resamplers.jl")
