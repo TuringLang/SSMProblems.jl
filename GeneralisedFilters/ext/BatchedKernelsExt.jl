@@ -11,9 +11,11 @@ using BatchedKernels:
     SharedCuVector,
     SharedCuMatrix
 using CUDA
+using Random: AbstractRNG
 
 include("batched_kernels/containers.jl")
 include("batched_kernels/models.jl")
 include("batched_kernels/filtering.jl")
+include("batched_kernels/backward.jl")
 
 end

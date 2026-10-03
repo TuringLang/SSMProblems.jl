@@ -83,7 +83,7 @@
         @test Array(gpu.prior.outer.Σ0) == op.Σ0
         if T === Float32
             # Storage dispatch must not silently accept a host RNG or unsupported
-            # reference trajectories; these checks are independent of precision.
+            # host reference states; these checks are independent of precision.
             @test_throws ArgumentError simulate(rng, gpu.dyn.outer, 7, xpg)
             @test_throws DimensionMismatch inner_dynamics(
                 gpu.dyn.outer, 7, xpg, BatchedCuVector(CUDA.zeros(T, dx, n + 1))

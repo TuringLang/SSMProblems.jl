@@ -30,9 +30,7 @@ function GeneralisedFilters.add_logweight(w::BatchedCuScalar, increment::Batched
     return BatchedCuScalar(w.data .+ increment.data)
 end
 
-function _check_batched_filter(algo::KalmanFilter, ref_state=nothing)
-    isnothing(ref_state) ||
-        throw(ArgumentError("GPU reference trajectories are not supported"))
+function _check_batched_filter(algo::KalmanFilter)
     algo.repair isa NoRepair ||
         throw(ArgumentError("batched Kalman filtering requires NoRepair"))
     return nothing
@@ -49,7 +47,7 @@ function GeneralisedFilters.step(
     y;
     ref_state::Union{Nothing,AbstractVector}=nothing,
 ) where {W,P<:Particle{<:RBState},B<:BatchedStruct{P}}
-    _check_batched_filter(algo.af, ref_state)
+    _check_batched_filter(algo.af)
     return invoke(
         GeneralisedFilters.step,
         Tuple{
@@ -79,16 +77,31 @@ function GeneralisedFilters._predict_rb_population(
     t::Integer,
     particles::BatchedStruct{P},
     observation,
-    ref_state,
+    ref,
 ) where {P<:Particle{<:RBState}}
-    _check_batched_filter(algo.af, ref_state)
+    _check_batched_filter(algo.af)
     fields = GeneralisedFilters._rb_population_fields(particles)
     state = fields.state
     predicted, increment = GeneralisedFilters._predict_rb_state(
-        rng, dyn, algo, t, state, observation, ref_state
+        rng, dyn, algo, t, state, observation, ref
     )
     weights = GeneralisedFilters.add_logweight(fields.log_w, increment)
     return (; state=predicted, log_w=weights, ancestor=fields.ancestor)
+end
+
+# The reference constrains the new outer state, never the gathered old state.
+# Pin before the shared RBPF recipe resolves the conditional inner dynamics.
+function GeneralisedFilters.propagate(
+    rng::AbstractRNG,
+    dyn,
+    algo::BootstrapFilter,
+    t::Integer,
+    state::RBState{<:BatchedCuVector},
+    observation,
+    ref,
+)
+    x = GeneralisedFilters.simulate(rng, dyn, t, state.x)
+    return _pin_reference!(x, ref), GeneralisedFilters.TypelessZero()
 end
 
 function GeneralisedFilters._update_rb_population(
@@ -119,7 +132,7 @@ function GeneralisedFilters.predict(
     observation;
     ref_state=nothing,
 )
-    _check_batched_filter(algo, ref_state)
+    _check_batched_filter(algo)
     return GeneralisedFilters.kalman_predict.(state, dyn)
 end
 

@@ -77,3 +77,40 @@ function GeneralisedFilters.construct_new_state(
     particles = BatchedStruct(Particle, components)
     return ParticleDistribution(particles, zero(W))
 end
+
+# Dense histories retain device populations and share the CPU ancestry/CSMC loops.
+function GeneralisedFilters._history_states(
+    state::ParticleDistribution{W,P,B}
+) where {W,P<:Particle,B<:BatchedStruct{P}}
+    return state.particles.components.state
+end
+function GeneralisedFilters._history_ancestors(
+    state::ParticleDistribution{W,P,B}
+) where {W,P<:Particle,B<:BatchedStruct{P}}
+    return state.particles.components.ancestor.data
+end
+
+# Eager gathering copies every batched leaf, preserving explicitly shared leaves.
+GeneralisedFilters._history_copy(states::BatchedStruct) = states[Base.OneTo(length(states))]
+
+# Compact selected states: a view into the full population would keep its entire
+# allocation alive when a CSMC trajectory is retained for the next sweep.
+GeneralisedFilters._history_index(states::BatchedStruct, i::Integer) = states[[i]][1]
+
+# This is an intentional single-scalar transfer during sequential ancestry tracing.
+function GeneralisedFilters._history_index(xs::CUDA.AnyCuVector, i::Integer)
+    CUDA.@allowscalar xs[i]
+end
+
+function GeneralisedFilters._sample_index(rng::AbstractRNG, weights::CuVector)
+    index = GeneralisedFilters.sample_ancestors(
+        rng, GeneralisedFilters.Multinomial(), weights, 1
+    )
+    return GeneralisedFilters._history_index(index, 1)
+end
+
+function GeneralisedFilters._init_tree(
+    initial::ParticleDistribution, state::ParticleDistribution{W,P,B}
+) where {W,P<:Particle,B<:BatchedStruct{P}}
+    return GeneralisedFilters.DenseParticleContainer(initial, state)
+end

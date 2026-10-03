@@ -71,7 +71,7 @@ function _predict_particles(
     observation,
     ref_state,
 )
-    reference = isnothing(ref_state) ? nothing : _trajectory_state(ref_state, t)
+    reference = _reference_state(ref_state, t)
     fields = _predict_rb_population(rng, dyn, algo, t, particles, observation, reference)
     return _assemble_rb_population(particles, fields)
 end

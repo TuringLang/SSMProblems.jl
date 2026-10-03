@@ -125,6 +125,18 @@ function GeneralisedFilters.simulate(
     return _transition_outer(rng, d.A, d.b, root, x)
 end
 
+# GF retains reference residency/precision validation; BK owns member assignment.
+_pin_reference!(x::BatchedCuVector, ::Nothing) = x
+function _pin_reference!(x::BatchedCuVector{T}, ref) where {T}
+    ref isa CUDA.AnyCuVector{T} || throw(
+        ArgumentError(
+            "GPU reference states must be device vectors matching the particle precision",
+        ),
+    )
+    x[1] = ref
+    return x
+end
+
 function GeneralisedFilters.initialise(
     rng::AbstractRNG,
     p::HierarchicalPrior{<:DeviceSamplingPrior},
@@ -133,8 +145,6 @@ function GeneralisedFilters.initialise(
 )
     rng isa Union{CUDA.RNG,BatchedRNG} ||
         throw(ArgumentError("batched GPU initialisation requires CUDA.RNG or BatchedRNG"))
-    isnothing(ref_state) ||
-        throw(ArgumentError("GPU reference trajectories are not supported"))
     algo.af.repair isa NoRepair ||
         throw(ArgumentError("batched Kalman filtering requires NoRepair"))
     T = eltype(p.outer.μ0)
@@ -146,8 +156,9 @@ function GeneralisedFilters.initialise(
     n = GeneralisedFilters.num_particles(algo)
     n <= typemax(Int32) ||
         throw(ArgumentError("particle count exceeds Int32 ancestor storage"))
+    ref = GeneralisedFilters._reference_state(ref_state, 0)
     root = _sampling_root(p.outer.Σ0)
-    x = _draw_outer(rng, p.outer.μ0, root, n)
+    x = _pin_reference!(_draw_outer(rng, p.outer.μ0, root, n), ref)
     ip = GeneralisedFilters.inner_prior(p, x)
     ip isa BatchedStruct{<:GaussianPrior} || throw(
         ArgumentError("GPU inner_prior must return a BatchedStruct of GaussianPrior atoms"),

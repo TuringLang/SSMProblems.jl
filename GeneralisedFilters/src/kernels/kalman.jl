@@ -131,7 +131,7 @@ function rts_backward_step(
     predicted::Union{Nothing,GaussianState}=nothing,
 )
     pred = isnothing(predicted) ? kalman_predict(filtered, d) : predicted
-    G = filtered.Σ * d.A' / cholesky(Symmetric(pred.Σ))
+    G = (cholesky(Symmetric(pred.Σ)) \ (d.A * filtered.Σ'))'
     μ = filtered.μ + G * (smoothed_next.μ - pred.μ)
     Σ = symmetrise(filtered.Σ + G * (smoothed_next.Σ - pred.Σ) * G')
     return GaussianState(μ, Σ)
@@ -268,21 +268,28 @@ not differentiated by the HMC parameter update.
 """
 struct SqrtBackwardInformationPredictor <: AbstractBackwardPredictor end
 
-function _compress_residual(B, r, logscale)
+# Numerical primitive: compress one or two residual blocks without constructing
+# any filtering objects. Backends may avoid materialising the stacked matrix.
+function _qr_compress_residual(B, r)
     n = size(B, 2)
-    # Padding ensures square output even when there are fewer observations than states.
-    M = vcat(hcat(B, r), zeros(eltype(B), n + 1, n + 1))
-    R = qr(M).R
-    return SqrtInformationLikelihood(
-        R[1:n, 1:n], R[1:n, n + 1], logscale - abs2(R[n + 1, n + 1]) / 2
-    )
+    # Padding also handles fewer residual rows than state dimensions.
+    T = promote_type(eltype(B), eltype(r))
+    R = qr(vcat(hcat(B, r), zeros(T, n + 1, n + 1))).R
+    return R[1:n, 1:n], R[1:n, n + 1], abs2(R[n + 1, n + 1])
 end
-function _compress_residual(B::StaticMatrix{M,N}, r::StaticVector, logscale) where {M,N}
+function _qr_compress_residual(B::StaticMatrix{M,N}, r::StaticVector) where {M,N}
     T = promote_type(eltype(B), eltype(r))
     R = qr(vcat(hcat(B, r), zero(SMatrix{N + 1,N + 1,T}))).R
-    return SqrtInformationLikelihood(
-        R[SOneTo(N), SOneTo(N)], R[SOneTo(N), N + 1], logscale - abs2(R[N + 1, N + 1]) / 2
-    )
+    return R[SOneTo(N), SOneTo(N)], R[SOneTo(N), N + 1], abs2(R[N + 1, N + 1])
+end
+function _qr_compress_residual(B, r, C, q)
+    return _qr_compress_residual(vcat(B, C), vcat(r, q))
+end
+
+# Statistical construction and normalization are shared by every backend.
+function _compress_residual(logscale, residuals...)
+    R, s, energy = _qr_compress_residual(residuals...)
+    return SqrtInformationLikelihood(R, s, logscale - energy / 2)
 end
 
 # Upper root of I + C*C', obtained without forming a potentially ill-conditioned Gram matrix.
@@ -295,6 +302,9 @@ function _identity_plus_root(C::StaticMatrix{M,N,T}) where {M,N,T}
     return _correct_cholesky_sign(qr(vcat(one(SMatrix{M,M,T}), C')).R)
 end
 
+# Log determinant of F*F', retaining support for non-triangular covariance factors.
+_root_logdet(F) = 2 * logabsdet(F)[1]
+
 function backward_initialise(
     ::SqrtBackwardInformationPredictor, o::LinearGaussianObservation, y
 )
@@ -303,8 +313,8 @@ function backward_initialise(
     size(L, 1) == size(L, 2) ||
         throw(ArgumentError("observation noise factor must be square and nonsingular"))
     B, r = L \ o.H, L \ (y - o.c)
-    logscale = -(length(y) * log(2π) + 2 * logabsdet(L)[1]) / 2
-    return _compress_residual(B, r, logscale)
+    logscale = -(length(y) * log(2π) + _root_logdet(L)) / 2
+    return _compress_residual(logscale, B, r)
 end
 function backward_predict(
     ::SqrtBackwardInformationPredictor,
@@ -315,8 +325,8 @@ function backward_predict(
     U = UpperTriangular(_identity_plus_root(C))
     B = U' \ (l.B * d.A)
     r = U' \ (l.r - l.B * d.b)
-    logscale = l.logscale - sum(log, diag(U))
-    return _compress_residual(B, r, logscale)
+    logscale = l.logscale - _root_logdet(U) / 2
+    return _compress_residual(logscale, B, r)
 end
 function backward_update(
     bp::SqrtBackwardInformationPredictor,
@@ -325,7 +335,7 @@ function backward_update(
     y,
 )
     obs = backward_initialise(bp, o, y)
-    return _compress_residual(vcat(l.B, obs.B), vcat(l.r, obs.r), l.logscale + obs.logscale)
+    return _compress_residual(l.logscale + obs.logscale, l.B, l.r, obs.B, obs.r)
 end
 
 _forward_root(g::GaussianState) = _covariance_root(g.Σ)
@@ -344,6 +354,6 @@ function compute_marginal_predictive_likelihood(
     C = l.B * _forward_root(forward)
     U = UpperTriangular(_identity_plus_root(C))
     v = U' \ (l.r - l.B * forward.μ)
-    return (include_constant ? l.logscale : zero(l.logscale)) - sum(log, diag(U)) -
+    return (include_constant ? l.logscale : zero(l.logscale)) - _root_logdet(U) / 2 -
            sum(abs2, v) / 2
 end
