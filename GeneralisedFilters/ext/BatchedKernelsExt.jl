@@ -11,7 +11,7 @@ using BatchedKernels:
     BatchedCuMatrix,
     SharedCuVector,
     SharedCuMatrix
-using BatchedKernels: SharedValue, allocate_batch, check_batch_copy
+using BatchedKernels: SharedScalar, SharedValue, allocate_batch, check_batch_copy
 using CUDA
 using Random: AbstractRNG
 

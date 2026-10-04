@@ -10,7 +10,7 @@ remain host-controlled; particle sampling, Gaussian updates, weights and ancesto
 gathering operate on the GPU.
 
 This example requires the current GeneralisedFilters development checkout,
-BatchedKernels 0.2.2 or later in the 0.2 series, and a CUDA GPU.
+BatchedKernels 0.3, and a CUDA GPU.
 The ordinary documentation build does not execute GPU examples.
 
 ## Model and execution
@@ -74,6 +74,13 @@ without copying their storage. During ancestor sampling and backward simulation,
 selected next state. Custom batch methods should accept both batched and shared
 next states. In this example, a shared next volatility also makes `Q` shared.
 
+`Float32` and `Float64` fields passed through `shared(atom, N)` are runtime inputs: their
+values can change between calls without recompiling the fused kernel. This includes
+the backward likelihood's `logscale`. Use BK's `literal(value, N)` only for deliberate
+compile-time configuration; integer or Boolean configuration fields require this
+explicit choice. Runtime scalar fields need parameterised field types, and
+runtime-dependent branching inside fused functions is not supported.
+
 ## Reference trajectories
 
 Pass the existing `ref_state` keyword to fix particle 1's outer trajectory.
@@ -101,7 +108,8 @@ Sampling currently draws the full batch before replacing particle 1, so
 random-stream consumption need not match the CPU implementation.
 
 `ConditionalSMC` with `NoRefreshment()` uses the same sampling loop as on the CPU,
-with dense GPU history. The returned reference contains compact device vectors:
+with sparse GPU history of the outer states. The returned reference contains
+compact device vectors:
 
 ```julia
 using AbstractMCMC
@@ -122,9 +130,10 @@ Use `ConditionalSMC(algo, AncestorSampling())` or
 the default square-root Gaussian backward predictor, sharing the CPU time loops
 and backward-weight formula. With `GPUExecution()`, selected-path likelihoods use the model’s CPU methods;
 only selected outer states and observations are downloaded. Small Gaussian messages
-are uploaded for population scoring, which stays on the GPU. Both strategies
-currently retain dense history. The outer Gaussian transition must have a nonsingular covariance for its
-density to be defined.
+are uploaded for population scoring, which stays on the GPU. Ancestor sampling
+uses sparse outer-state history; backward simulation retains full dense history
+because it needs all past candidate states and Gaussian beliefs. The outer Gaussian
+transition must have a nonsingular covariance for its density to be defined.
 
 To smooth the inner Gaussian process conditional on a sampled outer trajectory,
 use the ordinary conditional-model and Kalman-smoother interface:

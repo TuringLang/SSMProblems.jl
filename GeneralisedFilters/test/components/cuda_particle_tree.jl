@@ -84,9 +84,10 @@ end
     using GeneralisedFilters, BatchedKernels, CUDA, LinearAlgebra
     const GF = GeneralisedFilters
     CUDA.allowscalar(false)
-    struct TaggedState{R,I}
+    struct TaggedState{R,I,S}
         state::R
         tag::I
+        scale::S
     end
     n = 5
     function states(t)
@@ -101,7 +102,12 @@ end
             RBState, (; x=BatchedCuVector(CUDA.fill(Float32(3t), 1, n)), z=belief)
         )
         BatchedStruct(
-            TaggedState, (; state=rb, tag=BatchedCuScalar(CuArray(Int64.(2^40 .+ (1:n)))))
+            TaggedState,
+            (;
+                state=rb,
+                tag=BatchedCuScalar(CuArray(Int64.(2^40 .+ (1:n)))),
+                scale=shared(Float32(t) / 10.0f0, n),
+            ),
         )
     end
     # A completely different initial structure must not be cast to the later one.
@@ -122,6 +128,8 @@ end
     @test !Base.mightalias(xstorage, tree.states.components.state.components.x.data)
     insert!(tree, states(6), CuArray(Int64[1, 1, 1, 1, 1]))
     @test only(Array(path[5].state.x)) == 15.0f0
+    # Runtime shared scalars must become owned per-slot values in the tree.
+    @test [s.scale for s in path.xs] == Float32.(1:5) ./ 10.0f0
     @test all(p -> length(p) == 7, get_ancestry(tree))
 
     # Public histories keep RB beliefs; CSMC's recorder projects only the outer x.

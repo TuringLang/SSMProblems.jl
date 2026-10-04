@@ -110,9 +110,10 @@ an ordinary vector. The same ownership rule applies to any mutable arrays they c
 With CUDA and BatchedKernels loaded, the same `ParticleTree(initial, first_state)`
 and `push!` interface stores batched GPU populations in a sparse device pool.
 Supported payloads include scalar, vector and matrix batches and nested
-`BatchedStruct`s, including full `RBState` values. All numerical leaves must reside
-on the active CUDA device. Initial states have a separate fixed buffer and may have
-a different type or structure from later states. Later populations must retain
+`BatchedStruct`s, including full `RBState` values. Numerical array leaves must reside
+on the active CUDA device; shared scalar values are also supported. Initial states
+have a separate fixed buffer and may have a different type or structure from later
+states. Later populations must retain
 compatible scalar types, inner dimensions and composite structure. Ancestry may use
 device vectors of `Int32` or `Int64`; tree metadata uses `Int64`.
 

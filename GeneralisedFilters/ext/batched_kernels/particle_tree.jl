@@ -5,6 +5,7 @@ const TreeBatch = Union{
     BatchedStruct,
     SharedCuVector,
     SharedCuMatrix,
+    SharedScalar,
     SharedValue,
 }
 
@@ -13,7 +14,7 @@ function GeneralisedFilters._tree_device(
 )
     return x.data isa CUDA.AnyCuArray && CUDA.device(x.data) == CUDA.device()
 end
-GeneralisedFilters._tree_device(x::SharedValue) = true
+GeneralisedFilters._tree_device(x::Union{SharedScalar,SharedValue}) = true
 function GeneralisedFilters._tree_device(x::BatchedStruct)
     return all(GeneralisedFilters._tree_device, values(x.components))
 end

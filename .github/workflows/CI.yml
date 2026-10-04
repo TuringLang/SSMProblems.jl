@@ -90,7 +90,7 @@ jobs:
           fail_ci_if_error: true
 
   test-gpu:
-    name: GeneralisedFilters - CUDA Extension Load Check
+    name: GeneralisedFilters - GPU Extension Load Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -112,13 +112,14 @@ jobs:
             Pkg.develop(PackageSpec(path="SSMProblems"));
             Pkg.instantiate();'
 
-      - name: Check CUDA extension loading
+      - name: Check CUDA and BatchedKernels extension loading
         run: |
           julia --project=GeneralisedFilters --color=yes -e '
             using Pkg;
-            # Load the optional extension without requiring a GPU
-            Pkg.add("CUDA");
-            using CUDA;
-            using GeneralisedFilters;
-            println("GeneralisedFilters with CUDA loaded successfully");
+            # Load both optional extensions without requiring a GPU
+            Pkg.add(["CUDA", "BatchedKernels"]);
+            using CUDA, BatchedKernels, GeneralisedFilters;
+            @assert Base.get_extension(GeneralisedFilters, :CUDAExt) !== nothing;
+            @assert Base.get_extension(GeneralisedFilters, :BatchedKernelsExt) !== nothing;
+            println("GeneralisedFilters CUDA and BatchedKernels extensions loaded successfully");
             println("CUDA functional: ", CUDA.functional())'
