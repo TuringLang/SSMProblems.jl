@@ -12,8 +12,22 @@
         @test gpu_rng(reference) === reference
 
         # Scalar samplers, optimized dense bulk paths, and distribution clients.
-        for T in (Bool, Int8, UInt8, Int16, UInt16, Int32, UInt32, Int64, UInt64,
-                  Int128, UInt128, Float16, Float32, Float64)
+        for T in (
+            Bool,
+            Int8,
+            UInt8,
+            Int16,
+            UInt16,
+            Int32,
+            UInt32,
+            Int64,
+            UInt64,
+            Int128,
+            UInt128,
+            Float16,
+            Float32,
+            Float64,
+        )
             @test rand(bundle, T) == rand(reference, T)
         end
         @test rand(bundle) == rand(reference)
@@ -33,9 +47,13 @@
             f(reference, expected)
             @test actual == expected
         end
-        for distribution in (Normal(), Gamma(2), Categorical([0.2, 0.8]),
-                             MvNormal([0.0, 0.0], [1.0 0.2; 0.2 1.0]),
-                             Dirichlet([1.0, 2.0]))
+        for distribution in (
+            Normal(),
+            Gamma(2),
+            Categorical([0.2, 0.8]),
+            MvNormal([0.0, 0.0], [1.0 0.2; 0.2 1.0]),
+            Dirichlet([1.0, 2.0]),
+        )
             @test rand(bundle, distribution) == rand(reference, distribution)
             @test rand(bundle, distribution, 10) == rand(reference, distribution, 10)
         end

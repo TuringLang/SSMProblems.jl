@@ -1,4 +1,6 @@
-@testitem "CombinedRNG routes GPU draws and replays complete filtering" tags = [:gpu, :batched] begin
+@testitem "CombinedRNG routes GPU draws and replays complete filtering" tags = [
+    :gpu, :batched
+] begin
     using CUDA, BatchedKernels, Random, AbstractMCMC
     const GF = GeneralisedFilters
     CUDA.allowscalar(false)
@@ -44,20 +46,25 @@
     struct BundleObservation end
     function GF.inner_observation(::BundleObservation, ::Integer, x::BatchedCuVector)
         n = length(x)
-        return BatchedStruct(LinearGaussianObservation, (;
-            H=SharedCuMatrix(CUDA.ones(Float32, 1, 1), n), c=x,
-            R=SharedCuMatrix(CUDA.fill(0.2f0, 1, 1), n),
-        ))
+        return BatchedStruct(
+            LinearGaussianObservation,
+            (;
+                H=SharedCuMatrix(CUDA.ones(Float32, 1, 1), n),
+                c=x,
+                R=SharedCuMatrix(CUDA.fill(0.2f0, 1, 1), n),
+            ),
+        )
     end
     model = StateSpaceModel(
         GaussianPrior(CUDA.zeros(Float32, 1), CUDA.ones(Float32, 1, 1)),
         LinearGaussianDynamics(
-            CUDA.fill(0.8f0, 1, 1), CUDA.zeros(Float32, 1),
+            CUDA.fill(0.8f0, 1, 1),
+            CUDA.zeros(Float32, 1),
             CovarianceFactor(CUDA.fill(0.2f0, 1, 1)),
         ),
         GaussianPrior(CUDA.zeros(Float32, 1), CUDA.ones(Float32, 1, 1)),
         LinearGaussianDynamics(
-            CUDA.fill(0.7f0, 1, 1), CUDA.zeros(Float32, 1), CUDA.fill(0.1f0, 1, 1),
+            CUDA.fill(0.7f0, 1, 1), CUDA.zeros(Float32, 1), CUDA.fill(0.1f0, 1, 1)
         ),
         BundleObservation(),
     )
@@ -74,10 +81,12 @@
         draw_rng = CombinedRNG(Xoshiro(19), BatchedRNG(20))
         draw_replay = copy(draw_rng)
         ancestors = GF.sample_ancestors(draw_rng, scheme, weights, 31)
-        @test Array(ancestors) == Array(GF.sample_ancestors(draw_replay, scheme, weights, 31))
+        @test Array(ancestors) ==
+            Array(GF.sample_ancestors(draw_replay, scheme, weights, 31))
         @test all(i -> 1 <= i <= 4, Array(ancestors))
         conditional = GF.conditional_sample_ancestors(draw_rng, scheme, weights, 3)
-        @test Array(conditional) == Array(GF.conditional_sample_ancestors(draw_replay, scheme, weights, 3))
+        @test Array(conditional) ==
+            Array(GF.conditional_sample_ancestors(draw_replay, scheme, weights, 3))
         @test Array(conditional)[1] == 3
         algo = RBPF(BF(31; threshold=1.0, resampler=scheme), KF())
         local rng = CombinedRNG(Xoshiro(21), BatchedRNG(22))
@@ -108,7 +117,9 @@
         trajectory(draw) = [Array(x) for x in draw.trajectory]
         @test trajectory(draw) == trajectory(replay_draw)
         draw, state = AbstractMCMC.step(chain_rng, csmc_model, sampler, state)
-        replay_draw, replay_state = AbstractMCMC.step(chain_replay, csmc_model, sampler, replay_state)
+        replay_draw, replay_state = AbstractMCMC.step(
+            chain_replay, csmc_model, sampler, replay_state
+        )
         @test trajectory(draw) == trajectory(replay_draw)
     end
 end

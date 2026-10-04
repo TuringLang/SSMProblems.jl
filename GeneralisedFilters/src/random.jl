@@ -26,9 +26,13 @@ struct CombinedRNG{C<:AbstractRNG,G<:AbstractRNG} <: AbstractRNG
     function CombinedRNG(cpu::C, gpu::G) where {C<:AbstractRNG,G<:AbstractRNG}
         (cpu isa CombinedRNG || gpu isa CombinedRNG) &&
             throw(ArgumentError("CombinedRNG children must not be nested bundles"))
-        (cpu isa Random.TaskLocalRNG || gpu isa Random.TaskLocalRNG) &&
-            throw(ArgumentError("CombinedRNG requires explicit RNGs; use Xoshiro() instead of TaskLocalRNG()"))
-        cpu === gpu && throw(ArgumentError("CombinedRNG requires distinct CPU and GPU generators"))
+        (cpu isa Random.TaskLocalRNG || gpu isa Random.TaskLocalRNG) && throw(
+            ArgumentError(
+                "CombinedRNG requires explicit RNGs; use Xoshiro() instead of TaskLocalRNG()",
+            ),
+        )
+        cpu === gpu &&
+            throw(ArgumentError("CombinedRNG requires distinct CPU and GPU generators"))
         return new{C,G}(cpu, gpu)
     end
 end
@@ -65,8 +69,20 @@ end
 # Keep methods narrow: forwarding arbitrary rand arguments conflicts with the
 # distribution and sampler methods provided by Random and Distributions.
 const _CombinedRNGPrimitive = Union{
-    Bool,Int8,UInt8,Int16,UInt16,Int32,UInt32,Int64,UInt64,Int128,UInt128,
-    Float16,Float32,Float64,
+    Bool,
+    Int8,
+    UInt8,
+    Int16,
+    UInt16,
+    Int32,
+    UInt32,
+    Int64,
+    UInt64,
+    Int128,
+    UInt128,
+    Float16,
+    Float32,
+    Float64,
 }
 Random.rand(rng::CombinedRNG) = rand(rng.cpu)
 Random.rand(rng::CombinedRNG, range::AbstractRange) = rand(rng.cpu, range)
@@ -79,23 +95,25 @@ end
 # Random's generic uniform/range samplers require this internal trait. Keep these
 # compatibility hooks local and cover them with supported-version tests.
 Random.rng_native_52(rng::CombinedRNG) = Random.rng_native_52(rng.cpu)
-Random.rand(rng::CombinedRNG, sampler::Random.SamplerTrivial{Random.UInt52Raw{UInt64}}) =
-    rand(rng.cpu, sampler)
+function Random.rand(
+    rng::CombinedRNG, sampler::Random.SamplerTrivial{Random.UInt52Raw{UInt64}}
+)
+    return rand(rng.cpu, sampler)
+end
 
 Random.randn(rng::CombinedRNG) = randn(rng.cpu)
 Random.randexp(rng::CombinedRNG) = Random.randexp(rng.cpu)
 for f in (:randn, :randexp)
-    @eval Random.$f(
-        rng::CombinedRNG, T::Union{Type{Float16},Type{Float32},Type{Float64}}
-    ) = Random.$f(rng.cpu, T)
+    @eval Random.$f(rng::CombinedRNG, T::Union{Type{Float16},Type{Float32},Type{Float64}}) =
+        Random.$f(rng.cpu, T)
 end
-Random.randn(rng::CombinedRNG, ::Type{Complex{T}}) where {T<:AbstractFloat} =
-    randn(rng.cpu, Complex{T})
+function Random.randn(rng::CombinedRNG, ::Type{Complex{T}}) where {T<:AbstractFloat}
+    return randn(rng.cpu, Complex{T})
+end
 
 # Forward dense bulk paths to retain the CPU child's optimized implementations.
 # Other CPU containers can use Random's generic elementwise sampler machinery.
 Random.rand!(rng::CombinedRNG, A::Array) = Random.rand!(rng.cpu, A)
-Random.rand!(rng::CombinedRNG, A::Array, ::Type{T}) where {T} =
-    Random.rand!(rng.cpu, A, T)
+Random.rand!(rng::CombinedRNG, A::Array, ::Type{T}) where {T} = Random.rand!(rng.cpu, A, T)
 Random.randn!(rng::CombinedRNG, A::Array{T}) where {T} = Random.randn!(rng.cpu, A)
 Random.randexp!(rng::CombinedRNG, A::Array{T}) where {T} = Random.randexp!(rng.cpu, A)

@@ -5,14 +5,11 @@
 
     function build_model(θ)
         return create_homogeneous_linear_gaussian_model(
-            [0.0], [1.0;;], [0.8;;], [θ[1]], [0.1;;],
-            [1.0;;], [0.0], [0.5;;],
+            [0.0], [1.0;;], [0.8;;], [θ[1]], [0.1;;], [1.0;;], [0.0], [0.5;;]
         )
     end
     _, _, ys = simulate(Xoshiro(42), build_model([0.2]), 5)
-    model = ParticleGibbsModel(
-        MvNormal([0.0], [4.0;;]), ParameterisedSSM(build_model, ys)
-    )
+    model = ParticleGibbsModel(MvNormal([0.0], [4.0;;]), ParameterisedSSM(build_model, ys))
     sampler = ParticleGibbs(
         ConditionalSMC(BF(10; resampler=GeneralisedFilters.Multinomial())), NUTS(0.8)
     )
@@ -49,20 +46,35 @@ end
 
     fresh() = CombinedRNG(Xoshiro(71), Xoshiro(93))
     serial = AbstractMCMC.sample(
-        fresh(), BundleProbeModel(), BundleProbeSampler(), AbstractMCMC.MCMCSerial(),
-        4, 3; progress=false,
+        fresh(),
+        BundleProbeModel(),
+        BundleProbeSampler(),
+        AbstractMCMC.MCMCSerial(),
+        4,
+        3;
+        progress=false,
     )
     replay = AbstractMCMC.sample(
-        fresh(), BundleProbeModel(), BundleProbeSampler(), AbstractMCMC.MCMCSerial(),
-        4, 3; progress=false,
+        fresh(),
+        BundleProbeModel(),
+        BundleProbeSampler(),
+        AbstractMCMC.MCMCSerial(),
+        4,
+        3;
+        progress=false,
     )
     @test serial == replay
     @test length(unique(first(chain)[1] for chain in serial)) == 3
     @test length(unique(first(chain)[2] for chain in serial)) == 3
     if Threads.nthreads() > 1
         threaded = AbstractMCMC.sample(
-            fresh(), BundleProbeModel(), BundleProbeSampler(), AbstractMCMC.MCMCThreads(),
-            4, 3; progress=false,
+            fresh(),
+            BundleProbeModel(),
+            BundleProbeSampler(),
+            AbstractMCMC.MCMCThreads(),
+            4,
+            3;
+            progress=false,
         )
         @test threaded == serial
     end
