@@ -121,9 +121,10 @@ individual indices to the CPU, without downloading particle populations.
 Use `ConditionalSMC(algo, AncestorSampling())` or
 `ConditionalSMC(algo, BackwardSimulation())` for trajectory refreshment. These use
 the default square-root Gaussian backward predictor, sharing the CPU time loops
-and backward-weight formula. Population weights run on the GPU; selected-path
-likelihood updates use batches of size one. Both strategies currently retain dense
-history. The outer Gaussian transition must have a nonsingular covariance for its
+and backward-weight formula. With `GPUExecution()`, selected-path likelihoods use the model’s CPU methods;
+only selected outer states and observations are downloaded. Small Gaussian messages
+are uploaded for population scoring, which stays on the GPU. Both strategies
+currently retain dense history. The outer Gaussian transition must have a nonsingular covariance for its
 density to be defined.
 
 To smooth the inner Gaussian process conditional on a sampled outer trajectory,

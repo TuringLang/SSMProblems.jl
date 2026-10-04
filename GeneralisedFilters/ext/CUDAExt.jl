@@ -29,6 +29,8 @@ Random.randn!(
     A::CUDA.AnyCuArray{<:Union{AbstractFloat,Complex{<:AbstractFloat}}},
 ) = Random.randn!(GeneralisedFilters.gpu_rng(rng), A)
 
+GeneralisedFilters._host_array(x::CUDA.AnyCuArray) = Array(x)
+
 ## GPU RESAMPLING ##########################################################################
 
 # Respect either a host RNG or a CUDA RNG; broadcasts below must use device arrays.

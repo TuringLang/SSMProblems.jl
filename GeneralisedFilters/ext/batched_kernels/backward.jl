@@ -63,6 +63,18 @@ function GF.compute_marginal_predictive_likelihood(
     return GF.compute_marginal_predictive_likelihood.(states, shared(l, length(states)))
 end
 
+# A CPU suffix message is small and shared by all candidates. Match the population
+# precision at the scoring boundary; no candidate states leave the device.
+function GF.compute_marginal_predictive_likelihood(
+    states::BatchedStruct{<:GaussianState}, l::SqrtInformationLikelihood
+)
+    T = eltype(states.components.μ.data)
+    device_likelihood = SqrtInformationLikelihood(
+        CuArray{T}(l.B), CuArray{T}(l.r), T(l.logscale)
+    )
+    return GF.compute_marginal_predictive_likelihood(states, device_likelihood)
+end
+
 function GF.inner_dynamics(
     d::HierarchicalDynamics, t::Integer, xp::BatchedCuVector, xn::CUDA.AnyCuVector
 )

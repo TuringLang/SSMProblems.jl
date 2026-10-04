@@ -18,6 +18,8 @@
         cl=GF._compute_backward_likelihoods(
             Xoshiro(5), model, pf, cy, cr, AncestorSampling()
         )
+        # CPU suffix messages are uploaded only when scoring the device population.
+        @test all(l -> !(l.B isa CUDA.AnyCuArray) && !(l.r isa CUDA.AnyCuArray), gl)
         for (g, c) in zip(gl, cl)
             @test Array(g.B)'*Array(g.B) ≈ c.B'*c.B rtol=2.0f-4 atol=2.0f-5
             @test Array(g.B)'*Array(g.r) ≈ c.B'*c.r rtol=2.0f-4 atol=2.0f-5

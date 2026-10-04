@@ -255,6 +255,8 @@ function _compute_backward_likelihoods(
     rng::AbstractRNG, model::HierarchicalSSM, pf::RBPF, observations, ref_state, strategy
 )
     isnothing(ref_state) && return nothing
+    observations = _path_values(execution(pf), observations)
+    ref_state = _path_values(execution(pf), ref_state)
     K = length(observations)
     bp = _backward_predictor(pf, strategy)
     pred_lik = _backward_start(bp, model, pf, K, observations[K], ref_state[K])
@@ -386,6 +388,10 @@ end
 
 ## BACKWARD SIMULATION HELPERS #############################################################
 
+# Only the selected outer state is needed by the backward recursion; do not
+# download its Gaussian belief or any historical particle population.
+_path_value(ex::GPUExecution, state::RBState) = RBState(_host_array(state.x), state.z)
+
 # Backward simulation recomputes each suffix likelihood using the selected outer path.
 _bs_init_back_lik(rng, model, pf, observations, K, state_K, strategy) = nothing
 function _bs_init_back_lik(
@@ -447,14 +453,16 @@ function _csmc_sample(
     # Backward simulation pass
     idx = _sample_index(rng, get_weights(state))
     sampled_state = _history_index(container.states[K], idx)
+    path_observations = _path_values(execution(pf), observations)
+    path_next = _path_value(execution(pf), sampled_state)
 
     back_lik = _bs_init_back_lik(
         rng,
         model,
         _refreshment_filter(pf),
-        observations,
+        path_observations,
         K,
-        sampled_state,
+        path_next,
         csmc.refreshment,
     )
 
@@ -466,6 +474,7 @@ function _csmc_sample(
         backward_ws = _ancestor_weights(container, t, model.dyn, pf, t + 1, ref_next)
         idx = _sample_index(rng, softmax(backward_ws))
         xs[t] = _history_index(container.states[t], idx)
+        path_previous = _path_value(execution(pf), xs[t])
 
         back_lik = _bs_step_back_lik(
             rng,
@@ -473,11 +482,12 @@ function _csmc_sample(
             _refreshment_filter(pf),
             t,
             back_lik,
-            observations,
-            xs[t],
-            xs[t + 1],
+            path_observations,
+            path_previous,
+            path_next,
             csmc.refreshment,
         )
+        path_next = path_previous
     end
 
     # Time 0: backward step from t=1 to initial particles.

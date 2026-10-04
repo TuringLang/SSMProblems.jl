@@ -22,7 +22,9 @@ struct SerialExecution <: AbstractExecution end
 
 Initialise a device particle population using the model's GPU initialisation method.
 Subsequent operations dispatch on that population's storage, while time iteration and
-scalar decisions remain host-controlled. This setting does not automatically upload
+scalar decisions and CSMC selected-path likelihoods run on the CPU. The same model
+must support CPU component resolution as well as batched device methods.
+This setting does not automatically upload
 an arbitrary CPU model or make its callbacks GPU-compatible.
 
 Model implementations can extend `initialise(::GPUExecution, rng, prior, algo; ref_state)`
@@ -152,3 +154,11 @@ function _mix64(z::UInt64)
     z = (z ⊻ (z >> 27)) * 0x94d049bb133111eb
     return z ⊻ (z >> 31)
 end
+
+# Small selected-path inputs cross the device boundary independently of populations.
+# CPU values (including StaticArrays) keep their representation and ownership.
+_host_array(x) = x
+_path_value(::AbstractExecution, x) = x
+_path_value(::GPUExecution, x) = _host_array(x)
+_path_values(::AbstractExecution, xs) = xs
+_path_values(ex::GPUExecution, xs) = map(x -> _path_value(ex, x), xs)
