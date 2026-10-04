@@ -58,7 +58,9 @@
         @test isconcretetype(eltype(d))
         @test Array(fuse(transition_mean, d, zg).data) ≈ id.A * z .+ id.C * xp .+ id.b
         @test Array(fuse(observation_mean, o, zg).data) ≈ ob.H * z .+ ob.c
-        constant = inner_dynamics(gpu.dyn.outer, 7, xpg, xng)
+        constant = inner_dynamics(
+            gpu.dyn.outer, 7, xpg, SharedCuVector(CuArray(xn[:, 1]), n)
+        )
         @test constant.components.A.data === gpu.dyn.outer.A
         @test constant.components.Q isa SharedCuMatrix
 

@@ -5,6 +5,7 @@ using BatchedKernels:
     BatchedStruct,
     BatchedRNG,
     fuse,
+    shared,
     BatchedCuScalar,
     BatchedCuVector,
     BatchedCuMatrix,

@@ -4,8 +4,11 @@ export initialise, step, predict, update, filter
 
 """
     initialise([rng,] prior, algo; ref_state=nothing)
+    initialise(execution, rng, prior, particle_filter; ref_state=nothing)
 
 Construct the initial state representation from the prior for a filtering algorithm.
+Particle filters delegate to the execution-aware overload to choose population storage.
+Once initialised, subsequent operations dispatch on the state representation.
 """
 function initialise end
 

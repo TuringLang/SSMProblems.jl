@@ -1,4 +1,4 @@
-export AbstractExecution, SerialExecution, ThreadedExecution
+export AbstractExecution, SerialExecution, ThreadedExecution, GPUExecution
 
 """
     AbstractExecution
@@ -16,6 +16,20 @@ Evaluate particles in order on the calling task, drawing directly from the filte
 number generator. This is the default.
 """
 struct SerialExecution <: AbstractExecution end
+
+"""
+    GPUExecution()
+
+Initialise a device particle population using the model's GPU initialisation method.
+Subsequent operations dispatch on that population's storage, while time iteration and
+scalar decisions remain host-controlled. This setting does not automatically upload
+an arbitrary CPU model or make its callbacks GPU-compatible.
+
+Model implementations can extend `initialise(::GPUExecution, rng, prior, algo; ref_state)`
+to select their resident device parameters and construct batched particle storage.
+The BatchedKernels extension provides this method for supported device Gaussian priors.
+"""
+struct GPUExecution <: AbstractExecution end
 
 """
     ThreadedExecution(; blocksize=32, ntasks=nothing)

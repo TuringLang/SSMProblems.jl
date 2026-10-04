@@ -24,12 +24,12 @@ StaticArrays, with both development packages selected using `Pkg.develop(path=..
 include("examples/gpu-rbpf/model.jl")
 using .GPUVolatilityExample, GeneralisedFilters, CUDA, BatchedKernels, Random
 CUDA.allowscalar(false)
-cpu_model, gpu_model = GPUVolatilityExample.models(16, 4, Float32)
-ys = GPUVolatilityExample.observations(cpu_model, 20)
+ssm = GPUVolatilityExample.model(16, 4, Float32)
+ys = GPUVolatilityExample.observations(ssm, 20)
 device_ys = [CuArray(Vector(y)) for y in ys]
-algo = RBPF(BF(8192; threshold=0.5), KF())
+algo = RBPF(BF(8192; threshold=0.5, execution=GPUExecution()), KF())
 rng = CombinedRNG(Xoshiro(1), BatchedRNG(2))
-state, log_evidence = GeneralisedFilters.filter(rng, gpu_model, algo, device_ys)
+state, log_evidence = GeneralisedFilters.filter(rng, ssm, algo, device_ys)
 mean = GPUVolatilityExample.inner_mean(state)
 ```
 
@@ -46,8 +46,7 @@ streams; it does not split them into independent streams. `Random.seed!(rng, see
 resets both children, deriving the GPU seed from a separately seeded CPU copy.
 Use an explicit CPU generator such as `Xoshiro`; `TaskLocalRNG` is unsupported
 because it does not provide independently owned checkpoint state. The original
-single-`CUDA.RNG` route remains supported. The older `filter_gpu` example helper
-is available for callers managing particle and resampling generators separately.
+single-`CUDA.RNG` route remains supported.
 
 The outer state is scalar log volatility. Conditional on it, a 16-dimensional
 Gaussian factor process has process covariance `exp(x_t) * Q`. Each particle thus
@@ -55,12 +54,26 @@ has its own covariance evolution. The observation dimension is four. Fixed model
 arrays and observations are uploaded before filtering; only the final mean is
 downloaded in this example.
 
-`VolatilityDynamics` defines an ordinary conditional CPU model and an explicit
-`inner_dynamics` batch method. That method returns a `BatchedStruct` of the existing
-`LinearGaussianDynamics` type, with `SharedCuMatrix`/`SharedCuVector` for constant
-`A` and `b` and a `BatchedCuMatrix` for particle-dependent `Q`. Sharing is declared
-by storage, never inferred by comparing values. Initialisation dispatches on the
-device-backed outer Gaussian prior; there is no preparation object.
+The same `ssm` supports CPU filtering by using `RBPF(BF(8192), KF())` with `ys`.
+`GPUExecution()` selects batched initialisation; later operations dispatch on the
+particle storage. Model authors define
+`initialise(::GPUExecution, rng, prior, algo; ref_state)` to select resident device
+parameters. The example delegates that method to the existing Gaussian initialiser.
+
+The model owns fixed CPU parameters and device arrays uploaded once at construction.
+Its components return ordinary atoms for CPU states and `BatchedStruct` atoms for
+batched states. `InnerDynamics` shares `A` and `b`, while `Q` varies with volatility.
+Treat the fixed storage as read-only. To vary the process-noise scale, construct
+`GPUVolatilityExample.model(fixed, logscale)` using the same `fixed_parameters(...)`
+object. Only the scalar parameter changes; CPU differentiation does not upload
+Dual values. GPU differentiation and automatic hybrid particle-Gibbs orchestration
+are not provided by this example.
+
+For an entirely shared device model atom, use `shared(atom, N)` to wrap its fields
+without copying their storage. During ancestor sampling and backward simulation,
+`inner_dynamics` receives batched candidate parents and a `SharedCuVector` for the
+selected next state. Custom batch methods should accept both batched and shared
+next states. In this example, a shared next volatility also makes `Q` shared.
 
 ## Reference trajectories
 
@@ -75,7 +88,7 @@ reference = ReferenceTrajectory(
     CuArray(Float32[0]), [CuArray(Float32[0]) for _ in ys]
 )
 state, log_evidence = GeneralisedFilters.filter(
-    rng, gpu_model, algo, device_ys; ref_state=reference
+    rng, ssm, algo, device_ys; ref_state=reference
 )
 ```
 
@@ -94,7 +107,7 @@ with dense GPU history. The returned reference contains compact device vectors:
 ```julia
 using AbstractMCMC
 sampler = ConditionalSMC(algo)  # NoRefreshment()
-model = CSMCModel(gpu_model, device_ys)
+model = CSMCModel(ssm, device_ys)
 rng = CombinedRNG(Xoshiro(3), BatchedRNG(4))
 sample, sampler_state = AbstractMCMC.step(rng, model, sampler)
 sample, sampler_state = AbstractMCMC.step(rng, model, sampler, sampler_state)
@@ -117,7 +130,7 @@ To smooth the inner Gaussian process conditional on a sampled outer trajectory,
 use the ordinary conditional-model and Kalman-smoother interface:
 
 ```julia
-conditional_model = condition_inner(gpu_model, trajectory)
+conditional_model = condition_inner(ssm, trajectory)
 smoothed, conditional_log_evidence = GeneralisedFilters.smooth(
     rng, conditional_model, KS, device_ys; t_smooth=1
 )
@@ -128,13 +141,25 @@ This returns the conditional Gaussian marginal at `t_smooth`; its mean and covar
 remain on device. Model resolution and Gaussian calculations use batches of size one,
 while the same smoothing time loop serves CPU and GPU models.
 
+For small inner states, conditional smoothing can be faster on the CPU. Transfer
+only the selected outer trajectory and use the same model with CPU observations:
+
+```julia
+host_trajectory = map(Array, trajectory)
+smoothed_cpu, conditional_log_evidence = GeneralisedFilters.smooth(
+    rng, condition_inner(ssm, host_trajectory), KS, ys; t_smooth=1
+)
+```
+
 ## Supported boundary
 
 The initial route supports bootstrap RBPF with a covariance-form Kalman filter,
 `NoRepair`, device Gaussian outer sampling, explicit batch model methods and device
 observation vectors. It returns the final particle population and log evidence.
-The `SerialExecution` and `ThreadedExecution` settings control CPU population traversal;
-device-backed populations use BatchedKernels regardless of that setting.
+`SerialExecution` and `ThreadedExecution` select CPU populations for the example;
+`GPUExecution` selects batched populations. The existing device-backed Gaussian-prior
+route also remains supported. Execution settings do not automatically convert
+arbitrary CPU callbacks or parameters into GPU implementations.
 GPU AD and arbitrary GPU samplers are outside this example. Filtering summaries can be reduced on device as shown above.
 
 Models must provide valid covariance matrices. A finiteness check rejects

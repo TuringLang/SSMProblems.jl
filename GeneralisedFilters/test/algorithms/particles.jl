@@ -116,6 +116,11 @@ end
     using LogExpFunctions: logsumexp
     const GF = GeneralisedFilters
 
+    # An execution request must not silently fall back to CPU particle storage.
+    @test_throws ArgumentError initialise(
+        Xoshiro(1), GaussianPrior([0.0], [1.0;;]), BF(3; execution=GPUExecution())
+    )
+
     struct HookDynamics <: GF.LatentDynamics end
     struct HookObservation <: GF.ObservationProcess end
     function GF.predict_particle(

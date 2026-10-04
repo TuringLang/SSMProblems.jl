@@ -34,7 +34,10 @@
         )
     end
     function GF.inner_dynamics(
-        d::ReferenceInner, ::Integer, xp::BatchedCuVector, xn::BatchedCuVector
+        d::ReferenceInner,
+        ::Integer,
+        xp::BatchedCuVector,
+        xn::Union{BatchedCuVector,SharedCuVector},
     )
         n = length(xp)
         return BatchedStruct(
@@ -73,6 +76,11 @@
         algo = RBPF(BF(n), KF())
         state = initialise(CUDA.RNG(9), model.prior, algo; ref_state=reference)
         initial = state
+        # A shared next state must not make the candidate-parent contribution shared.
+        parents = initial.particles.components.state.components.x
+        dynamics = GF.inner_dynamics(model.dyn, 1, parents, reference[1])
+        @test Array(dynamics.components.b.data) ≈
+            0.2f0 .* Array(parents.data) .+ 0.7f0 * refs[2]
         history = nothing
         population_x = [Array(state.particles.components.state.components.x.data)]
         population_ancestors = Vector{Int}[]

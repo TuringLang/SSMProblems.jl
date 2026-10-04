@@ -49,14 +49,40 @@ function initialise(
     algo::AbstractParticleFilter;
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
+    return initialise(execution(algo), rng, prior, algo; ref_state)
+end
+
+function initialise(
+    ex::AbstractExecution,
+    rng::AbstractRNG,
+    prior::StatePrior,
+    algo::AbstractParticleFilter;
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+)
     N = num_particles(algo)
     reference = _reference_state(ref_state, 0)
-    particles = _population_map(execution(algo), rng, N) do rng, i
+    particles = _population_map(ex, rng, N) do rng, i
         ref = i == 1 ? reference : nothing
         return initialise_particle(rng, prior, algo, ref)
     end
 
     return ParticleDistribution(particles, TypelessZero())
+end
+
+function initialise(
+    ::GPUExecution,
+    ::AbstractRNG,
+    prior::StatePrior,
+    algo::AbstractParticleFilter;
+    ref_state=nothing,
+)
+    return throw(
+        ArgumentError(
+            "GPUExecution requires a GPU initialisation method for $(typeof(prior)) and " *
+            "$(typeof(algo)); load the device extension and define the model's " *
+            "initialise(::GPUExecution, rng, prior, algo; ref_state) method",
+        ),
+    )
 end
 
 function predict(

@@ -1,4 +1,4 @@
-using BatchedKernels: BatchedKernels, TraceMatrix, SharedValue
+using BatchedKernels: BatchedKernels, TraceMatrix
 using GeneralisedFilters: SqrtInformationLikelihood, SqrtBackwardInformationPredictor
 using LinearAlgebra: UpperTriangular
 const GF = GeneralisedFilters
@@ -17,29 +17,6 @@ function GF._qr_compress_residual(B::TraceMatrix, r, C, q)
     return BatchedKernels.qr_compress_residual(B, r, C, q)
 end
 
-# Explicit sharing: these atoms describe the same selected path for every candidate.
-function _shared(d::LinearGaussianDynamics, n)
-    return BatchedStruct(
-        LinearGaussianDynamics,
-        (; A=SharedCuMatrix(d.A, n), b=SharedCuVector(d.b, n), Q=SharedCuMatrix(d.Q, n)),
-    )
-end
-function _shared(o::LinearGaussianObservation, n)
-    return BatchedStruct(
-        LinearGaussianObservation,
-        (; H=SharedCuMatrix(o.H, n), c=SharedCuVector(o.c, n), R=SharedCuMatrix(o.R, n)),
-    )
-end
-function _shared(l::SqrtInformationLikelihood, n)
-    return BatchedStruct(
-        SqrtInformationLikelihood,
-        (;
-            B=SharedCuMatrix(l.B, n),
-            r=SharedCuVector(l.r, n),
-            logscale=SharedValue(l.logscale, n),
-        ),
-    )
-end
 # The only scalar leaf here is the suffix-common log normalizer.
 _single_likelihood(batch) = CUDA.@allowscalar batch[1]
 const DeviceBackwardLikelihood = SqrtInformationLikelihood{
@@ -53,7 +30,7 @@ function GF.backward_initialise(
     bp::SqrtBackwardInformationPredictor, o::DeviceObservation, y
 )
     return _single_likelihood(
-        fuse((o, y)->GF.backward_initialise(bp, o, y), _shared(o, 1), SharedCuVector(y, 1))
+        fuse((o, y)->GF.backward_initialise(bp, o, y), shared(o, 1), SharedCuVector(y, 1))
     )
 end
 function GF.backward_predict(
@@ -62,7 +39,7 @@ function GF.backward_predict(
     d::LinearGaussianDynamics,
 )
     return _single_likelihood(
-        fuse((l, d)->GF.backward_predict(bp, l, d), _shared(l, 1), _shared(d, 1))
+        fuse((l, d)->GF.backward_predict(bp, l, d), shared(l, 1), shared(d, 1))
     )
 end
 function GF.backward_update(
@@ -74,8 +51,8 @@ function GF.backward_update(
     return _single_likelihood(
         fuse(
             (l, o, y)->GF.backward_update(bp, l, o, y),
-            _shared(l, 1),
-            _shared(o, 1),
+            shared(l, 1),
+            shared(o, 1),
             SharedCuVector(y, 1),
         ),
     )
@@ -83,14 +60,14 @@ end
 function GF.compute_marginal_predictive_likelihood(
     states::BatchedStruct{<:GaussianState}, l::DeviceBackwardLikelihood
 )
-    return GF.compute_marginal_predictive_likelihood.(states, _shared(l, length(states)))
+    return GF.compute_marginal_predictive_likelihood.(states, shared(l, length(states)))
 end
 
 function GF.inner_dynamics(
     d::HierarchicalDynamics, t::Integer, xp::BatchedCuVector, xn::CUDA.AnyCuVector
 )
-    # Existing model callbacks accept a concrete batch of candidate next states.
-    return GF.inner_dynamics(d, t, xp, BatchedCuVector(repeat(xn, 1, length(xp))))
+    # Every candidate parent is paired with the same selected next state.
+    return GF.inner_dynamics(d, t, xp, SharedCuVector(xn, length(xp)))
 end
 function _outer_logdensity(A, b, root, xp, xn)
     residual = UpperTriangular(root)' \ (xn - A*xp - b)
@@ -136,12 +113,6 @@ function GF._ancestor_weights(
 end
 
 const DeviceGaussianState = GaussianState{<:CUDA.AnyCuVector,<:CUDA.AnyCuMatrix}
-function _shared(g::GaussianState, n)
-    return BatchedStruct(
-        GaussianState, (; μ=SharedCuVector(g.μ, n), Σ=SharedCuMatrix(g.Σ, n))
-    )
-end
-
 # Single selected-path Kalman calculations use the same kernels as populations.
 # This lets condition_inner(...), followed by the ordinary Kalman smoother, retain
 # its CPU time loop and storage checks without a second smoothing implementation.
@@ -149,7 +120,7 @@ function GF._kalman_state(μ::CUDA.AnyCuVector, Σ::CUDA.AnyCuMatrix)
     return GaussianState(copy(μ), copy(Σ))
 end
 function GF.kalman_predict(state::DeviceGaussianState, d::LinearGaussianDynamics)
-    return GF.kalman_predict.(_shared(state, 1), _shared(d, 1))[1]
+    return GF.kalman_predict.(shared(state, 1), shared(d, 1))[1]
 end
 function GF.kalman_update(
     state::DeviceGaussianState,
@@ -158,7 +129,7 @@ function GF.kalman_update(
     repair::GF.CovarianceRepair=NoRepair(),
 )
     _check_batched_filter(KalmanFilter(; repair))
-    result=GF.kalman_update.(_shared(state, 1), _shared(o, 1), SharedCuVector(y, 1))
+    result=GF.kalman_update.(shared(state, 1), shared(o, 1), SharedCuVector(y, 1))
     return CUDA.@allowscalar result[1]
 end
 function GF.rts_backward_step(
@@ -169,6 +140,6 @@ function GF.rts_backward_step(
 )
     pred=isnothing(predicted) ? GF.kalman_predict(filtered, d) : predicted
     return GF.rts_backward_step.(
-        _shared(filtered, 1), _shared(d, 1), _shared(next, 1), _shared(pred, 1)
+        shared(filtered, 1), shared(d, 1), shared(next, 1), shared(pred, 1)
     )[1]
 end

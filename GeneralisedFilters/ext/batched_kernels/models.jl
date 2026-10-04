@@ -47,26 +47,20 @@ function GeneralisedFilters.inner_prior(
     _check_device_model_arrays(T, p.μ0, p.Σ0, x.data)
     d = length(p.μ0)
     size(p.Σ0) == (d, d) || throw(DimensionMismatch("inner prior covariance shape"))
-    n = length(x)
-    fields = (; μ0=SharedCuVector(p.μ0, n), Σ0=SharedCuMatrix(p.Σ0, n))
-    return BatchedStruct(GaussianPrior, fields)
+    return shared(p, length(x))
 end
 
 function GeneralisedFilters.inner_dynamics(
     d::LinearGaussianDynamics{<:CuMatrix,<:CuVector,<:CuMatrix},
     ::Integer,
     xp::BatchedCuVector{T},
-    xn::BatchedCuVector,
+    xn::Union{BatchedCuVector,SharedCuVector},
 ) where {T}
     length(xp) == length(xn) || throw(DimensionMismatch("outer state batch counts differ"))
     _check_device_model_arrays(T, d.A, d.b, d.Q, xp.data, xn.data)
     k = length(d.b)
     size(d.A) == size(d.Q) == (k, k) || throw(DimensionMismatch("inner dynamics shapes"))
-    n = length(xp)
-    fields = (;
-        A=SharedCuMatrix(d.A, n), b=SharedCuVector(d.b, n), Q=SharedCuMatrix(d.Q, n)
-    )
-    return BatchedStruct(LinearGaussianDynamics, fields)
+    return shared(d, length(xp))
 end
 
 function GeneralisedFilters.inner_observation(
@@ -78,11 +72,7 @@ function GeneralisedFilters.inner_observation(
     k = length(o.c)
     size(o.H, 1) == k && size(o.R) == (k, k) ||
         throw(DimensionMismatch("inner observation shapes"))
-    n = length(x)
-    fields = (;
-        H=SharedCuMatrix(o.H, n), c=SharedCuVector(o.c, n), R=SharedCuMatrix(o.R, n)
-    )
-    return BatchedStruct(LinearGaussianObservation, fields)
+    return shared(o, length(x))
 end
 
 # Factor shared covariances once on the host-controlled path, then fuse the
@@ -139,6 +129,19 @@ function _pin_reference!(x::BatchedCuVector{T}, ref) where {T}
 end
 
 function GeneralisedFilters.initialise(
+    rng::AbstractRNG,
+    p::HierarchicalPrior{<:DeviceSamplingPrior},
+    algo::RBPF{<:BootstrapFilter,<:KalmanFilter};
+    ref_state=nothing,
+)
+    # Preserve the existing device-prior entry point, including its storage dispatch.
+    return GeneralisedFilters.initialise(
+        GeneralisedFilters.GPUExecution(), rng, p, algo; ref_state
+    )
+end
+
+function GeneralisedFilters.initialise(
+    ::GeneralisedFilters.GPUExecution,
     rng::AbstractRNG,
     p::HierarchicalPrior{<:DeviceSamplingPrior},
     algo::RBPF{<:BootstrapFilter,<:KalmanFilter};
