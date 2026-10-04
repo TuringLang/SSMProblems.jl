@@ -66,8 +66,7 @@ batched states. `InnerDynamics` shares `A` and `b`, while `Q` varies with volati
 Treat the fixed storage as read-only. To vary the process-noise scale, construct
 `GPUVolatilityExample.model(fixed, logscale)` using the same `fixed_parameters(...)`
 object. Only the scalar parameter changes; CPU differentiation does not upload
-Dual values. GPU differentiation and automatic hybrid particle-Gibbs orchestration
-are not provided by this example.
+Dual values. GPU differentiation is not required.
 
 For an entirely shared device model atom, use `shared(atom, N)` to wrap its fields
 without copying their storage. During ancestor sampling and backward simulation,
@@ -151,6 +150,36 @@ smoothed_cpu, conditional_log_evidence = GeneralisedFilters.smooth(
     rng, condition_inner(ssm, host_trajectory), KS, ys; t_smooth=1
 )
 ```
+
+## Particle Gibbs with CPU parameter updates
+
+`GPUExecution()` keeps CSMC populations and its retained trajectory on device.
+Before each parameter update, GF copies the selected outer trajectory and observations
+to CPU once. The ordinary parameter likelihood and AD backend use the same model
+builder; repeated gradient evaluations do not transfer arrays. Both representations
+must use the current parameters. This example varies a scalar noise scale and reuses
+only fixed device arrays.
+
+With AdvancedHMC and ForwardDiff installed:
+
+```julia
+using AdvancedHMC, ForwardDiff, Distributions
+fixed = GPUVolatilityExample.fixed_parameters(16, 4, Float32)
+build = θ -> GPUVolatilityExample.model(fixed, only(θ))
+pg_model = ParticleGibbsModel(
+    MvNormal(Float32[0], Float32[0.25;;]), ParameterisedSSM(build, device_ys)
+)
+pg = ParticleGibbs(ConditionalSMC(algo, AncestorSampling()), AdvancedHMC.NUTS(0.8f0))
+draw, pg_state = AbstractMCMC.step(
+    rng, pg_model, pg; initial_params=Float32[0], n_adapts=100
+)
+draw, pg_state = AbstractMCMC.step(rng, pg_model, pg, pg_state; n_adapts=100)
+```
+
+The parameter precision must be compatible with the model's GPU calculations;
+this example keeps parameters and device arrays in Float32. AdvancedHMC derives
+its parameter precision from the sampler configuration, so use `NUTS(0.8f0)`
+for Float32 rather than the Float64 literal `0.8`.
 
 ## Supported boundary
 
