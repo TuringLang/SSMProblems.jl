@@ -5,25 +5,22 @@ export GaussianState
 
 A multivariate Gaussian with mean `μ` and covariance `Σ`, retaining the supplied array
 representations. Covariances are symmetric by convention; positive-definiteness is not
-enforced at construction. Kalman algorithms normalise their computational states to full
-matrix storage independently of model parameters. Supports `rand` and `logpdf` when the
-covariance meets the requirements of those operations.
+enforced at construction. Kalman initialisation selects full matrix storage independently
+of model parameters; subsequent calculations retain their natural array representations.
+Supports `rand` and `logpdf` when the covariance meets those operations' requirements.
 """
 struct GaussianState{TM<:AbstractVector,TS<:AbstractMatrix}
     μ::TM
     Σ::TS
 end
 
-# Computational Kalman states use full covariance storage, independently of the
-# parameter representation. Scalar promotion must include the covariance: its
-# entries may carry Dual values even when the mean is constant.
+# Select full CPU state storage once at initialisation. Mean and covariance keep
+# their own scalar types; arithmetic determines any subsequent promotion.
 function _kalman_state(μ::SVector{N}, Σ::AbstractMatrix) where {N}
-    T = promote_type(eltype(μ), eltype(Σ))
-    return GaussianState(SVector{N,T}(μ), SMatrix{N,N,T}(Σ))
+    return GaussianState(μ, SMatrix{N,N,eltype(Σ)}(Σ))
 end
 function _kalman_state(μ::AbstractVector, Σ::AbstractMatrix)
-    T = promote_type(eltype(μ), eltype(Σ))
-    return GaussianState(convert(Vector{T}, μ), convert(Matrix{T}, Σ))
+    return GaussianState(convert(Vector{eltype(μ)}, μ), convert(Matrix{eltype(Σ)}, Σ))
 end
 
 Statistics.mean(g::GaussianState) = g.μ
