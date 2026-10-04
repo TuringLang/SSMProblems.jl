@@ -49,13 +49,40 @@ function initialise(
     algo::AbstractParticleFilter;
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
+    return initialise(execution(algo), rng, prior, algo; ref_state)
+end
+
+function initialise(
+    ex::AbstractExecution,
+    rng::AbstractRNG,
+    prior::StatePrior,
+    algo::AbstractParticleFilter;
+    ref_state::Union{Nothing,AbstractVector}=nothing,
+)
     N = num_particles(algo)
-    particles = _population_map(execution(algo), rng, N) do rng, i
-        ref = !isnothing(ref_state) && i == 1 ? _trajectory_state(ref_state, 0) : nothing
+    reference = _reference_state(ref_state, 0)
+    particles = _population_map(ex, rng, N) do rng, i
+        ref = i == 1 ? reference : nothing
         return initialise_particle(rng, prior, algo, ref)
     end
 
     return ParticleDistribution(particles, TypelessZero())
+end
+
+function initialise(
+    ::GPUExecution,
+    ::AbstractRNG,
+    prior::StatePrior,
+    algo::AbstractParticleFilter;
+    ref_state=nothing,
+)
+    return throw(
+        ArgumentError(
+            "GPUExecution requires a GPU initialisation method for $(typeof(prior)) and " *
+            "$(typeof(algo)); load the device extension and define the model's " *
+            "initialise(::GPUExecution, rng, prior, algo; ref_state) method",
+        ),
+    )
 end
 
 function predict(
@@ -91,13 +118,10 @@ function _predict_particles(
     observation,
     ref_state,
 )
+    reference = _reference_state(ref_state, iter)
     return _population_map(execution(algo), rng, num_particles(algo)) do rng, i
         particle = particles[i]
-        ref = if !isnothing(ref_state) && i == 1
-            _trajectory_state(ref_state, iter)
-        else
-            nothing
-        end
+        ref = i == 1 ? reference : nothing
         return predict_particle(rng, dyn, algo, iter, particle, observation, ref)
     end
 end
@@ -209,6 +233,7 @@ function step(
     observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
+    _reference_state(ref_state, iter)
     rs = resampler(algo)
     incoming = state
     state = maybe_resample(rng, rs, state; ref_state)
@@ -356,6 +381,7 @@ function step(
     observation;
     ref_state::Union{Nothing,AbstractVector}=nothing,
 )
+    _reference_state(ref_state, iter)
     rs = _step_resampler(rng, model, algo, iter, state, observation)
     incoming = state
     state = maybe_resample(rng, rs, state; ref_state)

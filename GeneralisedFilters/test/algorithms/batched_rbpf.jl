@@ -108,7 +108,7 @@
         end
         @test total_gpu ≈ total_cpu rtol=2.0f-5
 
-        # Reject unsupported paths explicitly, before conditional resampling starts.
+        # Reject an incomplete reference before conditional resampling starts.
         algo = RBPF(BF(n), KF())
         @test_throws ArgumentError step(
             CUDA.RNG(1), gpu, algo, 4, state, CUDA.zeros(T, dy); ref_state=[zeros(T, dx)]

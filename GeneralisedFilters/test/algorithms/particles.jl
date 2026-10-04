@@ -116,6 +116,11 @@ end
     using LogExpFunctions: logsumexp
     const GF = GeneralisedFilters
 
+    # An execution request must not silently fall back to CPU particle storage.
+    @test_throws ArgumentError initialise(
+        Xoshiro(1), GaussianPrior([0.0], [1.0;;]), BF(3; execution=GPUExecution())
+    )
+
     struct HookDynamics <: GF.LatentDynamics end
     struct HookObservation <: GF.ObservationProcess end
     function GF.predict_particle(
@@ -144,6 +149,19 @@ end
     expected = [(id=i, draw=draws[i], ref=i == 1 ? 99 : nothing) for i in 1:3]
     @test getfield.(predicted.particles, :state) == expected
     @test rand(rng) == rand(reference_rng)
+    indexed = GF.predict(
+        Xoshiro(42),
+        HookDynamics(),
+        BF(3),
+        1,
+        initial,
+        nothing;
+        ref_state=ReferenceTrajectory(98, [99]),
+    )
+    @test indexed.particles == predicted.particles
+    @test_throws ArgumentError GF.predict(
+        Xoshiro(42), HookDynamics(), BF(3), 1, initial, nothing; ref_state=[98]
+    )
     filtered, _ = GF.update(HookObservation(), BF(3), 1, predicted, nothing)
     @test getfield.(filtered.particles, :state) == [(:updated, p) for p in expected]
     @test GF.log_weights(filtered) ≈ draws .- logsumexp(draws)

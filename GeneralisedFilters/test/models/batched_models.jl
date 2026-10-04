@@ -58,7 +58,9 @@
         @test isconcretetype(eltype(d))
         @test Array(fuse(transition_mean, d, zg).data) ≈ id.A * z .+ id.C * xp .+ id.b
         @test Array(fuse(observation_mean, o, zg).data) ≈ ob.H * z .+ ob.c
-        constant = inner_dynamics(gpu.dyn.outer, 7, xpg, xng)
+        constant = inner_dynamics(
+            gpu.dyn.outer, 7, xpg, SharedCuVector(CuArray(xn[:, 1]), n)
+        )
         @test constant.components.A.data === gpu.dyn.outer.A
         @test constant.components.Q isa SharedCuMatrix
 
@@ -83,7 +85,7 @@
         @test Array(gpu.prior.outer.Σ0) == op.Σ0
         if T === Float32
             # Storage dispatch must not silently accept a host RNG or unsupported
-            # reference trajectories; these checks are independent of precision.
+            # host reference states; these checks are independent of precision.
             @test_throws ArgumentError simulate(rng, gpu.dyn.outer, 7, xpg)
             @test_throws DimensionMismatch inner_dynamics(
                 gpu.dyn.outer, 7, xpg, BatchedCuVector(CUDA.zeros(T, dx, n + 1))

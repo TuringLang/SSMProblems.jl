@@ -38,7 +38,10 @@ steps:
           import Pkg
           Pkg.activate(; temp=true)
           Pkg.develop([Pkg.PackageSpec(path="../SSMProblems"), Pkg.PackageSpec(path=".")])
-          Pkg.add(["CUDA", "TestItemRunner", "TestItems", "StableRNGs", "Distributions"])
+          Pkg.add([
+              "CUDA", "BatchedKernels", "TestItemRunner", "TestItems", "StableRNGs",
+              "Distributions", "StaticArrays", "AbstractMCMC", "ForwardDiff", "AdvancedHMC",
+          ])
           using CUDA, TestItemRunner
           CUDA.functional() || error("CUDA hardware is required for this job")
           println("+++ :julia: Running GPU runtime tests")

@@ -1,6 +1,6 @@
 name = "GeneralisedFilters"
 uuid = "3ef92589-7ab8-43f9-b5b9-a3a0c86ecbb7"
-version = "0.5.0"
+version = "0.6.0"
 authors = ["THargreaves <tim.hargreaves@icloud.com>", "Charles Knipp <charlesknipp98@gmail.com>", "FredericWantiez <frederic.wantiez@gmail.com>", "Hong Ge <hg344@cam.ac.uk>"]
 
 [deps]
@@ -41,7 +41,7 @@ AcceleratedKernels = "0.4.3"
 AdvancedHMC = "0.8.7"
 AdvancedMH = "0.8.9"
 Aqua = "0.8"
-BatchedKernels = "0.2"
+BatchedKernels = "0.3"
 Bijectors = "0.16.3"
 CUDA = "5, 6.2"
 DataStructures = "0.18.20, 0.19"

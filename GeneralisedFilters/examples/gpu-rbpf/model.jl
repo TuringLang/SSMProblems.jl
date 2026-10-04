@@ -1,70 +1,125 @@
 module GPUVolatilityExample
+using GeneralisedFilters, CUDA, BatchedKernels, Random, StaticArrays, LinearAlgebra
+const GF = GeneralisedFilters
 
-using GeneralisedFilters, CUDA, BatchedKernels, LinearAlgebra, Random, StaticArrays
-
-# z_t = A z_{t-1} + b + exp(x_t/2) L ε_t; x_t is scalar log volatility.
-# The same conditional model has scalar CPU and explicitly batched GPU methods.
-struct VolatilityDynamics{M,V,Q}
-    A::M
-    b::V
-    Q::Q
+# One owner for fixed parameters. Device arrays are derived once at construction.
+struct FixedParameters{H,D}
+    host::H
+    device::D
 end
-(d::VolatilityDynamics)(ctx) = LinearGaussianDynamics(d.A, d.b, exp(only(ctx.x_new)) * d.Q)
+struct OuterPrior{P} <: StatePrior
+    parameters::P
+end
+struct OuterDynamics{P} <: LatentDynamics
+    parameters::P
+end
+struct InnerPrior{P}
+    parameters::P
+end
+struct InnerDynamics{P,T}
+    parameters::P
+    logscale::T
+end
+struct InnerObservation{P}
+    parameters::P
+end
 
-function GeneralisedFilters.inner_dynamics(
-    d::VolatilityDynamics, ::Integer, xp::BatchedCuVector, xn::BatchedCuVector
+outer_prior(p) = GaussianPrior(p.μx, p.Σx)
+outer_dynamics(p) = LinearGaussianDynamics(p.Ax, p.bx, CovarianceFactor(p.Lx))
+inner_prior(p) = GaussianPrior(p.μz, p.Σz)
+inner_observation(p) = LinearGaussianObservation(p.H, p.c, p.R)
+
+GF.distribution(p::OuterPrior) = GF.distribution(outer_prior(p.parameters.host))
+function GF.distribution(d::OuterDynamics, t::Integer, x)
+    return GF.distribution(outer_dynamics(d.parameters.host), t, x)
+end
+function GF.simulate(rng::AbstractRNG, d::OuterDynamics, t::Integer, x::BatchedCuVector)
+    return GF.simulate(rng, outer_dynamics(d.parameters.device), t, x)
+end
+function GF.logdensity(
+    d::OuterDynamics, t::Integer, xp::BatchedCuVector, xn::CUDA.AnyCuVector
 )
-    n = length(xn)
-    k = length(d.b)
-    covariance = reshape(d.Q, k, k, 1) .* reshape(exp.(xn.data), 1, 1, n)
-    fields = (;
-        A=SharedCuMatrix(d.A, n), b=SharedCuVector(d.b, n), Q=BatchedCuMatrix(covariance)
+    return GF.logdensity(outer_dynamics(d.parameters.device), t, xp, xn)
+end
+(p::InnerPrior)(ctx) = inner_prior(p.parameters.host)
+(o::InnerObservation)(ctx) = inner_observation(o.parameters.host)
+function (d::InnerDynamics)(ctx)
+    p = d.parameters.host
+    return LinearGaussianDynamics(p.A, p.b, exp(d.logscale + only(ctx.x_new)) * p.Q)
+end
+function GF.inner_prior(p::InnerPrior, x::BatchedCuVector)
+    return shared(inner_prior(p.parameters.device), length(x))
+end
+function GF.inner_observation(o::InnerObservation, ::Integer, x::BatchedCuVector)
+    return shared(inner_observation(o.parameters.device), length(x))
+end
+function GF.inner_dynamics(
+    d::InnerDynamics,
+    ::Integer,
+    xp::BatchedCuVector,
+    xn::Union{BatchedCuVector,SharedCuVector},
+)
+    length(xp) == length(xn) || throw(DimensionMismatch("outer batch counts"))
+    p, n = d.parameters.device, length(xn)
+    k = length(p.b)
+    covariance = if xn isa SharedCuVector
+        SharedCuMatrix(p.Q .* reshape(exp.(d.logscale .+ xn.data), 1, 1), n)
+    else
+        BatchedCuMatrix(reshape(p.Q, k, k, 1) .* reshape(exp.(d.logscale .+ xn.data), 1, 1, n))
+    end
+    return BatchedStruct(
+        LinearGaussianDynamics,
+        (; A=SharedCuMatrix(p.A, n), b=SharedCuVector(p.b, n), Q=covariance),
     )
-    return BatchedStruct(LinearGaussianDynamics, fields)
 end
 
-"""Equivalent static-array CPU and device models; all fixed uploads happen here."""
-function models(d=16, m=4, ::Type{T}=Float32) where {T}
+function fixed_parameters(d=16, m=4, ::Type{T}=Float32) where {T}
     rng = Xoshiro(41)
-    eye = Matrix{T}(I, d, d)
-    H = randn(rng, T, m, d) / sqrt(T(d))
-    # StaticArrays is the CPU baseline used in the timing comparison.
-    cpu = StateSpaceModel(
-        GaussianPrior(SVector{1,T}(0), SMatrix{1,1,T}(0.2)),
-        LinearGaussianDynamics(
-            SMatrix{1,1,T}(0.95), SVector{1,T}(0), CovarianceFactor(SMatrix{1,1,T}(0.1))
-        ),
-        GaussianPrior(SVector{d,T}(zeros(T, d)), SMatrix{d,d,T}(eye)),
-        VolatilityDynamics(
-            SMatrix{d,d,T}(T(0.9) * eye),
-            SVector{d,T}(zeros(T, d)),
-            SMatrix{d,d,T}(T(0.05) * eye),
-        ),
-        LinearGaussianObservation(
-            SMatrix{m,d,T}(H),
-            SVector{m,T}(zeros(T, m)),
-            SMatrix{m,m,T}(T(0.2) * Matrix{T}(I, m, m)),
-        ),
+    eye = SMatrix{d,d,T}(Matrix{T}(I, d, d))
+    host = (;
+        μx=SVector{1,T}(0),
+        Σx=SMatrix{1,1,T}(0.2),
+        Ax=SMatrix{1,1,T}(0.95),
+        bx=SVector{1,T}(0),
+        Lx=SMatrix{1,1,T}(0.1),
+        μz=zero(SVector{d,T}),
+        Σz=eye,
+        A=T(0.9)*eye,
+        b=zero(SVector{d,T}),
+        Q=T(0.05)*eye,
+        H=SMatrix{m,d,T}(randn(rng, T, m, d)/sqrt(T(d))),
+        c=zero(SVector{m,T}),
+        R=T(0.2)*SMatrix{m,m,T}(Matrix{T}(I, m, m)),
     )
-    p, dyn, ip, id, o = cpu.prior.outer,
-    cpu.dyn.outer, cpu.prior.inner, cpu.dyn.inner,
-    cpu.obs.inner
-    gpu = StateSpaceModel(
-        GaussianPrior(CuArray(Vector(p.μ0)), CuArray(Matrix(p.Σ0))),
-        LinearGaussianDynamics(
-            CuArray(Matrix(dyn.A)),
-            CuArray(Vector(dyn.b)),
-            CovarianceFactor(CuArray(Matrix(dyn.Q.factor))),
-        ),
-        GaussianPrior(CuArray(Vector(ip.μ0)), CuArray(Matrix(ip.Σ0))),
-        VolatilityDynamics(
-            CuArray(Matrix(id.A)), CuArray(Vector(id.b)), CuArray(Matrix(id.Q))
-        ),
-        LinearGaussianObservation(
-            CuArray(Matrix(o.H)), CuArray(Vector(o.c)), CuArray(Matrix(o.R))
-        ),
+    return FixedParameters(host, map(x -> CuArray(Array(x)), host))
+end
+
+# Rebuilding at a new parameter value reuses only FIXED device storage. In
+# particular, CPU AD can put a Dual in logscale without uploading any Dual arrays.
+function model(p::FixedParameters, logscale=zero(eltype(p.host.b)))
+    return StateSpaceModel(
+        OuterPrior(p),
+        OuterDynamics(p),
+        InnerPrior(p),
+        InnerDynamics(p, logscale),
+        InnerObservation(p),
     )
-    return cpu, gpu
+end
+
+"""One model with fixed host/device arrays and CPU/batched component methods."""
+model(d=16, m=4, ::Type{T}=Float32) where {T} = model(fixed_parameters(d, m, T))
+
+# The execution setting selects initial population storage. The rest of filtering
+# uses the same model and the ordinary state-dispatched GF operations.
+function GF.initialise(
+    ex::GPUExecution,
+    rng::AbstractRNG,
+    p::HierarchicalPrior{<:OuterPrior},
+    algo::RBPF{<:BootstrapFilter,<:KalmanFilter};
+    ref_state=nothing,
+)
+    device_prior = HierarchicalPrior(outer_prior(p.outer.parameters.device), p.inner)
+    return GF.initialise(ex, rng, device_prior, algo; ref_state)
 end
 
 function observations(model, steps=20)
@@ -74,26 +129,6 @@ function observations(model, steps=20)
         state = simulate(rng, model.dyn, t, state)
         return simulate(rng, model.obs, t, state)
     end
-end
-
-# Temporary example-level separation until BK supports ordinary resampling draws.
-# Both streams are supplied by the caller and persist across all time steps.
-function filter_gpu(
-    particle_rng::BatchedRNG, resampling_rng::AbstractRNG, model, algo::RBPF, ys
-)
-    isempty(ys) && throw(ArgumentError("filter requires nonempty observations"))
-    state = initialise(particle_rng, model.prior, algo)
-    total = zero(eltype(GeneralisedFilters.log_weights(state)))
-    for t in eachindex(ys)
-        state = GeneralisedFilters.maybe_resample(
-            resampling_rng, GeneralisedFilters.resampler(algo), state
-        )
-        state, increment = GeneralisedFilters.move(
-            particle_rng, model, algo, t, state, ys[t]
-        )
-        total += increment
-    end
-    return state, total
 end
 
 # Only the final summary is downloaded. No particle-sized host copy is needed.

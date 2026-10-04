@@ -1,6 +1,24 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 (unreleased)
+
+- **Compatibility:** Kalman initialisation selects full covariance storage; subsequent
+  updates and smoothing retain the array representations and scalar types produced by
+  their arithmetic. Mean and covariance are no longer promoted together automatically.
+  Models should keep compatible state storage across steps rather than rely on repeated
+  canonicalisation of changing matrix representations.
+- Add GPU Rao–Blackwellised particle filtering through the optional BatchedKernels 0.3
+  extension, sharing numerical kernels and population orchestration with CPU filtering.
+  Select device initialisation with `GPUExecution()` and provide CPU and batched methods
+  on one model.
+- Support GPU reference trajectories, conditional resampling, ancestor sampling, backward
+  simulation and conditional Gaussian smoothing. Selected-path backward messages and
+  particle-Gibbs parameter updates use CPU model methods; population scoring stays on GPU.
+- Support sparse GPU particle histories with nested batched states and compact selected
+  trajectories. Backward simulation retains dense history for past candidate populations.
+- Add `CombinedRNG` to pass CPU and GPU random streams through one filtering or sampling
+  interface. Runtime shared floating-point scalars use BK 0.3 without specialising kernels
+  on their values.
 
 - Add `ThreadedExecution` for evaluating particle populations on several threads, selected
   with the `execution` keyword of `ParticleFilter` and `BF`. RBPF, auxiliary particle

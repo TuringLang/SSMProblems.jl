@@ -1,4 +1,4 @@
-export AbstractExecution, SerialExecution, ThreadedExecution
+export AbstractExecution, SerialExecution, ThreadedExecution, GPUExecution
 
 """
     AbstractExecution
@@ -16,6 +16,22 @@ Evaluate particles in order on the calling task, drawing directly from the filte
 number generator. This is the default.
 """
 struct SerialExecution <: AbstractExecution end
+
+"""
+    GPUExecution()
+
+Initialise a device particle population using the model's GPU initialisation method.
+Subsequent operations dispatch on that population's storage, while time iteration and
+scalar decisions and CSMC selected-path likelihoods run on the CPU. The same model
+must support CPU component resolution as well as batched device methods.
+This setting does not automatically upload
+an arbitrary CPU model or make its callbacks GPU-compatible.
+
+Model implementations can extend `initialise(::GPUExecution, rng, prior, algo; ref_state)`
+to select their resident device parameters and construct batched particle storage.
+The BatchedKernels extension provides this method for supported device Gaussian priors.
+"""
+struct GPUExecution <: AbstractExecution end
 
 """
     ThreadedExecution(; blocksize=32, ntasks=nothing)
@@ -138,3 +154,11 @@ function _mix64(z::UInt64)
     z = (z ⊻ (z >> 27)) * 0x94d049bb133111eb
     return z ⊻ (z >> 31)
 end
+
+# Small selected-path inputs cross the device boundary independently of populations.
+# CPU values (including StaticArrays) keep their representation and ownership.
+_host_array(x) = x
+_path_value(::AbstractExecution, x) = x
+_path_value(::GPUExecution, x) = _host_array(x)
+_path_values(::AbstractExecution, xs) = xs
+_path_values(ex::GPUExecution, xs) = map(x -> _path_value(ex, x), xs)

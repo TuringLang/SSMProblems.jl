@@ -234,6 +234,14 @@ end
         @test length(idxs) == 5
         @test CUDA.@allowscalar idxs[1] == ref_idx
     end
+    # With two equal weights, both dependent schemes must return one of each
+    # ancestor. Conditioning on ancestor 2 must rotate, not overwrite slot one.
+    for scheme in (Systematic(), Stratified())
+        idxs = GeneralisedFilters.conditional_sample_ancestors(
+            rng, scheme, CuVector(Float32[0.5, 0.5]), 2
+        )
+        @test Array(idxs) == [2, 1]
+    end
 end
 
 @testitem "GPU conditional resampling matches the CPU law" tags = [:gpu] begin

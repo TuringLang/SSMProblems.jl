@@ -20,8 +20,10 @@ abstract type AbstractBackwardPredictor <: AbstractSampler end
 
 ## CORE TYPES AND CONTAINERS ###############################################################
 
+include("random.jl")
 include("gaussian.jl")
 include("containers.jl")
+include("parallel_particle_tree.jl")
 include("resamplers.jl")
 
 ## EXECUTION ###############################################################################

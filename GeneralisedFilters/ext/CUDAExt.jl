@@ -13,15 +13,40 @@ using GeneralisedFilters: GeneralisedFilters, Multinomial, Systematic, Stratifie
 
 using GeneralisedFilters: ReferenceTrajectory
 
-using AcceleratedKernels: searchsortedfirst, foreachindex
+using AcceleratedKernels: searchsortedfirst
 using CUDA
-using Random: AbstractRNG
+using Random: Random, AbstractRNG
+
+# Explicit device destinations select the bundled GPU RNG. Allocating ordinary
+# arrays and scalar draws continue to use the CPU child through the core interface.
+function Random.rand!(rng::GeneralisedFilters.CombinedRNG, A::CUDA.AnyCuArray)
+    return Random.rand!(GeneralisedFilters.gpu_rng(rng), A)
+end
+function Random.randn!(rng::GeneralisedFilters.CombinedRNG, A::CUDA.AnyCuArray)
+    return Random.randn!(GeneralisedFilters.gpu_rng(rng), A)
+end
+# Resolve the intersection with GPUArrays' floating-array fallback.
+function Random.randn!(
+    rng::GeneralisedFilters.CombinedRNG,
+    A::CUDA.AnyCuArray{<:Union{AbstractFloat,Complex{<:AbstractFloat}}},
+)
+    return Random.randn!(GeneralisedFilters.gpu_rng(rng), A)
+end
+
+GeneralisedFilters._host_array(x::CUDA.AnyCuArray) = Array(x)
 
 ## GPU RESAMPLING ##########################################################################
 
 # Respect either a host RNG or a CUDA RNG; broadcasts below must use device arrays.
 _device_uniforms(rng::AbstractRNG, ::Type{T}, n::Int) where {T} = CuArray(rand(rng, T, n))
 _uniform_scalar(rng::AbstractRNG, ::Type{T}) where {T} = rand(rng, T)
+function _device_uniforms(rng::GeneralisedFilters.CombinedRNG, ::Type{T}, n::Int) where {T}
+    return Random.rand!(rng, CuArray{T}(undef, n))
+end
+# Systematic offsets and conditional reference offsets are host scalar decisions.
+function _uniform_scalar(rng::GeneralisedFilters.CombinedRNG, ::Type{T}) where {T}
+    return rand(GeneralisedFilters.cpu_rng(rng), T)
+end
 # CUDA 6 RNGs provide bulk draws but not Random's host scalar API.
 function _uniform_scalar(rng::CUDA.RNG, ::Type{T}) where {T}
     return only(Array(_device_uniforms(rng, T, 1)))
@@ -233,129 +258,6 @@ end
 
 ## GPU SPARSE PARTICLE STORAGE #############################################################
 
-mutable struct ParallelParticleTree{ST,M<:CUDA.DeviceMemory}
-    states::ST
-    parents::CuVector{Int64,M}
-    leaves::CuVector{Int64,M}
-    offspring::CuVector{Int64,M}
-
-    function ParallelParticleTree(states::ST, M::Integer) where {ST}
-        if M < length(states)
-            throw(ArgumentError("M must be greater than or equal to the number of states"))
-        end
-
-        parents = CUDA.zeros(Int64, M)
-        offspring = CUDA.zeros(Int64, M)
-        N = length(states)
-        states = expand(states, M)
-        tree_states = states
-        leaves = CuArray(1:N)
-        return new{ST,CUDA.DeviceMemory}(tree_states, parents, leaves, offspring)
-    end
-end
-
-function scatter!(r, p, q)
-    return r[q] .= p
-end
-
-function gather!(r, p, q)
-    return r .= p[q]
-end
-
-function update_offspring!(offspring, leaves, parents)
-    foreachindex(leaves) do i
-        j = leaves[i]
-        while (j > 0) && (offspring[j] == 0)
-            j = parents[j]
-            if j > 0
-                offspring[j] -= 1
-            end
-        end
-    end
-end
-
-function insert!(tree::ParallelParticleTree, states, ancestors::CuVector{Int64})
-    b = CuVector{Int64}(undef, length(ancestors))
-    gather!(b, tree.leaves, ancestors)
-
-    # Update offspring counts
-    offspring = ancestors_to_offspring(ancestors)
-    scatter!(tree.offspring, offspring, tree.leaves)
-
-    # Prune tree
-    update_offspring!(tree.offspring, tree.leaves, tree.parents)
-
-    # Expand tree if necessary
-    if sum(tree.offspring .== 0) < length(ancestors)
-        @debug "expanding tree"
-        expand!(tree)
-    end
-    z = cumsum(tree.offspring .== 0)
-
-    # Insert new states
-    new_leaves = searchsortedfirst(z, CuArray(1:length(tree.leaves)))
-    scatter!(tree.parents, b, new_leaves)
-    tree.states[new_leaves] = states
-    tree.leaves .= new_leaves
-    return tree
-end
-
-function expand!(tree::ParallelParticleTree{T}) where {T}
-    M = length(tree.states)
-
-    new_parents = CUDA.zeros(Int64, 2M)
-    new_parents[1:length(tree.parents)] = tree.parents
-    tree.parents = new_parents
-
-    new_offspring = CUDA.zeros(Int64, 2M)
-    new_offspring[1:length(tree.offspring)] = tree.offspring
-    tree.offspring = new_offspring
-
-    tree.states = expand(tree.states, 2M)
-
-    return tree
-end
-
-# Get ancestry of all particles. The parallel tree stores initial and subsequent states
-# in a single `states` buffer (homogeneous type), so the returned trajectories have
-# T0 == T.
-function get_ancestry(tree::ParallelParticleTree{ST}, T::Integer) where {ST}
-    buf = Vector{Vector{eltype(tree.states)}}(undef, T + 1)
-    parents = copy(tree.leaves)
-    for t in (T + 1):-1:2
-        buf[t] = Vector(tree.states[parents])
-        gather!(parents, tree.parents, parents)
-    end
-    buf[1] = Vector(tree.states[parents])
-    # Each leaf's trajectory: x0 = buf[1][k], xs = [buf[2][k], ..., buf[T+1][k]]
-    return [
-        ReferenceTrajectory(buf[1][k], [buf[t + 1][k] for t in 1:T]) for
-        k in eachindex(tree.leaves)
-    ]
-end
-
-# Get ancestry of a single particle
-function get_ancestry(
-    container::ParallelParticleTree{ST}, i::Integer, T::Integer
-) where {ST}
-    xs = Vector{eltype(container.states)}(undef, T)
-    CUDA.@allowscalar begin
-        ancestor_index = container.leaves[i]
-        for t in T:-1:1
-            xs[t] = container.states[ancestor_index]
-            ancestor_index = container.parents[ancestor_index]
-        end
-        x0 = container.states[ancestor_index]
-        return ReferenceTrajectory(x0, xs)
-    end
-end
-
-# Helper for expanding state arrays (placeholder - actual implementation may vary)
-function expand(states, M)
-    # This needs to match the actual state type
-    new_states = similar(states, M)
-    new_states[1:length(states)] = states
-    return new_states
-end
+include("cuda/particle_tree.jl")
 
 end # module CUDAExt

@@ -113,10 +113,26 @@ function LogDensityProblems.logdensity_and_gradient(ld::DifferentiatedParameterD
     return DI.value_and_gradient(ld.objective, ld.preparation, ld.adtype, θ)
 end
 
+# Build one CPU conditional target per parameter update, outside all repeated
+# likelihood/gradient evaluations. Keep the device trajectory in sampler state.
+_parameter_inputs(::AbstractExecution, param_model, trajectory) = (param_model, trajectory)
+function _parameter_inputs(ex::GPUExecution, param_model, trajectory)
+    host_model = ParameterisedSSM(
+        param_model.build, _path_values(ex, param_model.observations)
+    )
+    return host_model, _path_values(ex, trajectory)
+end
+
 function _create_log_density_model(
-    model::ParticleGibbsModel, af, trajectory, adtype; initial_params=mean(model.prior)
+    model::ParticleGibbsModel,
+    af,
+    trajectory,
+    adtype;
+    initial_params=mean(model.prior),
+    execution::AbstractExecution=SerialExecution(),
 )
-    ld = SSMParameterLogDensity(model.prior, model.param_model, af, trajectory)
+    param_model, path = _parameter_inputs(execution, model.param_model, trajectory)
+    ld = SSMParameterLogDensity(model.prior, param_model, af, path)
     adtype === nothing && return AbstractMCMC.LogDensityModel(ld)
     objective = θ -> LogDensityProblems.logdensity(ld, θ)
     prep = DI.prepare_gradient(objective, adtype, initial_params)
@@ -148,7 +164,9 @@ function AbstractMCMC.step(
 
     # Create log-density model (uses outer-only trajectory for hierarchical models)
     outer_traj = trajectory
-    ld_model = _create_log_density_model(model, af, outer_traj, pg.adtype; initial_params=θ)
+    ld_model = _create_log_density_model(
+        model, af, outer_traj, pg.adtype; initial_params=θ, execution=execution(pg.csmc.pf)
+    )
 
     # Run initial parameter step
     _, param_state = AbstractMCMC.step(rng, ld_model, pg.param; initial_params=θ, kwargs...)
@@ -177,7 +195,12 @@ function AbstractMCMC.step(
     af = _get_inner_filter(pg.csmc.pf)
     outer_traj = state.trajectory
     ld_model = _create_log_density_model(
-        model, af, outer_traj, pg.adtype; initial_params=state.θ
+        model,
+        af,
+        outer_traj,
+        pg.adtype;
+        initial_params=state.θ,
+        execution=execution(pg.csmc.pf),
     )
 
     # Refresh cached target density/gradient after the trajectory changes, preserving adaptation.
