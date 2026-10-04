@@ -112,5 +112,11 @@ end
 function GeneralisedFilters._init_tree(
     initial::ParticleDistribution, state::ParticleDistribution{W,P,B}
 ) where {W,P<:Particle,B<:BatchedStruct{P}}
-    return GeneralisedFilters.DenseParticleContainer(initial, state)
+    tree = GeneralisedFilters.ParticleTree(
+        GeneralisedFilters._outer_history_states(initial),
+        GeneralisedFilters._outer_history_states(state),
+        GeneralisedFilters._history_ancestors(state),
+        GeneralisedFilters._tree_capacity(length(initial)),
+    )
+    return GeneralisedFilters._OuterStateHistory(tree)
 end

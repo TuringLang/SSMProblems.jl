@@ -82,6 +82,7 @@
         @test Array(dynamics.components.b.data) ≈
             0.2f0 .* Array(parents.data) .+ 0.7f0 * refs[2]
         history = nothing
+        sparse = nothing
         population_x = [Array(state.particles.components.state.components.x.data)]
         population_ancestors = Vector{Int}[]
         xp = Array(state.particles.components.state.components.x.data)
@@ -118,8 +119,10 @@
             end
             if t == 1
                 history = DenseParticleContainer(initial, state)
+                sparse = GF._init_tree(initial, state)
             else
                 push!(history, state)
+                GF._update_tree!(sparse, state)
             end
             projected = GF._rb_population_fields(state.particles)
             reassembled = GF._assemble_rb_population(state.particles, projected)
@@ -171,6 +174,8 @@
             end
             expected[1] = population_x[1][1, a]
             @test [only(Array(s.x)) for s in collect(path)] == expected
+            sparse_path = get_ancestry(sparse.history, i)
+            @test [only(Array(x)) for x in collect(sparse_path)] == expected
         end
         # Histories own batch buffers, including weights and ancestry.
         saved = Array(history.states[end].components.x.data)

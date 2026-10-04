@@ -199,6 +199,17 @@ function _update_container!(history::DenseParticleContainer, state::ParticleDist
     return push!(history, state)
 end
 
+function _update_tree!(tree::_OuterStateHistory, state::ParticleDistribution)
+    insert!(tree.history, _outer_history_states(state), _history_ancestors(state))
+    return tree
+end
+function _sample_trajectory(
+    rng::AbstractRNG, tree::_OuterStateHistory, state::ParticleDistribution
+)
+    return get_ancestry(tree.history, _sample_index(rng, get_weights(state)))
+end
+get_ancestry(tree::_OuterStateHistory) = get_ancestry(tree.history)
+
 ## BACKWARD PREDICTIVE LIKELIHOODS #########################################################
 
 default_backward_predictor(::KalmanFilter) = SqrtBackwardInformationPredictor()

@@ -104,3 +104,38 @@ StaticArrays need no such deep copies.
 
 For analytical filters, a manual loop can collect the returned filtering distributions in
 an ordinary vector. The same ownership rule applies to any mutable arrays they contain.
+
+## GPU sparse histories
+
+With CUDA and BatchedKernels loaded, the same `ParticleTree(initial, first_state)`
+and `push!` interface stores batched GPU populations in a sparse device pool.
+Supported payloads include scalar, vector and matrix batches and nested
+`BatchedStruct`s, including full `RBState` values. All numerical leaves must reside
+on the active CUDA device. Initial states have a separate fixed buffer and may have
+a different type or structure from later states. Later populations must retain
+compatible scalar types, inner dimensions and composite structure. Ancestry may use
+device vectors of `Int32` or `Int64`; tree metadata uses `Int64`.
+
+GPU sparse history owns its numerical payloads. Shared numerical fields are copied
+into per-slot storage, so a shared covariance can change between steps without
+altering earlier states. Non-numerical shared literals, such as a factorisation's
+triangle flag, must remain constant within each storage buffer. This snapshot rule
+is stronger than the CPU container's shallow ownership described above.
+
+`get_ancestry(tree, i)` returns one compact `ReferenceTrajectory` indexed from zero.
+Its vector and matrix states stay on the device, backed only by the selected path's
+allocation. Later tree mutation cannot alter the returned path. Scalar metadata and
+selected scalar fields may transfer to the host during reconstruction; complete
+populations are never downloaded. `get_ancestry(tree)` explicitly constructs all
+leaf paths and consequently allocates storage for all requested output paths.
+
+GPU vanilla conditional SMC and ancestor sampling use this tree with outer states
+only. Public `ParticleTree` histories still retain complete states, including RB
+beliefs. These retained filtering beliefs can be inspected along a surviving path
+or used as cached forward inputs when implementing conditional Gaussian smoothing
+along that path, under the same model parameters. Extracting the path does not
+itself turn filtering beliefs into smoothed beliefs.
+Backward simulation continues to use dense history because it needs past
+candidates that have no surviving forward descendants. Sparse storage removes dead
+branches; with no coalescence its worst-case memory still grows with particles
+times time steps, and allocated capacity is reused rather than shrunk.
