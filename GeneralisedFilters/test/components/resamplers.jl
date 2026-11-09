@@ -168,6 +168,38 @@ end
     end
 end
 
+@testitem "Inverse-CDF scans stop at the last positive weight" begin
+    using StableRNGs
+
+    # Weights summing to less than one exaggerate the shortfall that rounding produces in
+    # the scaled cumulative weights: every threshold past the first lies beyond the CDF.
+    ws = Float32[0.3, 0.3, 0.0, 0.0]
+    rng = StableRNG(1234)
+    for resampler in (Systematic(), Stratified()), _ in 1:100
+        @test GeneralisedFilters.sample_ancestors(rng, resampler, ws) ⊆ 1:2
+        for ref_idx in 1:2
+            idxs = GeneralisedFilters.conditional_sample_ancestors(
+                rng, resampler, ws, ref_idx
+            )
+            @test idxs[1] == ref_idx
+            @test idxs ⊆ 1:2
+        end
+    end
+end
+
+@testitem "Conditional resampling retains a reference below CDF resolution" setup = [
+    ConditionalResamplingTestSetup
+] begin
+    # The reference's weight vanishes when added to the cumulative weight before it, so
+    # its interval has zero width and no threshold can select it.
+    ws = Float32[0.5, 1.0f-10, 0.5]
+    rng = StableRNG(1234)
+    for resampler in RESAMPLERS, _ in 1:100
+        idxs = GeneralisedFilters.conditional_sample_ancestors(rng, resampler, ws, 2)
+        @test idxs[1] == 2
+    end
+end
+
 @testitem "Conditional resampling is invariant" setup = [ConditionalResamplingTestSetup] begin
     for resampler in RESAMPLERS
         rng = StableRNG(1234)
@@ -241,6 +273,19 @@ end
             rng, scheme, CuVector(Float32[0.5, 0.5]), 2
         )
         @test Array(idxs) == [2, 1]
+    end
+end
+
+@testitem "GPU conditional resampling retains a reference below CDF resolution" tags = [
+    :gpu
+] begin
+    using CUDA
+
+    ws = CuVector(Float32[0.5, 1.0f-10, 0.5])
+    rng = CUDA.RNG(1234)
+    for resampler in (Systematic(), Stratified()), _ in 1:20
+        idxs = GeneralisedFilters.conditional_sample_ancestors(rng, resampler, ws, 2)
+        @test CUDA.@allowscalar idxs[1] == 2
     end
 end
 

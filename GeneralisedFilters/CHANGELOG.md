@@ -28,6 +28,10 @@
 - Compute only the triangular factor in square-root backward messages for larger static
   Float32/Float64 matrices. This avoids forming Q and contended small-matrix BLAS calls,
   speeding up CSMC ancestor sampling and backward simulation, especially with threads.
+- Fix systematic and stratified resampling reading past the weights when rounding puts a
+  threshold beyond the final cumulative weight, as with Float32 weights; scans now stop at
+  the last positive-weight particle. Conditional variants on CPU and GPU now always keep the
+  reference, including one whose weight is below the precision of the cumulative weights.
 
 ## 0.5.0
 
