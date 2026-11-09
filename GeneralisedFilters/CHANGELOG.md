@@ -25,6 +25,9 @@
   filters and CSMC ancestor sampling and backward simulation use the setting of their
   particle filter. Results depend on the generator state and `blocksize` but not on the
   number of threads. `SerialExecution()` remains the default and is unchanged.
+- Compute only the triangular factor in square-root backward messages for larger static
+  Float32/Float64 matrices. This avoids forming Q and contended small-matrix BLAS calls,
+  speeding up CSMC ancestor sampling and backward simulation, especially with threads.
 
 ## 0.5.0
 

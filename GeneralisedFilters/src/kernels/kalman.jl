@@ -268,18 +268,33 @@ not differentiated by the HMC parameter update.
 """
 struct SqrtBackwardInformationPredictor <: AbstractBackwardPredictor end
 
+# Backward messages need only R. For larger static matrices, qr(A) falls back to
+# LAPACK and explicitly constructs Q; concurrent small factorizations also contend
+# for BLAS workspace. Generic in-place QR on MMatrix keeps Householder reflectors
+# implicit and uses Julia's unblocked implementation. Keep the unrolled static QR
+# for tiny matrices, where it is faster. Other scalar/storage types retain qr's
+# own dispatch, including for AD numbers.
+_backward_qr_upper(A) = qr(A).R
+function _backward_qr_upper(A::StaticMatrix{M,N,T}) where {M,N,T<:Union{Float32,Float64}}
+    if M <= 16 && N <= 8
+        return qr(A).R
+    end
+    factors = qr!(MMatrix{M,N,T}(A)).factors
+    return triu(SMatrix{min(M, N),N}(factors[SOneTo(min(M, N)), SOneTo(N)]))
+end
+
 # Numerical primitive: compress one or two residual blocks without constructing
 # any filtering objects. Backends may avoid materialising the stacked matrix.
 function _qr_compress_residual(B, r)
     n = size(B, 2)
     # Padding also handles fewer residual rows than state dimensions.
     T = promote_type(eltype(B), eltype(r))
-    R = qr(vcat(hcat(B, r), zeros(T, n + 1, n + 1))).R
+    R = _backward_qr_upper(vcat(hcat(B, r), zeros(T, n + 1, n + 1)))
     return R[1:n, 1:n], R[1:n, n + 1], abs2(R[n + 1, n + 1])
 end
 function _qr_compress_residual(B::StaticMatrix{M,N}, r::StaticVector) where {M,N}
     T = promote_type(eltype(B), eltype(r))
-    R = qr(vcat(hcat(B, r), zero(SMatrix{N + 1,N + 1,T}))).R
+    R = _backward_qr_upper(vcat(hcat(B, r), zero(SMatrix{N + 1,N + 1,T})))
     return R[SOneTo(N), SOneTo(N)], R[SOneTo(N), N + 1], abs2(R[N + 1, N + 1])
 end
 function _qr_compress_residual(B, r, C, q)
@@ -295,11 +310,11 @@ end
 # Upper root of I + C*C', obtained without forming a potentially ill-conditioned Gram matrix.
 function _identity_plus_root(C)
     return _correct_cholesky_sign(
-        qr(vcat(Matrix{eltype(C)}(I, size(C, 1), size(C, 1)), C')).R
+        _backward_qr_upper(vcat(Matrix{eltype(C)}(I, size(C, 1), size(C, 1)), C'))
     )
 end
 function _identity_plus_root(C::StaticMatrix{M,N,T}) where {M,N,T}
-    return _correct_cholesky_sign(qr(vcat(one(SMatrix{M,M,T}), C')).R)
+    return _correct_cholesky_sign(_backward_qr_upper(vcat(one(SMatrix{M,M,T}), C')))
 end
 
 # Log determinant of F*F', retaining support for non-triangular covariance factors.
