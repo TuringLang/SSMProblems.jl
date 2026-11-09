@@ -46,6 +46,59 @@
     end
 end
 
+@testitem "Backward R-only QR preserves static roots and normalized likelihoods" begin
+    using GeneralisedFilters, StaticArrays, LinearAlgebra, Random, ForwardDiff
+    G = GeneralisedFilters
+    rng = Xoshiro(512)
+    for T in (Float32, Float64), (m, n) in ((4, 2), (32, 16), (17, 17), (7, 13))
+        A = SMatrix{m,n,T}(randn(rng, T, m, n))
+        # Full rank, rank deficient, and differently scaled columns all use QR;
+        # no Gram-matrix factorisation or positive-definiteness repair is needed.
+        for B in (
+            A,
+            A * Diagonal(SVector{n,T}(ntuple(i -> i == 1 ? zero(T) : one(T), n))),
+            A * Diagonal(SVector{n,T}(10 .^ range(-4, 4; length=n))),
+        )
+            saved = copy(B)
+            R = @inferred G._backward_qr_upper(B)
+            @test R isa SMatrix{min(m, n),n,T}
+            @test istriu(R)
+            @test R' * R ≈ B' * B rtol = 100eps(T)
+            @test B == saved
+        end
+    end
+
+    # Exercise both the R-only compression and overlap paths at the dimension
+    # that exposed the threaded regression, against an independent forward KF.
+    for T in (Float32, Float64)
+        n, m = 16, 4
+        p = GaussianPrior(zero(SVector{n,T}), one(SMatrix{n,n,T}))
+        d = LinearGaussianDynamics(
+            T(0.9) * one(SMatrix{n,n,T}), zero(SVector{n,T}), T(0.1) * one(SMatrix{n,n,T})
+        )
+        o = LinearGaussianObservation(
+            SMatrix{m,n,T}(randn(rng, T, m, n)),
+            zero(SVector{m,T}),
+            T(0.2) * one(SMatrix{m,m,T}),
+        )
+        ys = [SVector{m,T}(randn(rng, T, m)) for _ in 1:5]
+        bp = SqrtBackwardInformationPredictor()
+        back = G.backward_initialise(bp, o, ys[end])
+        for t in 4:-1:1
+            back = G.backward_update(bp, G.backward_predict(bp, back, d), o, ys[t])
+        end
+        pred = G.kalman_predict(GaussianState(p.μ0, p.Σ0), d)
+        @test G.compute_marginal_predictive_likelihood(pred, back; include_constant=true) ≈
+            marginal_loglikelihood(StateSpaceModel(p, d, o), KF(), ys) rtol = 100eps(T)
+        @test back.B isa SMatrix{n,n,T}
+    end
+
+    # Non-BLAS scalar types retain generic QR dispatch and differentiability.
+    C = SMatrix{9,9}(Matrix{Float64}(I, 9, 9))
+    f(x) = sum(abs2, G._identity_plus_root(x * C))
+    @test ForwardDiff.derivative(f, 0.3) ≈ 2 * 9 * 0.3
+end
+
 @testitem "Explicit singular covariance factors preserve the model" begin
     using GeneralisedFilters, StaticArrays, LinearAlgebra, Statistics
     G = GeneralisedFilters
