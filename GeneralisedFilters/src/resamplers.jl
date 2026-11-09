@@ -326,6 +326,12 @@ function conditional_sample_ancestors(
     return a
 end
 
+# Rounding can place a threshold at or beyond the final scaled cumulative weight, so the
+# inverse-CDF scans stop at the last particle that has positive weight.
+function _last_positive(weights::AbstractVector{WT}) where {WT<:Real}
+    return findlast(>(zero(WT)), weights)
+end
+
 struct Systematic <: AbstractResampler end
 
 function sample_ancestors(
@@ -333,7 +339,8 @@ function sample_ancestors(
 ) where {WT<:Real}
     # pre-calculations
     vs = cumsum(weights)
-    vs *= n
+    vs .*= n
+    idx_max = _last_positive(weights)
 
     u0 = rand(rng, WT)
 
@@ -343,7 +350,7 @@ function sample_ancestors(
 
     @inbounds for i in 1:n
         u = u0 + (i - 1)
-        while vs[idx] <= u
+        while idx < idx_max && vs[idx] <= u
             idx += 1
         end
         a[i] = idx
@@ -363,19 +370,23 @@ function conditional_sample_ancestors(
     n = length(weights)
 
     vs = cumsum(weights)
-    vs *= n
+    vs .*= n
+    idx_max = _last_positive(weights)
 
     u0, K = _reference_offset(rng, vs, ref_idx, n)
 
+    # Slot `K`'s threshold lies in the reference's interval only in exact arithmetic, and
+    # rounding can step past an interval narrower than the spacing of `vs`, so the slot is
+    # assigned directly. This corrects rounding; the law of the other slots is unchanged.
     a = Vector{Int64}(undef, n)
     idx = 1
 
     @inbounds for i in 1:n
         u = u0 + (i - 1)
-        while vs[idx] <= u
+        while idx < idx_max && vs[idx] <= u
             idx += 1
         end
-        a[mod1(i - K + 1, n)] = idx
+        a[mod1(i - K + 1, n)] = i == K ? ref_idx : idx
     end
 
     return a
@@ -388,7 +399,8 @@ function sample_ancestors(
 ) where {WT<:Real}
     # pre-calculations
     vs = cumsum(weights)
-    vs *= n
+    vs .*= n
+    idx_max = _last_positive(weights)
 
     # initialize sampling algorithm
     a = Vector{Int64}(undef, n)
@@ -396,7 +408,7 @@ function sample_ancestors(
 
     @inbounds for i in 1:n
         u = rand(rng, WT) + (i - 1)
-        while vs[idx] <= u
+        while idx < idx_max && vs[idx] <= u
             idx += 1
         end
         a[i] = idx
@@ -415,7 +427,8 @@ function conditional_sample_ancestors(
     n = length(weights)
 
     vs = cumsum(weights)
-    vs *= n
+    vs .*= n
+    idx_max = _last_positive(weights)
 
     u_ref, K = _reference_offset(rng, vs, ref_idx, n)
 
@@ -424,10 +437,10 @@ function conditional_sample_ancestors(
 
     @inbounds for i in 1:n
         u = (i == K ? u_ref : rand(rng, WT)) + (i - 1)
-        while vs[idx] <= u
+        while idx < idx_max && vs[idx] <= u
             idx += 1
         end
-        a[mod1(i - K + 1, n)] = idx
+        a[mod1(i - K + 1, n)] = i == K ? ref_idx : idx
     end
 
     return a

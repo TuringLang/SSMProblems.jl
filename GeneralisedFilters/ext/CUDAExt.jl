@@ -92,7 +92,10 @@ function GeneralisedFilters.conditional_sample_ancestors(
     rng::AbstractRNG, ::Systematic, weights::CuVector, ref_idx::Integer
 )
     offspring, K = sample_conditional_offspring(rng, Systematic(), weights, ref_idx)
-    return offspring_to_ancestors(offspring; shift=K - 1)
+    as = offspring_to_ancestors(offspring; shift=K - 1)
+    # Rounding can move the reference slot's threshold out of a narrow interval.
+    CUDA.@allowscalar as[1] = ref_idx
+    return as
 end
 
 # Following Code 8 of Murray et. al (2015)
@@ -153,7 +156,10 @@ function GeneralisedFilters.conditional_sample_ancestors(
     rng::AbstractRNG, ::Stratified, weights::CuVector, ref_idx::Integer
 )
     offspring, K = sample_conditional_offspring(rng, Stratified(), weights, ref_idx)
-    return offspring_to_ancestors(offspring; shift=K - 1)
+    as = offspring_to_ancestors(offspring; shift=K - 1)
+    # Rounding can move the reference slot's threshold out of a narrow interval.
+    CUDA.@allowscalar as[1] = ref_idx
+    return as
 end
 
 # Following Code 7 of Murray et. al (2015)
